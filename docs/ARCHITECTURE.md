@@ -1,0 +1,160 @@
+# Architecture — AI Secretary
+
+> This document describes the architecture as built. Where a component is deferred, it is labeled
+> **Deferred**/**Planned** — see [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the live status table.
+
+## 1. Conceptual modules → physical layout
+
+The product is designed as four apps plus shared packages. In this build the whole thing is one
+Next.js 16 App Router deployment; the conceptual boundaries map to directories:
+
+| Conceptual module | Physical location | Responsibility |
+|---|---|---|
+| **apps/web** — admin dashboard + setup wizard | `src/app/page.tsx` (single-page app, client sections), `src/components/**` | Owner/admin UI: dashboard, wizard, customers, bookings, invoices, ledger, settings, voice test, text chat |
+| **apps/api** — HTTP API | Next.js route handlers under `src/app/api/**` (no server actions) | Auth/session, RBAC, zod validation, org scoping, orchestration of business services |
+| — business services (part of api boundary) | `src/lib/business/**` | Booking engine, invoice/payment math, ledger rules, customer service, automation service. Pure-ish TypeScript over Prisma; transactions live here |
+| **apps/worker** — automation tick | `src/instrumentation.ts` (`register()` starts the interval) + manual `POST /api/automations/run` | Periodic automation processing (due runs, retries); the manual endpoint allows operators/cron to trigger a tick |
+| **apps/voice** — voice channel | Browser-based (Web Speech API) inside apps/web; adapter interface in `src/lib/integrations` | Test calls today; telephony adapters **Deferred** |
+| package: db | `src/lib/db.ts` (Prisma client singleton) | Data access; schema in `prisma/schema.prisma` |
+| package: ai | `src/lib/ai/**` | Provider adapters (sandbox SDK, Ollama, OpenAI-compatible), embeddings, policy gate (local-only/hybrid/cloud) |
+| package: integrations | `src/lib/integrations/**` | Generic signed-webhook adapter, future SMS/email/calendar/telephony adapters (**Deferred**) |
+
+Boundary rules:
+
+- Route handlers never touch Prisma directly for business mutations; they call `src/lib/business` services.
+- Client components never import `src/lib/db`, `src/lib/ai`, or `src/lib/integrations`; those are server-only.
+- The worker (instrumentation hook) reuses the same business services — no separate business logic path.
+- `src/components/ui/**` is the shadcn/ui component set; app-specific components build on it and do not restyle primitives ad hoc.
+
+## 2. Sandbox vs production delta (stated honestly)
+
+| Concern | This build (sandbox) | Self-hosted production target |
+|---|---|---|
+| Runtime | Next.js dev server (`bun run dev`, port 3000) | Docker Compose in `infra/` (**Planned** — not in this build): web + postgres + optional ollama |
+| Database | **SQLite** via Prisma (`file:.../db/custom.db`) | **PostgreSQL** (+ **pgvector** for embeddings) |
+| Migrations | `prisma db push` (sandbox convenience) | `prisma migrate deploy` with committed migrations |
+| Embeddings | Stored in-app; lexical/cosine fallback (SQLite has no vector index) | pgvector index |
+| AI SDK | `z-ai-web-dev-sdk` (platform-provided, sandbox-only, **must be replaced in production**) | BYOK adapters: Ollama local, any OpenAI-compatible endpoint |
+| Rate limiting | In-memory per-process | DB/Redis-backed (multi-instance) |
+| TLS/headers termination | Caddy in sandbox routes to :3000 | Caddyfile in `infra/` with HSTS |
+
+**Schema portability rules** (enforced by review, checked in [DATA_MODEL.md](./DATA_MODEL.md)):
+
+- No Prisma `enum` types — role/status fields are `String` validated by zod unions at the boundary.
+- No native `Json` columns — structured blobs are `String` columns holding JSON, parsed/validated in services.
+- Money is always `Int` cents. Never floats, never decimals.
+- No DB-specific types (no SQLite-only pragmas in schema, no Postgres-only column types in the shared schema).
+These rules keep the SQLite→PostgreSQL switch a datasource-provider change, not a rewrite.
+
+## 3. Request lifecycle
+
+```
+Browser (SPA)
+  │  fetch (JSON, session cookie)
+  ▼
+Route handler  src/app/api/**/route.ts
+  1. Rate limit check (per IP + per session)
+  2. Auth: verify HMAC-signed session cookie → user
+  3. Org scope: resolve membership + role for target orgId
+  4. Parse & validate body/query with zod schema (unknown keys rejected)
+  5. RBAC assertion for the action
+  6. Call business service (src/lib/business) — may open a Prisma $transaction
+  7. Service writes consequential AuditEvent rows inside the same transaction
+  8. Handler returns JSON; errors map to typed status codes (400/401/403/404/409/429/500)
+```
+
+Automation tick lifecycle (apps/worker): `instrumentation.ts register()` starts an interval →
+claims due `AutomationRun` rows (status QUEUED, `scheduledFor <= now`) → executes actions via
+business/integration services → records result, schedules retry with backoff or dedupe-skips →
+writes audit. `POST /api/automations/run` (admin) triggers the same processing synchronously for
+operators and cron setups.
+
+## 4. AI receptionist tool-loop design
+
+The LLM is a **planner, never an actor**. It cannot write to the database. Every effect goes
+through server-side validated tools.
+
+```
+┌────────────┐  user msg   ┌─────────────────────────────┐
+│ Browser    │────────────▶│ /api/assistant (route)      │
+│ chat/voice │             │  policy gate (mode check)   │
+└────────────┘             │  build context (org, FAQ)   │
+                           ▼                             │
+                     ┌───────────┐  strict JSON tool call │
+                     │ LLM via   │──────────────────────▶ tools: {name, args}
+                     │ provider  │◀────────────────────── tool result JSON
+                     └───────────┘   validated in route
+                           │  final assistant message
+                           ▼
+                 Conversation + Message rows persisted (incl. every tool call)
+```
+
+Protocol rules:
+
+1. **Strict JSON tool protocol.** The model must respond with either a final message or a tool
+   object `{ "tool": "<name>", "args": {…} }`. Malformed JSON or unknown tool names are returned to
+   the model as an error observation, not executed.
+2. **Server-side validation.** Every tool has a zod schema in `src/lib/ai/tools`; args are parsed
+   before execution. Invalid args produce an observation the model can recover from; they never
+   partially mutate state.
+3. **LLM never writes the DB directly.** Tools call the same `src/lib/business` services the UI
+   uses — booking conflict rules, org scoping, and audit apply identically.
+4. **Loop bounds.** Max tool iterations per turn (default 6); exceeded → graceful handoff message
+   ("I'll hand this to a human").
+5. **Tool categories.** Read: availability, customer lookup, service/price lookup, FAQ search.
+   Write: create booking, create invoice draft, record payment intent. Destructive tools
+   (cancel/void) require explicit confirmation token from the user in-thread.
+6. **Auditability.** Each tool invocation is persisted as a `Message` row (role TOOL) with args and
+   result, plus `AssistantRun` metadata (provider, model, mode, latency, error).
+7. **Deterministic fallback.** If no provider is healthy, a rule-based responder handles the core
+   intents and is labeled as such in the transcript.
+
+## 5. AI provider policies: local-only / hybrid / cloud
+
+| Mode | Allowed providers | Enforcement |
+|---|---|---|
+| **local-only** (default for self-hosters) | Ollama / local endpoints only | Policy gate in `src/lib/ai` checked before **every** provider call; cloud endpoint → hard error (not silent fallback). Also blocks outbound telemetry paths |
+| **hybrid** | Local preferred; configured cloud allowed for specific features | Gate routes per-feature config |
+| **cloud** | BYOK cloud endpoints | Keys stored AES-256-GCM encrypted, server-side only |
+
+- The mode is an org-level setting, default **local-only**; changing it is an admin action that is audited.
+- The sandbox SDK adapter counts as a *cloud* provider and is therefore disabled in local-only mode.
+- Embeddings follow the same gate: local embeddings when available, otherwise lexical retrieval
+  (SQLite build), pgvector when on PostgreSQL.
+- Health checks (`/api/ai/providers` status) mark providers HEALTHY/UNHEALTHY; the assistant
+  refuses to start a turn with an unhealthy configured provider rather than silently failing.
+
+## 6. Automation engine
+
+Model: **trigger → (conditions) → (delay) → actions**, executed by the worker tick.
+
+| Aspect | Design |
+|---|---|
+| Triggers | Event-based: `booking.created`, `booking.cancelled`, `invoice.issued`, `invoice.overdue`, `payment.verified`, `message.received`. Schedule-based: due-date ticks (e.g. daily overdue scan) |
+| Conditions | Field predicates on the subject (e.g. `status == CONFIRMED`, `balanceCents > 0`, `consentMarketing == true`), AND-composed |
+| Delay | `delaySeconds` between trigger and execution; run is persisted as QUEUED with `scheduledFor`, so restarts don't lose it |
+| Actions | Create task/reminder, flag customer, draft message (queued — delivery **Deferred**), call automation webhook (generic signed POST), write audit note |
+| Retry | Exponential backoff, max attempts (default 3), `lastError` recorded per run |
+| Dedupe | `dedupeKey` (rule, subject, calendar window) unique — prevents duplicate reminders for the same booking/invoice |
+| Audit | Every run persisted (`AutomationRun`) with status QUEUED/RAN/SKIPPED/FAILED/CANCELLED + error; skipped-by-dedupe and skipped-by-opt-out are explicit statuses, not silent drops |
+
+Consent & opt-out are checked at run time, not just creation time: a customer with a channel opt-out
+makes the action SKIPPED with reason OPTED_OUT (see [SECURITY.md](./SECURITY.md) §Consent).
+
+## 7. Data & money rules (summary)
+
+- Every business row carries `organizationId`; queries are always org-scoped (see
+  [DATA_MODEL.md](./DATA_MODEL.md) invariants).
+- Money: `Int` cents; balances are computed from verified payments only.
+- Ledger is append-only; corrections are adjustment/reversal entries that reference the original.
+- Multi-step writes (booking insert + conflict check; payment + invoice status; ledger entries) run
+  inside Prisma interactive transactions.
+
+## 8. Observability & operations
+
+- `dev.log` captures dev server output; API failures log structured messages server-side.
+- `/api/health` returns basic liveness + provider/db status summary.
+- Audit trail (`AuditEvent`) is the primary "what happened" record; dashboard ledger view is the
+  financial record.
+- Backups: JSON export via `/api/admin/backup` (implemented); binary snapshot script `infra/backup.sh`
+  ships with the production packaging (**Planned**).

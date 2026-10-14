@@ -1,0 +1,459 @@
+// AI Secretary — data model
+// Portable across SQLite (sandbox/dev) and PostgreSQL (production self-host).
+// Conventions: money = integer cents; enums = String validated in code (SQLite has no enums);
+// JSON payloads = String columns parsed in code; every business record carries orgId.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id             String   @id @default(cuid())
+  name           String
+  slug           String   @unique
+  businessType   String   @default("generic") // apartment_rental | car_rental | salon | clinic | contractor | generic
+  timezone       String   @default("UTC")
+  locale         String   @default("en")
+  currency       String   @default("USD")
+  address        String   @default("")
+  phone          String   @default("")
+  email          String   @default("")
+  openingHours   String   @default("{}") // JSON: { "1": [["09:00","17:00"]], ... } dow 0=Sun
+  holidays       String   @default("[]") // JSON: ["2025-12-25"]
+  policies       String   @default("{}") // JSON: cancellation, deposit, quiet hours, consent
+  aiIdentity     String   @default("{}") // JSON: tone, greeting, closing, escalationNote
+  collectionsCfg String   @default("{}") // JSON: schedule days, templates, quiet hours, max touches
+  demo           Boolean  @default(false)
+  setupState     String   @default("{}") // JSON: step -> {done, savedAt}
+  setupComplete  Boolean  @default(false)
+  dataMode       String   @default("hybrid") // local_only | hybrid | cloud_first
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users            User[]
+  customers        Customer[]
+  services         Service[]
+  staff            Staff[]
+  bookings         Booking[]
+  invoices         Invoice[]
+  payments         Payment[]
+  ledgerEntries    LedgerEntry[]
+  webhookEvents    WebhookEvent[]
+  knowledgeDocs    KnowledgeDoc[]
+  conversations    Conversation[]
+  outbox           OutboxMessage[]
+  providerConfigs  ProviderConfig[]
+  aiLogs           AiLog[]
+  automations      Automation[]
+  auditEvents      AuditEvent[]
+  settings         AppSetting[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  orgId        String
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("owner") // owner | admin | agent | viewer
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  sessions     Session[]
+  @@index([orgId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model AppSetting {
+  id        String   @id @default(cuid())
+  orgId     String
+  key       String
+  value     String   @default("") // JSON or scalar string
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  @@unique([orgId, key])
+}
+
+model Customer {
+  id              String   @id @default(cuid())
+  orgId           String
+  name            String
+  email           String   @default("")
+  phone           String   @default("")
+  notes           String   @default("")
+  tags            String   @default("[]") // JSON string[]
+  consentContact  Boolean  @default(true) // consent for service communications
+  optOut          Boolean  @default(false) // explicit opt-out of outbound messaging
+  externalRef     String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  organization    Organization @relation(fields: [orgId], references: [id])
+  bookings        Booking[]
+  invoices        Invoice[]
+  conversations   Conversation[]
+  @@index([orgId])
+  @@index([orgId, phone])
+  @@index([orgId, email])
+}
+
+model Service {
+  id               String  @id @default(cuid())
+  orgId            String
+  name             String
+  description      String  @default("")
+  category         String  @default("general")
+  durationMin      Int     @default(60)
+  priceCents       Int     @default(0)
+  currency         String  @default("USD")
+  bufferBeforeMin  Int     @default(0)
+  bufferAfterMin   Int     @default(0)
+  maxPerSlot       Int     @default(1) // parallel capacity when no specific staff
+  requiresDeposit  Boolean @default(false)
+  depositCents     Int     @default(0)
+  active           Boolean @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  organization     Organization @relation(fields: [orgId], references: [id])
+  bookings         Booking[]
+  staffLinks       StaffService[]
+  @@index([orgId])
+}
+
+model Staff {
+  id        String  @id @default(cuid())
+  orgId     String
+  name      String
+  role      String  @default("")
+  email     String  @default("")
+  phone     String  @default("")
+  active    Boolean @default(true)
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields: [orgId], references: [id])
+  serviceLinks StaffService[]
+  bookings  Booking[]
+  workingHours WorkingHour[]
+  @@index([orgId])
+}
+
+model StaffService {
+  staffId    String
+  serviceId  String
+  staff      Staff   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  service    Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  @@id([staffId, serviceId])
+}
+
+model WorkingHour {
+  id      String @id @default(cuid())
+  orgId   String
+  staffId String? // null = org-wide default hours
+  dow     Int // 0=Sunday .. 6=Saturday
+  startMin Int // minutes from midnight
+  endMin  Int
+  staff   Staff? @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  @@index([orgId])
+  @@index([staffId])
+}
+
+model Booking {
+  id          String   @id @default(cuid())
+  orgId       String
+  customerId  String
+  serviceId   String
+  staffId     String?
+  startAt     DateTime
+  endAt       DateTime
+  status      String   @default("confirmed") // pending | confirmed | cancelled | completed | no_show
+  source      String   @default("manual") // manual | ai_chat | ai_voice | web | import
+  notes       String   @default("")
+  cancelReason String  @default("")
+  priceCents  Int      @default(0) // snapshot of service price at booking time
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  customer    Customer @relation(fields: [customerId], references: [id])
+  service     Service  @relation(fields: [serviceId], references: [id])
+  staff       Staff?   @relation(fields: [staffId], references: [id])
+  @@index([orgId, startAt])
+  @@index([orgId, status])
+  @@index([customerId])
+  @@index([staffId, startAt])
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  orgId       String
+  customerId  String
+  number      String
+  status      String   @default("draft") // draft | sent | partial | paid | void | uncollectible
+  currency    String   @default("USD")
+  subtotalCents Int    @default(0)
+  taxCents    Int      @default(0)
+  totalCents  Int      @default(0)
+  paidCents   Int      @default(0) // denormalized verified sum, source of truth = ledger+payments
+  issueDate   DateTime
+  dueDate     DateTime
+  rentalPeriod String  @default("") // JSON: {start,end,recurrence} for rentals
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  customer    Customer @relation(fields: [customerId], references: [id])
+  items       InvoiceItem[]
+  payments    Payment[]
+  ledgerEntries LedgerEntry[]
+  @@unique([orgId, number])
+  @@index([orgId, status])
+  @@index([customerId])
+}
+
+model InvoiceItem {
+  id             String @id @default(cuid())
+  invoiceId      String
+  description    String
+  qty            Int    @default(1)
+  unitPriceCents Int    @default(0)
+  totalCents     Int    @default(0)
+  invoice        Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  @@index([invoiceId])
+}
+
+model Payment {
+  id               String   @id @default(cuid())
+  orgId            String
+  invoiceId        String
+  amountCents      Int
+  method           String   @default("manual") // manual | card | bank | cash | online
+  reference        String   @default("")
+  status           String   @default("verified") // pending_verification | verified | failed | refunded
+  source           String   @default("manual") // manual | webhook | customer_claim
+  idempotencyKey   String?  @unique
+  externalEventId  String?  @unique
+  verifiedAt       DateTime?
+  verifiedBy       String   @default("") // userId or "webhook"
+  note             String   @default("")
+  createdAt        DateTime @default(now())
+  organization     Organization @relation(fields: [orgId], references: [id])
+  invoice          Invoice  @relation(fields: [invoiceId], references: [id])
+  ledgerEntries    LedgerEntry[]
+  @@index([orgId])
+  @@index([invoiceId])
+}
+
+model LedgerEntry {
+  id            String   @id @default(cuid())
+  orgId         String
+  ts            DateTime @default(now())
+  type          String   // charge | payment | refund | adjustment | reversal
+  debitAccount  String   // accounts_receivable | cash | revenue | refunds | fees | bad_debt ...
+  creditAccount String
+  amountCents   Int
+  invoiceId     String?
+  paymentId     String?
+  bookingId     String?
+  memo          String   @default("")
+  reversalOfId  String?  // points at the entry being reversed
+  createdBy     String   @default("system")
+  createdAt     DateTime @default(now())
+  organization  Organization @relation(fields: [orgId], references: [id])
+  invoice       Invoice?  @relation(fields: [invoiceId], references: [id])
+  payment       Payment?  @relation(fields: [paymentId], references: [id])
+  @@index([orgId, ts])
+  @@index([invoiceId])
+  @@index([paymentId])
+}
+
+model WebhookEvent {
+  id             String   @id @default(cuid())
+  orgId          String
+  provider       String   @default("generic")
+  eventId        String   @unique
+  payload        String   @default("")
+  signatureValid Boolean  @default(false)
+  result         String   @default("received") // received | processed | duplicate | rejected
+  processedAt    DateTime?
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [orgId], references: [id])
+  @@index([orgId])
+}
+
+model KnowledgeDoc {
+  id        String   @id @default(cuid())
+  orgId     String
+  title     String
+  source    String   @default("manual") // manual | paste | file
+  content   String
+  approved  Boolean  @default(false) // only approved docs are served to the AI
+  tags      String   @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  chunks    KnowledgeChunk[]
+  @@index([orgId])
+}
+
+model KnowledgeChunk {
+  id       String @id @default(cuid())
+  orgId    String
+  docId    String
+  ord      Int
+  text     String
+  vector   String @default("[]") // JSON float[] — local lexical/semantic vector; swap for pgvector in production
+  doc      KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  @@index([docId])
+  @@index([orgId])
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  orgId       String
+  customerId  String?
+  channel     String   @default("web") // web | voice_test | phone | sms
+  status      String   @default("open") // open | waiting_human | closed
+  aiEnabled   Boolean  @default(true)
+  summary     String   @default("")
+  contactName String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  messages    Message[]
+  @@index([orgId, updatedAt])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  orgId          String
+  role           String   // customer | assistant | agent | system
+  content        String
+  meta           String   @default("{}") // JSON: toolCalls, usage, provider info (never secrets)
+  createdAt      DateTime @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  @@index([conversationId, createdAt])
+}
+
+model OutboxMessage {
+  id           String   @id @default(cuid())
+  orgId        String
+  channel      String   @default("email") // email | sms | inapp
+  recipient    String
+  subject      String   @default("")
+  body         String
+  status       String   @default("queued") // queued | sent | failed | skipped
+  statusReason String   @default("") // e.g. "no channel configured" — honest states only
+  relatedType  String   @default("") // invoice | booking | conversation
+  relatedId    String   @default("")
+  dedupeKey    String?  @unique
+  scheduledFor DateTime @default(now())
+  sentAt       DateTime?
+  createdAt    DateTime @default(now())
+  organization Organization @relation(fields: [orgId], references: [id])
+  @@index([orgId, status])
+}
+
+model ProviderConfig {
+  id          String   @id @default(cuid())
+  orgId       String
+  capability  String   // llm | embedding | stt | tts | rerank | vision
+  provider    String   @default("managed") // managed | ollama | openai_compatible | browser | none
+  label       String   @default("")
+  baseUrl     String   @default("")
+  model       String   @default("")
+  apiKeyEnc   String   @default("") // AES-256-GCM ciphertext; never returned to client
+  configJson  String   @default("{}")
+  enabled     Boolean  @default(false)
+  lastTestAt  DateTime?
+  lastTestOk  Boolean  @default(false)
+  lastTestError String @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  @@unique([orgId, capability])
+  @@index([orgId])
+}
+
+model AiLog {
+  id             String   @id @default(cuid())
+  orgId          String
+  ts             DateTime @default(now())
+  capability     String
+  provider       String
+  model          String   @default("")
+  latencyMs      Int      @default(0)
+  tokensIn       Int      @default(0)
+  tokensOut      Int      @default(0)
+  ok             Boolean  @default(true)
+  errorSanitized String   @default("")
+  conversationId String   @default("")
+  organization   Organization @relation(fields: [orgId], references: [id])
+  @@index([orgId, ts])
+}
+
+model Automation {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String
+  description   String   @default("")
+  enabled       Boolean  @default(false)
+  testMode      Boolean  @default(true) // test mode logs actions instead of executing sends
+  triggerType   String   // invoice_overdue | booking_created | booking_reminder | conversation_escalated | manual
+  triggerCfg    String   @default("{}") // JSON
+  conditions    String   @default("[]") // JSON array of {field,op,value}
+  delayMinutes  Int      @default(0)
+  actions       String   @default("[]") // JSON array of {type, cfg}
+  maxRunsPerDay Int      @default(20)
+  quietHours    String   @default("{}") // JSON {start:"22:00", end:"08:00"}
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  organization  Organization @relation(fields: [orgId], references: [id])
+  runs          AutomationRun[]
+  @@index([orgId])
+}
+
+model AutomationRun {
+  id           String   @id @default(cuid())
+  orgId        String
+  automationId String
+  status       String   @default("running") // running | success | failed | skipped
+  attempt      Int      @default(1)
+  dedupeKey    String   @default("")
+  input        String   @default("{}")
+  output       String   @default("{}")
+  error        String   @default("")
+  scheduledFor DateTime @default(now())
+  startedAt    DateTime @default(now())
+  finishedAt   DateTime?
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  @@unique([automationId, dedupeKey])
+  @@index([orgId, scheduledFor])
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  orgId     String
+  ts        DateTime @default(now())
+  actorType String   @default("user") // user | ai | system | webhook
+  actorId   String   @default("")
+  action    String   // booking.created, invoice.paid, settings.updated, ...
+  entity    String   @default("")
+  entityId  String   @default("")
+  meta      String   @default("{}")
+  organization Organization @relation(fields: [orgId], references: [id])
+  @@index([orgId, ts])
+  @@index([orgId, entity])
+}
