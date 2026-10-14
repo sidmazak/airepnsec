@@ -331,12 +331,14 @@ model Conversation {
   aiEnabled   Boolean  @default(true)
   summary     String   @default("")
   contactName String   @default("")
+  externalRef String   @default("") // telephony thread key: Twilio CallSid (voice) or "sms:{from}" (sms)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   organization Organization @relation(fields: [orgId], references: [id])
   customer    Customer? @relation(fields: [customerId], references: [id])
   messages    Message[]
   @@index([orgId, updatedAt])
+  @@index([orgId, channel, externalRef])
 }
 
 model Message {

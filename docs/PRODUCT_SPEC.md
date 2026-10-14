@@ -63,16 +63,18 @@ automation engine, org isolation.
 | Payments | Provider-specific webhooks (Stripe/PayPal event schemas) | **Deferred** — needs real provider credentials; generic HMAC adapter is the seam |
 | Ledger | Append-only ledger, adjustments/reversals only, per-invoice reconciliation | Implemented |
 | Assistant | Text chat receptionist with strict JSON tool loop | Implemented |
-| Assistant | Browser voice test calls (Web Speech API) through the same tool loop | Implemented |
-| Assistant | Telephony/PSTN inbound & outbound voice | **Deferred** — requires telephony provider account + adapter; browser voice test exercises the identical server-side loop |
+| Assistant | Voice Console — real STT/TTS (built-in gateway or OpenAI-compatible BYOK) driving the same tool loop | Implemented |
+| Assistant | Real telephony: inbound voice (Twilio Voice/TwiML) with the full tool loop + escalation transfer; inbound SMS threads | Implemented (BYOK Twilio) |
+| Assistant | Outbound PSTN dialing / voice broadcast | **Deferred** — inbound telephony only in this build |
 | Knowledge | FAQ/knowledge items, retrieval for assistant grounding | Implemented |
 | AI providers | Local model detection (Ollama), OpenAI-compatible BYOK, sandbox SDK adapter, policy gate | Implemented |
 | Automations | Trigger/condition/delay/action engine, retry, dedupe, audit | Implemented |
-| Automations | Outbound message **delivery** (SMS/email send) | **Deferred** — messages are created and audited as QUEUED/draft; no send-side integration in this build; consent & opt-out enforced at creation time |
+| Automations | Outbound message **delivery** (email via SMTP, SMS via Twilio, signed webhooks) through the outbox dispatcher | Implemented (BYOK integrations; consent & opt-out enforced at queue and run time) |
 | Collections | Overdue policy, dunning schedule, escalation | Implemented (as automations producing audited queued messages/tasks) |
-| Channels | Web text chat, browser voice test | Implemented |
+| Channels | Web text chat, Voice Console (browser), phone (Twilio Voice), inbound SMS threads | Implemented |
 | Channels | WhatsApp/Instagram inbound | **Planned** |
-| Calendar | External calendar sync (ICS/Google) | **Deferred** — planned read-only ICS feed first |
+| Calendar | Read-only ICS feed + CalDAV push sync (bookings → external calendar servers) | Implemented |
+| Calendar | Two-way/pull sync (Google OAuth, external-event ingestion) | **Planned** — push sync only in this build |
 | Reporting | Dashboard (today's bookings, outstanding balances, ledger view) | Implemented (basic) |
 | Data | Org-scoped JSON export, backup endpoint | Implemented (JSON export) |
 | Data | Binary snapshot backup/restore scripts (`infra/`) | **Planned** — `infra/` packaging ships with the production Docker Compose work |
@@ -81,13 +83,14 @@ automation engine, org isolation.
 
 - **Not a multi-tenant SaaS.** One deployment serves one organization. Multi-tenancy is per-instance.
 - **No payment custody.** The system records and verifies payments; it never holds or moves funds.
-- **No email/SMS delivery in this build.** Outbound messages are modeled, consent-checked, and
-  audited, but sending is deferred (see feature table).
+- **No email/SMS delivery without your own provider.** Delivery is BYOK (SMTP/Twilio) through
+  the outbox; nothing sends until an integration is enabled, and nothing is ever faked as sent.
 - **No native mobile apps.** The admin UI is responsive web; the voice test runs in the browser.
 - **Not a general chatbot framework.** The assistant is scoped to reception/booking/billing intents
   over first-party data, with a fixed validated tool set.
-- **No marketplace, no public directory, no SEO surface.** The only public surface is the assistant
-  channel configured by the operator.
+- **No marketplace, no public directory, no SEO surface.** The only public surfaces are
+  operator-configured, signature-verified webhooks (assistant channels via Twilio, payment
+  callbacks).
 - **No dark-pattern collection.** Analytics/telemetry do not exist; local-only mode forbids outbound calls.
 
 ## 5. User roles

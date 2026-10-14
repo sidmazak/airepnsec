@@ -7,6 +7,7 @@ import { AuthScreen } from '@/components/sections/auth-screen'
 import { Sidebar, MobileTopBar } from '@/components/sections/sidebar'
 import { DashboardSection } from '@/components/sections/dashboard-section'
 import { InboxSection } from '@/components/sections/inbox-section'
+import { VoiceSection } from '@/components/sections/voice-section'
 import { BookingsSection } from '@/components/sections/bookings-section'
 import { CustomersSection } from '@/components/sections/customers-section'
 import { InvoicesSection } from '@/components/sections/invoices-section'
@@ -25,6 +26,7 @@ function SectionRouter() {
   switch (activeSection) {
     case 'dashboard': return <DashboardSection />
     case 'inbox': return <InboxSection />
+    case 'voice': return <VoiceSection />
     case 'bookings': return <BookingsSection />
     case 'customers': return <CustomersSection />
     case 'invoices': return <InvoicesSection />

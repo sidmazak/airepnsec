@@ -10,14 +10,14 @@ Next.js 16 App Router deployment; the conceptual boundaries map to directories:
 
 | Conceptual module | Physical location | Responsibility |
 |---|---|---|
-| **apps/web** — admin dashboard + setup wizard | `src/app/page.tsx` (single-page app, client sections), `src/components/**` | Owner/admin UI: dashboard, wizard, customers, bookings, invoices, ledger, settings, voice test, text chat |
+| **apps/web** — admin dashboard + setup wizard | `src/app/page.tsx` (single-page app, client sections), `src/components/**` | Owner/admin UI: dashboard, wizard, customers, bookings, invoices, ledger, settings, Voice Console, text chat |
 | **apps/api** — HTTP API | Next.js route handlers under `src/app/api/**` (no server actions) | Auth/session, RBAC, zod validation, org scoping, orchestration of business services |
 | — business services (part of api boundary) | `src/lib/business/**` | Booking engine, invoice/payment math, ledger rules, customer service, automation service. Pure-ish TypeScript over Prisma; transactions live here |
 | **apps/worker** — automation tick | `src/instrumentation.ts` (`register()` starts the interval) + manual `POST /api/automations/run` | Periodic automation processing (due runs, retries); the manual endpoint allows operators/cron to trigger a tick |
-| **apps/voice** — voice channel | Browser-based (Web Speech API) inside apps/web; adapter interface in `src/lib/integrations` | Test calls today; telephony adapters **Deferred** |
+| **apps/voice** — voice channel | Voice Console section (`src/components/sections/voice-section.tsx`), STT/TTS lib (`src/lib/ai/speech.ts`), telephony lib (`src/lib/telephony/twiml.ts`); routes `src/app/api/ai/{asr,tts}` + `src/app/api/telephony/**` | Browser voice console (real STT/TTS) + true phone/SMS receptionist via Twilio (see §9) |
 | package: db | `src/lib/db.ts` (Prisma client singleton) | Data access; schema in `prisma/schema.prisma` |
 | package: ai | `src/lib/ai/**` | Provider adapters (sandbox SDK, Ollama, OpenAI-compatible), embeddings, policy gate (local-only/hybrid/cloud) |
-| package: integrations | `src/lib/integrations/**` | Generic signed-webhook adapter, future SMS/email/calendar/telephony adapters (**Deferred**) |
+| package: integrations | `src/lib/integrations/**` | SMTP/Twilio/Stripe/CalDAV adapters, outbox dispatcher, ICS feed + CalDAV push sync, generic signed-webhook adapter |
 
 Boundary rules:
 
@@ -169,3 +169,30 @@ makes the action SKIPPED with reason OPTED_OUT (see [SECURITY.md](./SECURITY.md)
   financial record.
 - Backups: JSON export via `/api/admin/backup` (implemented); binary snapshot script `infra/backup.sh`
   ships with the production packaging (**Planned**).
+
+## 9. Voice, telephony & calendar sync
+
+Three voice surfaces share ONE receptionist brain (`handleReceptionistTurn` — the same validated
+tools, audit trail, and data-mode policy gate as text chat):
+
+| Surface | Speech path | Auth |
+|---|---|---|
+| **Voice Console** (browser, `#voice` section) | Browser records audio → `POST /api/ai/asr` (real STT: managed gateway or OpenAI-compatible `/audio/transcriptions`) → receptionist turn → `POST /api/ai/tts` (real TTS: managed gateway WAV, OpenAI-compatible MP3; text chunked ≤ 1000 chars) → browser playback. Per-turn STT/AI/TTS latency badges. | Session cookie (CSRF-protected) |
+| **Phone** (Twilio Voice) | Twilio does the speech recognition (`<Gather input="speech">`); the app runs the full turn and answers with TwiML `<Say>`; escalation → `<Dial>` transfer or message-taken hangup; status callbacks close the call. | Twilio signature |
+| **SMS** (Twilio) | Webhook threads one conversation per sender number, records the inbound message instantly, answers asynchronously via the Twilio Messages API; send failures land in the outbox with honest status + retry/backoff. | Twilio signature |
+
+**Transcripts.** The dialogue lives in `Conversation` + `Message` rows exactly like web chat
+(customer/assistant/tool messages; `Conversation.externalRef` carries the telephony thread key —
+CallSid for calls, `sms:{digits}` for SMS threads). **No audio is persisted anywhere**: STT audio
+is decoded, transcribed, and dropped; TTS audio is returned as base64 for playback and never
+stored; on phone calls the media never touches this server at all (Twilio's own `<Say>/<Gather>`
+handle speech). Inbound SMS bodies are additionally captured verbatim in `WebhookEvent` payloads.
+
+**Calendar sync — push design.** `src/lib/integrations/caldav.ts` is a raw-HTTP CalDAV client:
+`PROPFIND` health check (207/200), `PUT {uid}.ics` idempotent upsert, `DELETE`; HTTP Basic auth;
+a real RFC 5545 VEVENT builder (line folding, escaping, UTC stamps, `X-AIS-ORG` org marker).
+`POST /api/integrations/caldav-sync` (owner/admin, "Sync now" in the UI) pushes upcoming
+`pending|confirmed` bookings (default 45 days) as `booking-{id}@{orgslug}.ics` with per-item
+results and a persisted last-sync summary — verified live against Radicale. **Pull/two-way sync
+is documented future work** (external-event ingestion, conflict handling, Google OAuth); the
+read-only ICS feed remains the subscription path for now.

@@ -328,7 +328,12 @@ export type TurnResult = {
  * persist customer + final assistant messages. The LLM only chooses tools; every state
  * change goes through validated business services.
  */
-export async function handleReceptionistTurn(org: Organization, conversationId: string, userMessage: string): Promise<TurnResult> {
+export async function handleReceptionistTurn(
+  org: Organization,
+  conversationId: string,
+  userMessage: string,
+  opts: { skipInboundPersist?: boolean } = {}
+): Promise<TurnResult> {
   const conversation = await db.conversation.findFirst({ where: { id: conversationId, orgId: org.id } })
   if (!conversation) throw new Error('Conversation not found')
 
@@ -342,7 +347,9 @@ export async function handleReceptionistTurn(org: Organization, conversationId: 
     actor: { type: 'ai', id: 'receptionist' },
   }
 
-  await db.message.create({ data: { conversationId, orgId: org.id, role: 'customer', content: userMessage } })
+  if (!opts.skipInboundPersist) {
+    await db.message.create({ data: { conversationId, orgId: org.id, role: 'customer', content: userMessage } })
+  }
 
   const history = await db.message.findMany({ where: { conversationId }, orderBy: { createdAt: 'asc' }, take: 24 })
   const llmMessages: LlmMessage[] = [

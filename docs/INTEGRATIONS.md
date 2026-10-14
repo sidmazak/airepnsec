@@ -1,13 +1,17 @@
 # Integrations — AI Secretary
 
-How the app talks to third-party services: email (SMTP), SMS/WhatsApp (Twilio),
-Stripe payments, and signed outbound webhooks. Everything here is **BYOK
+How the app talks to third-party services: email (SMTP), SMS/WhatsApp (Twilio), real telephony
+(Twilio Voice inbound calls + inbound SMS), Stripe payments, CalDAV calendar push sync, and signed
+outbound webhooks. Speech recognition/synthesis for the browser **Voice Console** is not an
+integration row — it rides the AI provider layer (capabilities `stt`/`tts`, same BYOK + data-mode
+policy as chat; see [ARCHITECTURE.md](./ARCHITECTURE.md) §9). Everything here is **BYOK
 (bring your own key)** — the app ships with zero third-party accounts and makes
 no network calls until you configure a channel.
 
 Status summary (details per section below): integrations CRUD, the outbox
 dispatcher, Stripe payment links + signature-verified webhooks, generic inbound
-payment webhooks, outbound signed webhooks, and the ICS calendar feed are
+payment webhooks, outbound signed webhooks, the ICS calendar feed, the real
+phone/SMS receptionist (Twilio Voice webhooks), and CalDAV push sync are
 **implemented and live** (see the capability ledger in
 [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md)). The per-kind connection
 *test routines* are implemented in the connector layer but are **not yet
@@ -60,8 +64,8 @@ message is the current verification path.
 Config = non-secret fields (`configJson`), Secrets = encrypted fields.
 `GET /api/integrations` returns config plus `configured`, `enabled`,
 `lastTestAt/Ok/Error` — never secrets. Singleton kinds (one row per org):
-`smtp`, `twilio_sms`, `twilio_whatsapp`, `stripe`; `webhook_out` allows one row
-per destination URL.
+`smtp`, `twilio_sms`, `twilio_whatsapp`, `twilio_voice`, `caldav`, `stripe`;
+`webhook_out` allows one row per destination URL.
 
 ### `smtp` — email delivery
 
@@ -109,6 +113,64 @@ Full payment flow in §4.
 
 `webhook_out` may be enabled without a secret (unsigned mode is explicit —
 receivers get `x-signature: none` and can distinguish it from a real signature).
+
+### `twilio_voice` — real phone receptionist (inbound voice + inbound SMS)
+
+| | |
+|---|---|
+| Config | `from` (required — the voice-capable Twilio number, E.164, e.g. `+15551234567`), `language?` (TwiML speech language, default `en-US`), `voiceName?` (Twilio `<Say>` voice, default `alice`), `transferNumber?` (where escalated calls are `<Dial>`ed — without it escalation takes a message and hangs up), `publicBaseUrl?` (the exact https base URL you configure in the Twilio console — used for webhook signature validation) |
+| Secrets | `accountSid`, `authToken` (both required) |
+| Test routine | Same real authenticated Twilio account fetch as `twilio_sms`, reported as `Twilio Phone (voice) verified — account "…" (active), number +1555…`. |
+| Behavior | Inbound calls: signature-verified webhook opens a `phone` conversation keyed by CallSid, greets, then runs the FULL AI receptionist turn per spoken utterance (`<Gather input="speech">` — Twilio does the speech recognition and its `<Say>` voices the reply; no audio is stored, only the text transcript in `Conversation`/`Message` rows). Escalation → `<Dial> transferNumber` or a message-taken hangup; status callbacks close the call and audit. Inbound SMS threads per sender and answers asynchronously via the Twilio Messages API (§3 outbox honesty applies). |
+
+**Wiring the Twilio console** (Phone Numbers → your number → Voice & Messaging; all three URLs
+are shown copyable on the integration card):
+
+1. **A call comes in** → `POST <public-base-url>/api/telephony/voice/incoming`
+2. **Call status changes** → `POST <public-base-url>/api/telephony/voice/status`
+3. **A message comes in** → `POST <public-base-url>/api/telephony/sms/incoming`
+
+The Gather step is wired by the TwiML itself (action `/api/telephony/voice/gather`) — no console
+configuration needed.
+
+**Signature validation (incl. behind proxies).** Twilio signs every webhook as
+`base64(HMAC-SHA1(authToken, full URL + sorted "KeyValue" param concat))` in the
+`X-Twilio-Signature` header; the app verifies timing-safely and answers anything else `403`. A
+TLS-terminating proxy changes the absolute URL the app sees, so verification accepts a
+candidate list: the integration's `publicBaseUrl` first (what you told Twilio to call), then the
+`PUBLIC_BASE_URL` env var, then the forwarded request host. **Set `publicBaseUrl` (or
+`PUBLIC_BASE_URL`) to exactly the URL configured in the Twilio console** or signature checks
+will fail behind proxies. Every attempt is stored in `WebhookEvent` with `signatureValid` and
+`result` (`received | processed | duplicate | rejected`), and a previously rejected event never
+blocks a properly signed retry.
+
+### `caldav` — calendar push sync (bookings → your calendar)
+
+| | |
+|---|---|
+| Config | `url` (required — the CalDAV **calendar collection** URL, not the account root, e.g. `https://host/user/calendar/`), `username?` |
+| Secrets | `password?` — **optional** (some local servers allow anonymous writes). Use an **app password** wherever the provider requires one (Nextcloud, Fastmail, iCloud). |
+| Test routine | Real `PROPFIND` against the collection (15 s timeout); `207`/`200` = alive → `CalDAV collection verified (207, calendar collection) at …`. Honest failures: `401` (check username/app-password), `403` (collection denied), `404` (point at the collection, not the account root), anything else → "is this a CalDAV collection?" |
+| Sync | `POST /api/integrations/caldav-sync` (owner/admin; the **Sync now** button on the card) pushes upcoming `pending|confirmed` bookings (default next 45 days, `days` 1–120, cap 500) as `booking-{id}@{orgslug}.ics` via idempotent `PUT` — RFC 5545 VEVENTs with UTC stamps, folding/escaping, and an `X-AIS-ORG` org marker. Per-item results (`pushed/failed/total`); the last-sync summary is persisted and shown on the card. A PROPFIND health check runs first (unless `verifyFirst: false`) and updates `lastTest*`. |
+
+Server examples:
+
+- **Radicale** (self-hosted, zero config): `pip install radicale` then
+  `radicale --hosts 0.0.0.0:5232 --storage-filesystem-folder ./radicale-data`. Create the
+  collection once (`curl -X MKCALENDAR http://localhost:5232/ais/calendar/`), set url
+  `http://localhost:5232/ais/calendar/`; username/password optional.
+- **Nextcloud**: url `https://cloud.example.com/remote.php/dav/calendars/<user>/<calendar-id>/`,
+  username = your login, password = an **app password** (Settings → Security → Devices &
+  sessions).
+- **Fastmail**: url `https://caldav.fastmail.com/dav/calendars/user/<user>/<calendar>/`,
+  username = your Fastmail address, password = an **app-specific password** (Settings →
+  Privacy & Security → Third-party apps).
+- **iCloud**: url `https://caldav.icloud.com/<user>/calendars/`, password = an app-specific
+  password.
+
+This is **push** (one-way, app → calendar): upserts are idempotent per booking UID. A
+`deleteRemoteEvent` helper exists in the connector layer but is not wired to any endpoint yet —
+pull/two-way sync is documented future work (see [ARCHITECTURE.md](./ARCHITECTURE.md) §9).
 
 ## 3. The outbox
 
@@ -264,7 +326,9 @@ integration's credentials.
   bookings, statuses TENTATIVE/CONFIRMED, a −60 min VALARM per event, proper
   CRLF folding/escaping). `GET /api/calendar/bookings/<id>.ics` serves one
   booking (accepts `<id>.ics` or `booking-<id>.ics`; 404 outside your org).
-  Both are session-cookie authenticated and served as `text/calendar`.
+  Both are session-cookie authenticated and served as `text/calendar`. For
+  push sync into an external calendar (CalDAV — Radicale/Nextcloud/Fastmail),
+  see the `caldav` kind in §2.
 
 ## 8. Local testing recipe (zero external services)
 
@@ -307,3 +371,7 @@ run them in production.
 - Inbound webhooks are signature-gated (HMAC, timing-safe compare) and
   idempotent by event id; outbound webhooks sign what they send. Enabling an
   integration with insufficient credentials is refused (`not_configured`).
+- **Twilio webhooks** (`twilio_voice`, inbound SMS) carry Twilio's own
+  `X-Twilio-Signature` (HMAC-SHA1, timing-safe) — see §2 for the candidate-URL
+  scheme and proxy notes. Phone/SMS audio never reaches the server: only Twilio's
+  text transcription and the reply text are stored.

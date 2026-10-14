@@ -2,9 +2,10 @@
 
 > **Sandbox constraint (read first).** This sandbox build **forbids test-framework code** (no
 > Vitest/Jest/Playwright files may be committed from the sandbox). Verification during the build is
-> done with: (a) the browser-based protocol below, (b) the documented curl smoke suite, and
-> (c) lint + `dev.log` inspection. Section 4 lists the exact Vitest integration suite to add when
-> developing **outside** the sandbox — the cases are specified here so the port is mechanical.
+> done with: (a) the browser-based protocol below, (b) the documented curl smoke suite plus the
+> voice/telephony/CalDAV harness (§4), and (c) lint + `dev.log` inspection. Section 5 lists the
+> exact Vitest integration suite to add when developing **outside** the sandbox — the cases are
+> specified here so the port is mechanical.
 > Status column: ✅ verified in this build via (a)/(b) · 📋 specified, to run outside sandbox.
 
 ## 1. Acceptance test matrix
@@ -49,6 +50,10 @@
 | M1 | Security headers | Check headers on `/` | X-Frame-Options, nosniff, Referrer-Policy, CSP present | P1 | ✅ (curl -I) |
 | M2 | Rate limiting | Burst auth attempts | 429 with Retry-After after threshold | P1 | ✅ |
 | N1 | RBAC | Viewer attempts mutation; Agent attempts admin action | 403 both; audited | P0 | ✅ (curl) |
+| V1 | Voice | **Real STT/TTS round-trip** (Voice Console) — TTS WAV → ASR → receptionist turn → TTS reply | Transcript reproduced ("Thanks for calling Harbor View Salon…" round-trip verified); STT/AI/TTS latency badges rendered; no audio persisted (AiLog metrics only) | P0 | ✅ (browser) |
+| V2 | Telephony | Voice webhook **signature gate + AI turn** | Unsigned → `403 Invalid Twilio signature` (WebhookEvent `rejected`); signed → greeting `<Gather>` TwiML; signed Gather → one real tool turn (verified: booked the $65 Signature Haircut) | P0 | ✅ (curl) |
+| V3 | Telephony | **SMS opt-out + outbox honesty** | Opted-out sender: inbound recorded, nothing ever sent; send failure → outbox `queued` with honest `statusReason` (dispatcher retries with backoff); no enabled `twilio_sms` → `skipped` with a clear reason | P0 | ✅ (curl) |
+| V4 | Calendar | **CalDAV push sync** against Radicale | PROPFIND health `207`; collection created (MKCALENDAR); 9/9 upcoming bookings pushed and GET-able with valid RFC 5545 VEVENTs; per-item results + last-sync summary persisted | P1 | ✅ (curl) |
 
 ## 2. Browser-based verification protocol (used in this build)
 
@@ -160,7 +165,79 @@ echo "SMOKE OK"
 Run gate: every labeled expectation must print the expected code/value; any mismatch fails the run.
 Results are recorded in `worklog.md` per build session.
 
-## 4. Vitest integration suite (add outside the sandbox)
+## 4. Voice & telephony verification (performed for real in this build)
+
+All capabilities below were verified against the live dev server. The recipes re-run them
+manually — no test framework needed, matching the sandbox constraint.
+
+### 4.1 Voice console — real TTS→WAV→ASR round-trip (browser)
+
+1. Sign in, open the **Voice Console** section (sidebar → Conversations → Voice Console, `#voice`).
+2. The turn is a real pipeline, not browser-only speech: record via `MediaRecorder` →
+   `POST /api/ai/asr` `{b64, mime}` (real STT) → the transcript runs through the normal
+   receptionist turn (`POST /api/conversations/[id]/messages`) → the reply is synthesized by
+   `POST /api/ai/tts` (real TTS, WAV chunks) and played back.
+3. Expect: STT/AI/TTS **latency badges** after each turn; the transcript and reply persisted as
+   Conversation/Message rows; **no audio stored** anywhere (only `AiLog` metrics rows).
+4. Verified in this build: TTS→WAV→ASR reproduced the spoken phrase end-to-end in-browser
+   ("Thanks for calling Harbor View Salon…"). Repeatable with any mic input; speech config lives
+   under AI Providers (`stt`/`tts` — built-in gateway works out of the box).
+
+### 4.2 Telephony webhooks — signed vs unsigned (curl + python HMAC-SHA1)
+
+Twilio signature = `base64(HMAC-SHA1(authToken, fullUrl + sorted("Key"+"Value" concat)))`. The
+signing params must exactly match the form params sent (decoded values):
+
+```bash
+# one-time helper
+cat > /tmp/twilio_sig.py <<'PY'
+import base64, hashlib, hmac, sys
+auth, url = sys.argv[1].encode(), sys.argv[2]
+params = dict(p.split('=', 1) for p in sys.argv[3:] if '=' in p)
+data = url + ''.join(k + params[k] for k in sorted(params))
+print(base64.b64encode(hmac.new(auth, data.encode(), hashlib.sha1).digest()).decode())
+PY
+AUTH_TOKEN='<authToken of the enabled twilio_voice integration>'
+URL='http://localhost:3000/api/telephony/voice/incoming'
+SIG=$(python3 /tmp/twilio_sig.py "$AUTH_TOKEN" "$URL" CallSid=CAtest1 From=+15550000001 To=+15557654321)
+
+# unsigned → 403 (WebhookEvent result 'rejected'):
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "$URL" \
+  --data-urlencode "CallSid=CAtest1" --data-urlencode "From=+15550000001" --data-urlencode "To=+15557654321"
+# signed → 200 greeting TwiML (<Response><Gather input="speech"…>):
+curl -s -X POST "$URL" -H "X-Twilio-Signature: $SIG" \
+  --data-urlencode "CallSid=CAtest1" --data-urlencode "From=+15550000001" --data-urlencode "To=+15557654321"
+```
+
+- **incoming** (signed) → greeting `<Gather>` TwiML + a `phone` conversation keyed by the
+  CallSid; **gather** (same recipe against `/api/telephony/voice/gather`, add
+  `SpeechResult=...`) → ONE real receptionist turn through the normal tools — verified live by
+  booking the **$65 Signature Haircut** from a spoken utterance.
+- **SMS**: same recipe against `/api/telephony/sms/incoming` (params
+  `MessageSid/From/To/Body`) → a thread per sender (`externalRef sms:{digits}`), instant
+  recording, async answer via Twilio REST; with an opted-out customer the inbound is stored but
+  nothing is sent; with a failing/unconfigured sender the reply lands in the outbox as `queued`
+  (retry) or `skipped` (no enabled `twilio_sms`) with an honest `statusReason`.
+- Preconditions: `To` must match the `from` configured on an enabled `twilio_voice`/`twilio_sms`
+  integration (or the sole configured number in a single-org deployment), and the signed URL
+  must be on the candidate list (`config.publicBaseUrl` / `PUBLIC_BASE_URL` / request host).
+
+### 4.3 CalDAV push sync — Radicale via pip
+
+```bash
+pip install radicale
+radicale --hosts 0.0.0.0:5232 --storage-filesystem-folder /tmp/radicale &
+curl -X MKCALENDAR http://localhost:5232/ais/calendar/   # create the collection once
+# In the app: Integrations → CalDAV card → url http://localhost:5232/ais/calendar/
+#             → (optional) username/password → enable → "Sync now"
+curl http://localhost:5232/ais/calendar/booking-<id>@<orgslug>.ics   # verify a VEVENT
+```
+
+Verified in this build: PROPFIND health `207`, MKCALENDAR collection creation, **9/9** upcoming
+bookings pushed and GET-able with valid RFC 5545 VEVENT content (folding, escaping, UTC stamps,
+`X-AIS-ORG`). The CalDAV card shows the per-item result and the last-sync summary.
+
+## 5. Vitest integration suite (add outside the sandbox)
 
 Framework: **Vitest** + the repo's Prisma test DB (file-based SQLite per test run; Postgres
 container in CI for the production target). Exact cases, named so the port is unambiguous:

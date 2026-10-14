@@ -10,8 +10,8 @@ export type ProviderKind = 'managed' | 'ollama' | 'openai_compatible' | 'browser
 export const CAPABILITY_INFO: Record<Capability, { label: string; description: string; kinds: ProviderKind[] }> = {
   llm: { label: 'Conversation model (LLM)', description: 'Powers the AI receptionist chat and voice replies.', kinds: ['managed', 'ollama', 'openai_compatible', 'none'] },
   embedding: { label: 'Knowledge retrieval (RAG embeddings)', description: 'Embeds and retrieves your approved documents. The built-in neural model runs entirely on this machine.', kinds: ['local_neural', 'ollama', 'openai_compatible', 'local_lexical'] },
-  stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations.', kinds: ['browser', 'openai_compatible'] },
-  tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode.', kinds: ['browser', 'openai_compatible'] },
+  stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The built-in gateway works out of the box.', kinds: ['managed', 'browser', 'openai_compatible'] },
+  tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The built-in gateway works out of the box.', kinds: ['managed', 'browser', 'openai_compatible'] },
   rerank: { label: 'Reranking (optional)', description: 'Improves ordering of retrieved knowledge. Optional.', kinds: ['none', 'openai_compatible'] },
   vision: { label: 'Vision (optional)', description: 'Understands images. Optional.', kinds: ['none', 'openai_compatible', 'managed'] },
 }

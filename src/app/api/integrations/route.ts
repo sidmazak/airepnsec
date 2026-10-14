@@ -3,7 +3,7 @@ import { withAuth, json, parseBody, ApiError } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { encryptSecret } from '@/lib/crypto'
-import { isIntegrationKind, SINGLETON_KINDS } from '@/lib/integrations/connectors'
+import { INTEGRATION_KINDS, isIntegrationKind, SINGLETON_KINDS } from '@/lib/integrations/connectors'
 import { configSchemaFor, publicIntegration, secretsAreSufficient, secretsSchemaFor } from '@/lib/integrations/kinds'
 
 /** GET /api/integrations — configured integrations for the org (no secrets ever). */
@@ -32,7 +32,7 @@ export const POST = withAuth(
   async (req, ctx) => {
     const body = await parseBody(req, createSchema)
     if (!isIntegrationKind(body.kind)) {
-      throw new ApiError(422, `kind must be one of: smtp, twilio_sms, twilio_whatsapp, stripe, webhook_out`, 'bad_kind')
+      throw new ApiError(422, `kind must be one of: ${INTEGRATION_KINDS.join(', ')}`, 'bad_kind')
     }
 
     if (SINGLETON_KINDS.includes(body.kind)) {

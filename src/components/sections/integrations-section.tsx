@@ -38,8 +38,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
-  Mail, MessageSquare, Phone, Plug, RefreshCw, Send, Trash2, Webhook as WebhookIcon, XCircle,
+  CalendarClock, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
+  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Send, Trash2, Webhook as WebhookIcon, XCircle,
 } from 'lucide-react'
 
 /* ------------------------------ helpers ------------------------------ */
@@ -99,6 +99,18 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
     blurb: 'WhatsApp messages via Twilio (requires a WhatsApp-enabled sender).',
     needsCredentials: true,
   },
+  twilio_voice: {
+    title: 'Phone Receptionist (Twilio Voice)',
+    icon: PhoneCall,
+    blurb: 'Point your Twilio number at this app: the AI receptionist answers real calls and texts, books, quotes prices and escalates.',
+    needsCredentials: true,
+  },
+  caldav: {
+    title: 'Calendar Sync (CalDAV)',
+    icon: CalendarClock,
+    blurb: 'Push upcoming bookings to your own calendar — Nextcloud, Fastmail, Radicale, iCloud (app password).',
+    needsCredentials: false,
+  },
   stripe: {
     title: 'Payments (Stripe)',
     icon: CreditCard,
@@ -113,7 +125,7 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
   },
 }
 
-const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'stripe'] as const
+const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'caldav', 'stripe'] as const
 
 const OUTBOX_STATUS_CLASS: Record<string, string> = {
   sent: 'bg-emerald-100 text-emerald-900',
@@ -147,17 +159,30 @@ function CopyButton({ value, label, className }: { value: string; label: string;
 
 /* ------------------------------ drafts ------------------------------ */
 
-type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string }
-type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string }
+type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string }
+type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string; password: string }
 
-const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '' }
-const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '' }
+const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '' }
+const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '' }
 
 function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
   if (kind === 'smtp') {
     return { host: d.host.trim(), port: Number.parseInt(d.port, 10) || 0, secure: d.secure, from: d.from.trim() }
   }
   if (kind === 'twilio_sms' || kind === 'twilio_whatsapp') return { from: d.from.trim() }
+  if (kind === 'twilio_voice') {
+    const out: Record<string, unknown> = { from: d.from.trim() }
+    if (d.language.trim()) out.language = d.language.trim()
+    if (d.voiceName.trim()) out.voiceName = d.voiceName.trim()
+    if (d.transferNumber.trim()) out.transferNumber = d.transferNumber.trim()
+    if (d.publicBaseUrl.trim()) out.publicBaseUrl = d.publicBaseUrl.trim()
+    return out
+  }
+  if (kind === 'caldav') {
+    const out: Record<string, unknown> = { url: d.url.trim() }
+    if (d.username.trim()) out.username = d.username.trim()
+    return out
+  }
   if (kind === 'webhook_out') return { url: d.url.trim() }
   return {} // stripe — config only holds secrets
 }
@@ -171,9 +196,11 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
   if (kind === 'smtp') {
     if (d.user.trim()) out.user = d.user.trim()
     if (d.pass) out.pass = d.pass
-  } else if (kind === 'twilio_sms' || kind === 'twilio_whatsapp') {
+  } else if (kind === 'twilio_sms' || kind === 'twilio_whatsapp' || kind === 'twilio_voice') {
     if (d.accountSid.trim()) out.accountSid = d.accountSid.trim()
     if (d.authToken) out.authToken = d.authToken
+  } else if (kind === 'caldav') {
+    if (d.password) out.password = d.password
   } else if (kind === 'stripe') {
     if (d.secretKey) out.secretKey = d.secretKey
     if (d.webhookSecret) out.webhookSecret = d.webhookSecret
@@ -181,6 +208,68 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
     if (d.secret) out.secret = d.secret
   }
   return Object.keys(out).length > 0 ? out : undefined
+}
+
+/* ------------------------------ drafts ------------------------------ */
+
+/** One copyable webhook URL row (used by Twilio Voice/SMS setup). */
+function WebhookUrlRow({ url, label }: { url: string; label: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] text-muted-foreground w-full sm:w-auto sm:min-w-[150px]">{label}</span>
+      <code className="text-[11px] bg-muted rounded px-1.5 py-1 break-all flex-1 min-w-0">{url || '…'}</code>
+      <CopyButton value={url} label={`Copy ${label} webhook URL`} className="min-h-[36px] px-2 text-xs" />
+    </div>
+  )
+}
+
+/** CalDAV push-sync box: shows last sync summary + runs a real sync now. */
+function CalDavSyncBox({ canManage, onChanged }: { canManage: boolean; onChanged: () => Promise<void> | void }) {
+  const { toast } = useToast()
+  const [info, setInfo] = useState<{ enabled: boolean; lastSync: { at: string; pushed: number; failed: number; total: number } | null } | null>(null)
+  const [syncing, setSyncing] = useState(false)
+
+  const load = useCallback(() => {
+    api.get<{ enabled: boolean; lastSync: { at: string; pushed: number; failed: number; total: number } | null }>('/api/integrations/caldav-sync')
+      .then(setInfo)
+      .catch(() => setInfo(null))
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const syncNow = async () => {
+    setSyncing(true)
+    try {
+      const r = await api.post<{ pushed: number; failed: number; total: number }>('/api/integrations/caldav-sync')
+      toast({
+        title: r.total === 0 ? 'Nothing to sync — no upcoming bookings in the next 45 days' : `Synced ${r.pushed}/${r.total} bookings${r.failed ? `, ${r.failed} failed` : ''}`,
+        variant: r.failed > 0 ? 'destructive' : 'default',
+      })
+      load()
+      await onChanged()
+    } catch (err) {
+      toast({ title: 'CalDAV sync failed', description: friendlyApiErrorLocal(err, 'Unknown error'), variant: 'destructive' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <div className="rounded-md border p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">Bookings → calendar</p>
+        <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing || !canManage || !info?.enabled}>
+          {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+          Sync now
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {info?.lastSync
+          ? `Last sync ${formatDateTime(info.lastSync.at)} — ${info.lastSync.pushed}/${info.lastSync.total} events written${info.lastSync.failed ? `, ${info.lastSync.failed} failed` : ''}.`
+          : 'Never synced yet. Enable the integration, then sync upcoming bookings (next 45 days) to your calendar.'}
+      </p>
+    </div>
+  )
 }
 
 /* ------------------------------ connector card (singletons) ------------------------------ */
@@ -194,6 +283,7 @@ function ConnectorCard({
   onChanged: () => Promise<void> | void
 }) {
   const { toast } = useToast()
+  const origin = useOrigin()
   const meta = KIND_META[kind]
   const Icon = meta.icon
 
@@ -208,7 +298,9 @@ function ConnectorCard({
     const c = row?.config ?? {}
     setInitialCfg({
       host: str(c.host), port: c.port != null ? String(c.port) : '', secure: c.secure === true,
-      from: str(c.from), url: str(c.url),
+      from: str(c.from), url: str(c.url), username: str(c.username),
+      language: str(c.language), voiceName: str(c.voiceName),
+      transferNumber: str(c.transferNumber), publicBaseUrl: str(c.publicBaseUrl),
     })
     setDlgOpen(true)
   }
@@ -293,6 +385,29 @@ function ConnectorCard({
             {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
               <p className="text-xs text-muted-foreground break-all">Sender: {str(row.config.from) || 'not set'}</p>
             )}
+
+            {kind === 'twilio_voice' && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground break-all">
+                  Voice number: <span className="font-medium text-foreground">{str(row.config.from) || 'not set'}</span>
+                  {str(row.config.transferNumber) && <> · transfers to {str(row.config.transferNumber)}</>}
+                </p>
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium">Webhook URLs for the Twilio console:</p>
+                  <WebhookUrlRow url={`${origin}/api/telephony/voice/incoming`} label="A call comes in" />
+                  <WebhookUrlRow url={`${origin}/api/telephony/voice/status`} label="Call status changes" />
+                  <WebhookUrlRow url={`${origin}/api/telephony/sms/incoming`} label="A message comes in" />
+                </div>
+              </div>
+            )}
+
+            {kind === 'caldav' && (
+              <p className="text-xs text-muted-foreground break-all">
+                {str(row.config.url) ? <>Calendar: {str(row.config.url)}{str(row.config.username) ? <> · user {str(row.config.username)}</> : null}</> : 'No calendar URL configured yet.'}
+              </p>
+            )}
+
+            {kind === 'caldav' && row && <CalDavSyncBox canManage={canManage} onChanged={onChanged} />}
 
             {testResult ? (
               <Alert role="status" className={testResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}>
@@ -494,6 +609,54 @@ function ConfigureDialog({
             </div>
           )}
 
+          {kind === 'twilio_voice' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-from`}>Voice number (+E.164)</Label>
+                <Input id={`${idBase}-from`} value={cfg.from} onChange={(e) => setCfg((s) => ({ ...s, from: e.target.value }))} placeholder="+15551234567" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-lang`}>Speech language (optional)</Label>
+                  <Input id={`${idBase}-lang`} value={cfg.language} onChange={(e) => setCfg((s) => ({ ...s, language: e.target.value }))} placeholder="en-US" autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-voice`}>Twilio voice (optional)</Label>
+                  <Input id={`${idBase}-voice`} value={cfg.voiceName} onChange={(e) => setCfg((s) => ({ ...s, voiceName: e.target.value }))} placeholder="alice" autoComplete="off" className="min-h-[44px]" />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-transfer`}>Transfer number for escalations (optional)</Label>
+                <Input id={`${idBase}-transfer`} value={cfg.transferNumber} onChange={(e) => setCfg((s) => ({ ...s, transferNumber: e.target.value }))} placeholder="+15559876543" autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">When the AI escalates, Twilio dials this number; without it the caller gets a message-taken promise.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-pub`}>Public base URL (optional)</Label>
+                <Input id={`${idBase}-pub`} type="url" value={cfg.publicBaseUrl} onChange={(e) => setCfg((s) => ({ ...s, publicBaseUrl: e.target.value }))} placeholder="https://appointments.example.com" autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">The https origin you configured in the Twilio console — used to validate webhook signatures behind proxies.</p>
+              </div>
+              <div className="rounded-md border p-3 space-y-2">
+                <p className="text-sm font-medium">Webhook URLs for the Twilio console</p>
+                <WebhookUrlRow url={`${origin}/api/telephony/voice/incoming`} label="A call comes in" />
+                <WebhookUrlRow url={`${origin}/api/telephony/voice/status`} label="Call status changes" />
+                <WebhookUrlRow url={`${origin}/api/telephony/sms/incoming`} label="A message comes in" />
+              </div>
+            </div>
+          )}
+
+          {kind === 'caldav' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-url`}>Calendar collection URL</Label>
+                <Input id={`${idBase}-url`} type="url" value={cfg.url} onChange={(e) => setCfg((s) => ({ ...s, url: e.target.value }))} placeholder="https://cloud.example.com/remote.php/dav/calendars/user/personal/" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-usercal`}>Username (optional)</Label>
+                <Input id={`${idBase}-usercal`} value={cfg.username} onChange={(e) => setCfg((s) => ({ ...s, username: e.target.value }))} autoComplete="off" className="min-h-[44px]" />
+              </div>
+            </div>
+          )}
+
           {kind === 'webhook_out' && (
             <div className="space-y-1.5">
               <Label htmlFor={`${idBase}-url`}>Destination URL</Label>
@@ -532,7 +695,7 @@ function ConfigureDialog({
               </>
             )}
 
-            {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
+            {(kind === 'twilio_sms' || kind === 'twilio_whatsapp' || kind === 'twilio_voice') && (
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor={`${idBase}-sid`}>Account SID</Label>
@@ -543,6 +706,14 @@ function ConfigureDialog({
                   <Input id={`${idBase}-token`} type="password" value={sec.authToken} onChange={(e) => setSec((s) => ({ ...s, authToken: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
                 </div>
               </>
+            )}
+
+            {kind === 'caldav' && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-calpass`}>Password / app password (optional)</Label>
+                <Input id={`${idBase}-calpass`} type="password" value={sec.password} onChange={(e) => setSec((s) => ({ ...s, password: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">For iCloud/Fastmail use an app-specific password. Anonymous local servers (e.g. Radicale) can leave this empty.</p>
+              </div>
             )}
 
             {kind === 'stripe' && (

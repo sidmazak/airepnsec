@@ -68,9 +68,14 @@ the org from "setup" to "live", and it is explicit.
 - Text chat (web): on.
 - Browser voice test (Web Speech API): on — a "Test a call" button for the operator to place a
   simulated call in the browser; requires no telephony.
-- Email / SMS channels: shown as **Deferred** with a one-line honest explanation ("delivery
-  integration not built yet; messages will be recorded as drafts"). No fake toggles.
+- Email / SMS channels: toggles that mark the channel "configured" for reminder queueing; actual
+  delivery runs through the Integrations hub (SMTP/Twilio) via the outbox — see
+  [INTEGRATIONS.md](./INTEGRATIONS.md). Queued messages always carry their real status.
 - Webhook endpoint (inbound automations) shown for admins.
+- **Phone (Twilio Voice), inbound SMS, and CalDAV calendar sync are not wizard steps** — they are
+  optional BYOK integrations configured after activation in the Integrations hub (webhook URLs,
+  signature validation, CalDAV server examples: [INTEGRATIONS.md](./INTEGRATIONS.md)). The
+  wizard itself stays zero-integration.
 
 ## Step 7 — Collections & escalation
 

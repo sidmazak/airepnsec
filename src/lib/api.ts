@@ -179,8 +179,8 @@ export function withAuth(handler: Handler, options: AuthOptions = {}) {
   }
 }
 
-export function withPublic(handler: (req: NextRequest, params: Record<string, string>) => Promise<NextResponse>) {
-  return async (req: NextRequest, route: { params: Promise<Record<string, string>> } | undefined) => {
+export function withPublic(handler: (req: NextRequest, params: Record<string, string>) => Promise<Response>) {
+  return async (req: NextRequest, route: { params: Promise<Record<string, string>> } | undefined): Promise<Response> => {
     try {
       const url = new URL(req.url)
       if (!rateLimit(`${clientIp(req)}:${url.pathname}`, 60, 60_000)) return fail(429, 'Too many requests.')

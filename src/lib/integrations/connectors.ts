@@ -8,12 +8,12 @@ import { parseJson } from '@/lib/org'
  * NEVER leaves the server — error messages are sanitized against secret values.
  */
 
-export type IntegrationKind = 'smtp' | 'twilio_sms' | 'twilio_whatsapp' | 'stripe' | 'webhook_out'
+export type IntegrationKind = 'smtp' | 'twilio_sms' | 'twilio_whatsapp' | 'twilio_voice' | 'caldav' | 'stripe' | 'webhook_out'
 
-export const INTEGRATION_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'stripe', 'webhook_out']
+export const INTEGRATION_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'caldav', 'stripe', 'webhook_out']
 
 /** Kinds that allow only one row per org (enforced at create time). */
-export const SINGLETON_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'stripe']
+export const SINGLETON_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'caldav', 'stripe']
 
 export function isIntegrationKind(kind: string): kind is IntegrationKind {
   return (INTEGRATION_KINDS as string[]).includes(kind)
@@ -87,7 +87,7 @@ async function testSmtp(integration: { configJson: string; secretsEnc: string })
   }
 }
 
-/** Twilio (SMS or WhatsApp): real authenticated account fetch. */
+/** Twilio (SMS, WhatsApp, or Voice): real authenticated account fetch. */
 async function testTwilio(kind: IntegrationKind, integration: { configJson: string; secretsEnc: string }): Promise<TestResult> {
   const config = integrationConfig(integration)
   const secrets = decryptSecrets(integration)
@@ -98,6 +98,9 @@ async function testTwilio(kind: IntegrationKind, integration: { configJson: stri
   if (!from) return { ok: false, detail: 'Twilio config needs a "from" sender (e.g. +15551234567 or whatsapp:+15551234567)' }
   if (kind === 'twilio_whatsapp' && !from.toLowerCase().startsWith('whatsapp:')) {
     return { ok: false, detail: 'WhatsApp "from" must be in whatsapp:+1555... format' }
+  }
+  if (kind === 'twilio_voice' && !/\+\d{6,}/.test(from)) {
+    return { ok: false, detail: 'Voice "from" must be the Twilio voice-capable number in E.164 format (e.g. +15551234567)' }
   }
   try {
     const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}.json`, {
@@ -112,10 +115,10 @@ async function testTwilio(kind: IntegrationKind, integration: { configJson: stri
       return { ok: false, detail: `Twilio API rejected the credentials (HTTP ${res.status}): ${sanitizeMessage(body.message ?? res.statusText, integration)}` }
     }
     const account = (await res.json()) as { friendly_name?: string; status?: string }
-    const channel = kind === 'twilio_whatsapp' ? 'WhatsApp' : 'SMS'
+    const channel = kind === 'twilio_whatsapp' ? 'WhatsApp' : kind === 'twilio_voice' ? 'Phone (voice)' : 'SMS'
     return {
       ok: true,
-      detail: `Twilio ${channel} verified — account "${account.friendly_name ?? accountSid}" (${account.status ?? 'unknown'}), sender ${from}`,
+      detail: `Twilio ${channel} verified — account "${account.friendly_name ?? accountSid}" (${account.status ?? 'unknown'}), number ${from}`,
     }
   } catch (err) {
     return { ok: false, detail: `Twilio test failed: ${sanitizeMessage(err instanceof Error ? err.message : String(err), integration)}` }
@@ -189,7 +192,12 @@ export async function testIntegration(orgId: string, integration: { kind: string
       return testSmtp(integration)
     case 'twilio_sms':
     case 'twilio_whatsapp':
+    case 'twilio_voice':
       return testTwilio(integration.kind, integration)
+    case 'caldav': {
+      const { testCaldav } = await import('@/lib/integrations/caldav')
+      return testCaldav(integration)
+    }
     case 'stripe':
       return testStripe(integration)
     case 'webhook_out':
@@ -244,8 +252,8 @@ export type TwilioInput = { to: string; body: string }
  * Returns the Twilio message sid.
  */
 export async function sendTwilio(integration: { kind: string; configJson: string; secretsEnc: string }, input: TwilioInput): Promise<{ sid: string }> {
-  if (integration.kind !== 'twilio_sms' && integration.kind !== 'twilio_whatsapp') {
-    throw new Error('sendTwilio requires a twilio_sms or twilio_whatsapp integration')
+  if (integration.kind !== 'twilio_sms' && integration.kind !== 'twilio_whatsapp' && integration.kind !== 'twilio_voice') {
+    throw new Error('sendTwilio requires a twilio_sms, twilio_whatsapp, or twilio_voice integration')
   }
   const config = integrationConfig(integration)
   const secrets = decryptSecrets(integration)
@@ -258,6 +266,7 @@ export async function sendTwilio(integration: { kind: string; configJson: string
   const to = integration.kind === 'twilio_whatsapp' && !input.to.toLowerCase().startsWith('whatsapp:')
     ? `whatsapp:${input.to}`
     : input.to
+  // twilio_voice numbers can also send SMS (same Messages API)
 
   const form = new URLSearchParams({ To: to, From: from, Body: input.body })
   try {
