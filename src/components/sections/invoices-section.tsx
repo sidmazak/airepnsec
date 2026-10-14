@@ -26,7 +26,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
-  BadgeCheck, Ban, CheckCircle2, FlaskConical, Loader2, Plus, RefreshCw,
+  BadgeCheck, Ban, CheckCircle2, Copy, ExternalLink, FlaskConical, Link2, Loader2, Mail, Plus, RefreshCw,
   Receipt, ShieldAlert, Trash2, Wallet,
 } from 'lucide-react'
 
@@ -75,6 +75,27 @@ function friendlyError(err: unknown, fallback: string): string {
 function dollarsToCents(v: string): number {
   const n = Number.parseFloat(v)
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : -1
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch {
+      return false
+    }
+  }
 }
 
 type QueuePayment = Payment & {
@@ -277,6 +298,12 @@ function InvoiceDetailDialog({
   const [simulateOpen, setSimulateOpen] = useState(false)
   const [voidOpen, setVoidOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [sendBusy, setSendBusy] = useState(false)
+  const [sendLink, setSendLink] = useState('')
+  const [sendLinkError, setSendLinkError] = useState('')
+  const [linkBusy, setLinkBusy] = useState(false)
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkResult, setLinkResult] = useState<{ url: string; id: string } | null>(null)
 
   const load = useCallback(async (id: string) => {
     setLoading(true)
@@ -292,7 +319,10 @@ function InvoiceDetailDialog({
   }, [])
 
   useEffect(() => {
-    if (invoiceId) { setInvoice(null); setRecordOpen(false); setSimulateOpen(false); setVoidOpen(false); void load(invoiceId) }
+    if (invoiceId) {
+      setInvoice(null); setRecordOpen(false); setSimulateOpen(false); setVoidOpen(false); void load(invoiceId)
+      setSendLink(''); setSendLinkError(''); setLinkOpen(false); setLinkResult(null)
+    }
   }, [invoiceId, load])
 
   const refreshDetail = () => {
@@ -312,6 +342,36 @@ function InvoiceDetailDialog({
       toast({ title: 'Could not void invoice', description: friendlyError(err, 'Void failed'), variant: 'destructive' })
     } finally {
       setBusy(false)
+    }
+  }
+
+  /** Queue the invoice email — the outbox owns real delivery; nothing here claims "sent". */
+  const doSend = async () => {
+    if (!invoice) return
+    setSendBusy(true)
+    try {
+      const r = await api.post<{ queued: boolean; outboxId: string; paymentLink?: string; paymentLinkError?: string; channel: string; recipient: string }>(`/api/invoices/${invoice.id}/send`)
+      setSendLink(r.paymentLink ?? '')
+      setSendLinkError(r.paymentLinkError ?? '')
+      toast({ title: 'Queued for delivery', description: `Email to ${r.recipient} is queued in the outbox — it is not confirmed sent until the dispatcher delivers it.` })
+    } catch (err) {
+      toast({ title: 'Could not send invoice', description: friendlyError(err, 'Send failed'), variant: 'destructive' })
+    } finally {
+      setSendBusy(false)
+    }
+  }
+
+  const createLink = async () => {
+    if (!invoice) return
+    setLinkBusy(true)
+    try {
+      const r = await api.post<{ url: string; id: string }>(`/api/invoices/${invoice.id}/payment-link`)
+      setLinkResult(r)
+      setLinkOpen(true)
+    } catch (err) {
+      toast({ title: 'Payment link failed', description: friendlyError(err, 'Could not create payment link'), variant: 'destructive' })
+    } finally {
+      setLinkBusy(false)
     }
   }
 
@@ -400,6 +460,34 @@ function InvoiceDetailDialog({
                 <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Notes:</span> {invoice.notes}</p>
               )}
 
+              {sendLink && (
+                <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900" role="status">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden />
+                  <AlertDescription className="space-y-2">
+                    <p className="font-medium">Payment link attached</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <code className="text-xs break-all flex-1 min-w-0">{sendLink}</code>
+                      <Button
+                        size="sm" variant="outline" className="min-h-[44px]"
+                        onClick={async () => {
+                          const ok = await copyText(sendLink)
+                          toast(ok ? { title: 'Copied to clipboard' } : { title: 'Copy failed', description: 'Select the text and copy it manually.', variant: 'destructive' })
+                        }}
+                        aria-label="Copy payment link"
+                      >
+                        <Copy className="h-4 w-4" aria-hidden /> Copy
+                      </Button>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+              {sendLinkError && (
+                <Alert className="border-amber-200 bg-amber-50 text-amber-900" role="status">
+                  <ShieldAlert className="h-4 w-4" aria-hidden />
+                  <AlertDescription>Payment link not attached — {sendLinkError}</AlertDescription>
+                </Alert>
+              )}
+
               <Separator />
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -428,8 +516,26 @@ function InvoiceDetailDialog({
                 >
                   <Ban className="h-4 w-4" aria-hidden /> Void invoice
                 </Button>
+                <Button
+                  variant="outline"
+                  className="min-h-[44px]"
+                  disabled={!isAdmin || sendBusy || invoice.status === 'void'}
+                  onClick={() => void doSend()}
+                  title={isAdmin ? 'Queue the invoice email — the dispatcher owns real delivery' : 'Owner or admin only'}
+                >
+                  {sendBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Mail className="h-4 w-4" aria-hidden />} Send to customer
+                </Button>
+                <Button
+                  variant="outline"
+                  className="min-h-[44px]"
+                  disabled={!isAdmin || linkBusy || invoice.status === 'void'}
+                  onClick={() => void createLink()}
+                  title={isAdmin ? 'Create a Stripe payment link for the outstanding balance' : 'Owner or admin only'}
+                >
+                  {linkBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Link2 className="h-4 w-4" aria-hidden />} Payment link
+                </Button>
                 {!isAdmin && (
-                  <p className="text-xs text-muted-foreground w-full">Payment recording, webhook simulation and voiding are restricted to owner/admin accounts.</p>
+                  <p className="text-xs text-muted-foreground w-full">Payment recording, sending, payment links, webhook simulation and voiding are restricted to owner/admin accounts.</p>
                 )}
               </div>
             </div>
@@ -441,6 +547,49 @@ function InvoiceDetailDialog({
         <>
           <RecordPaymentDialog invoice={recordOpen ? invoice : null} onClose={() => setRecordOpen(false)} onChanged={refreshDetail} />
           <SimulateWebhookDialog invoice={simulateOpen ? invoice : null} onClose={() => setSimulateOpen(false)} onChanged={refreshDetail} />
+
+          <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Stripe payment link</DialogTitle>
+                <DialogDescription>
+                  {invoice
+                    ? `Share this link — it charges the outstanding balance of ${invoice.number} (${formatMoney(invoice.outstandingCents ?? 0)}). Payments arrive through the verified Stripe webhook.`
+                    : ''}
+                </DialogDescription>
+              </DialogHeader>
+              {linkResult && (
+                <div className="space-y-3">
+                  <div className="rounded-md border p-3">
+                    <code className="text-xs break-all" aria-label="Payment link URL">{linkResult.url}</code>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline" className="min-h-[44px]"
+                      onClick={async () => {
+                        const ok = await copyText(linkResult.url)
+                        toast(ok ? { title: 'Copied to clipboard' } : { title: 'Copy failed', description: 'Select the text and copy it manually.', variant: 'destructive' })
+                      }}
+                      aria-label="Copy payment link"
+                    >
+                      <Copy className="h-4 w-4" aria-hidden /> Copy link
+                    </Button>
+                    <Button
+                      variant="outline" className="min-h-[44px]"
+                      onClick={() => window.open(linkResult.url, '_blank', 'noopener')}
+                      aria-label="Open payment link in a new tab"
+                    >
+                      <ExternalLink className="h-4 w-4" aria-hidden /> Open
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" className="min-h-[44px]" onClick={() => setLinkOpen(false)}>Close</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <AlertDialog open={voidOpen} onOpenChange={(open) => !open && setVoidOpen(false)}>
             <AlertDialogContent>
               <AlertDialogHeader>

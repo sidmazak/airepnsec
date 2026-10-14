@@ -5,7 +5,7 @@ import type { SessionInfo } from '@/lib/client/api'
 
 export type SectionId =
   | 'dashboard' | 'inbox' | 'bookings' | 'customers' | 'invoices'
-  | 'ledger' | 'knowledge' | 'automations' | 'ai' | 'business' | 'diagnostics' | 'setup'
+  | 'ledger' | 'knowledge' | 'automations' | 'ai' | 'business' | 'integrations' | 'diagnostics' | 'setup'
 
 type AppState = {
   activeSection: SectionId

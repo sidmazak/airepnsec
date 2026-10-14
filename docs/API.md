@@ -26,6 +26,7 @@ All handlers live in `src/app/api/**/route.ts`. Single-page frontend at `/` call
 - Receptionist: `handleReceptionistTurn(org, conversationId, userMessage)` in `@/lib/ai/receptionist`
 - Providers: `getProviderRow`, `getActiveProvider`, `saveProvider`, `runAndStoreTest`, `toPublicConfig`, `CAPABILITIES`, `CAPABILITY_INFO` in `@/lib/ai/providers` — never return `apiKeyEnc`
 - Automations: `tick(orgId?)`, `emitEvent`, `workerHeartbeat` in `@/lib/automation/engine`
+- Integrations: `getEnabledIntegration`, `getUsableIntegration`, `decryptSecrets`, `sanitizeMessage`, `sendEmail`, `sendTwilio`, `signWebhookPayload`, `testIntegration` in `@/lib/integrations/connectors`; `dispatchOutbox`, `nudgeChannel` in `@/lib/integrations/dispatcher`; `createStripePaymentLink`, `verifyStripeSignature` in `@/lib/integrations/stripe`; `renderInvoiceEmail` in `@/lib/integrations/templates`; `buildIcs` in `@/lib/integrations/ics`; `publicIntegration` in `@/lib/integrations/kinds` — never return `secretsEnc`
 - Demo: `seedDemo()` in `@/lib/demo/seed`
 - Org helpers: `parseJson`, `getSetting`, `setSetting`, `updateOrgField` in `@/lib/org`
 
@@ -70,11 +71,29 @@ All handlers live in `src/app/api/**/route.ts`. Single-page frontend at `/` call
 - `PATCH /api/invoices/[id]` `{action:'void'|'mark_uncollectible'}` (owner/admin only).
 - `POST /api/invoices/[id]/payments` `{amountCents, method?, reference?}` (owner/admin) → recordVerifiedPayment (verified immediately; audited).
 - `POST /api/invoices/[id]/claims` `{amountCents, method?, reference?, note?}` → pending_verification.
+- `POST /api/invoices/[id]/send` (owner/admin) → queues the REAL invoice email: renders text+HTML (`renderInvoiceEmail`), best-effort Stripe payment link when stripe is enabled (`paymentLinkError` reported honestly on failure), opt-out/consent enforced, deduped per invoice per calendar day → `{queued: true, outboxId, channel: 'email', recipient, paymentLink?, paymentLinkError?}`. Errors: `404 not_found`, `409 invoice_void`, `422 no_email`, `409 opt_out`, `409 already_queued` (extra `outboxId` of the existing row). Audit `invoice.sent`.
+- `POST /api/invoices/[id]/payment-link` (owner/admin) → REAL Stripe Payment Link for the outstanding balance → `{url, id}`. Errors: `503 stripe_not_enabled`, `409 invoice_void`, `409 already_paid`, `502 stripe_error` (sanitized Stripe message). Audit `invoice.payment_link_created`.
 - `GET /api/payments?status=pending_verification` → verification queue (join invoice+customer).
 - `POST /api/payments/[id]/verify` (owner/admin), `POST /api/payments/[id]/reject` `{reason}` (owner/admin).
 - `POST /api/payments/webhook` — PUBLIC. Reads raw body + `x-signature` header; secret from `getWebhookSecret(orgId)` (org resolved by `orgSlug` field in payload JSON). Returns 202 `{result: processed|duplicate|rejected}` on any validation outcome, 401 only when payload cannot be parsed. NEVER processes without valid signature.
 - `POST /api/payments/simulate-webhook` (owner/admin) — TEST HARNESS: constructs a real signed webhook event (uses org webhook secret, generates eventId) and runs the same `processWebhook` path. Body `{invoiceNumber, amountCents, method?, reference?}`. Audit `webhook.simulated`. Clearly labeled in UI.
 - `PUT /api/webhook-secret` (owner/admin) → rotate secret (returns it once, over HTTPS, to the admin — this is the only time the secret is visible). Audit.
+- `POST /api/stripe/webhook` — PUBLIC. Verifies `Stripe-Signature: t=…,v1=…` (HMAC-SHA256 over `"<t>.<rawBody>"` with the stripe integration's `webhookSecret`, timing-safe) → `400 invalid_signature` otherwise. Org from `data.object.metadata.org_slug`, else the org whose secret verifies. Handled: `checkout.session.completed` (`amount_total`), `payment_intent.succeeded` (`amount_received`) → VERIFIED payment via the idempotent `processWebhook` path (overpay/currency-mismatch rejected honestly with `result:'error'` under 200). Dedupe by `event.id` → `{received:true, result:'duplicate', eventId}`; other types → `result:'ignored'`. Success → `{received:true, result:'processed', eventId, paymentId}`.
+
+### Integrations (auth; owner/admin for mutations)
+
+- `GET /api/integrations` → `{integrations: [{id, kind, label, config, configured: boolean, enabled, lastTestAt: string|null, lastTestOk: boolean, lastTestError: string, createdAt}]}` — `config` is the parsed non-secret `configJson`; credentials are represented ONLY by `configured` (secrets are never returned).
+- `POST /api/integrations` (owner/admin) `{kind, label?, config?, secrets?}` → `201 {integration}`. Kinds: `smtp`, `twilio_sms`, `twilio_whatsapp`, `stripe`, `webhook_out`. Per-kind config schemas: smtp `{host, port, secure?, from}`; twilio_* `{from}`; stripe `{}`; webhook_out `{url}`. Per-kind secrets: smtp `{user?, pass?}`; twilio_* `{accountSid, authToken}`; stripe `{secretKey, webhookSecret?}`; webhook_out `{secret?}`. Singleton kinds reject a second row (`409 already_configured`); `webhook_out` allows one per destination URL. Errors: `422 bad_kind | validation | insufficient_secrets`. Rows are created `enabled: false`. Audit `integration.created` (meta without secrets).
+- `PATCH /api/integrations/[id]` (owner/admin) `{label?, config?, secrets?, enabled?}` — `secrets` as an object = FULL replacement (encrypted); `secrets: null` clears credentials and forces `enabled:false`. Enabling requires sufficient credentials, except `smtp`/`webhook_out` where anonymous/unsigned is legitimate (`400 not_configured | insufficient_secrets`). Enabling nudges queued outbox messages of the matching channel for the next dispatch tick. Audit `integration.updated` (meta: `changed` field names only).
+- `DELETE /api/integrations/[id]` (owner/admin) → `{deleted: true}` — removes the row and its encrypted credentials. Audit `integration.deleted`.
+- Per-kind connection tests (`nodemailer verify`, Twilio/Stripe account fetch, signed webhook test POST) exist in `@/lib/integrations/connectors.testIntegration` but are NOT exposed as an HTTP endpoint in this build — enabling + dispatching a real message is the verification path.
+
+### Outbox / calendar (auth)
+
+- `GET /api/outbox?status=` → `{messages}` (last 200) — `OutboxMessage` rows with honest `status` (`queued|sent|failed|skipped`), `statusReason`, `attempts`, `channel` (`email|sms|whatsapp|webhook|inapp`), `dedupeKey`, `scheduledFor`, `sentAt`.
+- `POST /api/outbox/dispatch` (owner/admin) → releases backoff for every enabled channel, runs `dispatchOutbox()` now → `{ok: true, stats: {processed, sent, failed, waiting}}`. Audit `outbox.dispatched`. (Worker ticks the dispatcher every 30s automatically.)
+- `GET /api/calendar/bookings.ics?from=&to=` → subscribable RFC 5545 feed (`text/calendar`; default next 30 days, `pending`+`confirmed` bookings, TENTATIVE/CONFIRMED status, −60 min VALARM). Cookie session auth.
+- `GET /api/calendar/bookings/<id>.ics` → single booking as one VEVENT (accepts `<id>.ics` or `booking-<id>.ics`; `404` outside the org). Cookie session auth.
 
 ### Ledger (auth)
 - `GET /api/ledger?from&to&limit` → `{entries, balances}`.
@@ -103,14 +122,13 @@ All handlers live in `src/app/api/**/route.ts`. Single-page frontend at `/` call
 - `POST /api/providers/[capability]/test` → runAndStoreTest → `{ok, message, latencyMs}`.
 - `GET /api/ai/logs?limit=` → recent AiLog rows (no content, only metrics).
 - `PUT /api/settings/data-mode` `{dataMode: 'local_only'|'hybrid'|'cloud_first'}` (owner/admin). Audit `settings.data_mode_changed`.
-- `GET /api/settings/channels`, `PUT /api/settings/channels` `{email: boolean, sms: boolean}` → writes AppSetting `channel_email`/`channel_sms` (presence = "configured"; in this build no SMTP/SMS sender is wired — outbox stays honestly 'queued'; UI must say so).
+- `GET /api/settings/channels`, `PUT /api/settings/channels` `{email: boolean, sms: boolean}` → writes AppSetting `channel_email`/`channel_sms` (presence marks the channel "configured" for reminder queueing); actual delivery runs through Integrations (SMTP/Twilio) via the outbox dispatcher — see [INTEGRATIONS.md](./INTEGRATIONS.md).
 
 ### Automations (auth)
 - `GET /api/automations` → with last 5 runs each. `POST /api/automations` `{name, description?, triggerType, triggerCfg?, conditions?, delayMinutes?, actions, maxRunsPerDay?, quietHours?, testMode?, enabled?}` (owner/admin). Audit.
 - `PATCH /api/automations/[id]`, `DELETE /api/automations/[id]` (owner/admin).
 - `POST /api/automations/run` → tick(ctx.org.id) → stats. (Worker also ticks every 60s.)
-- `GET /api/automations/[id]/runs` → history.
-- `GET /api/outbox?status=` → outbox list with statusReason.
+- `GET /api/automations/[id]/runs` → history. Outbox listing/dispatch is under "Outbox / calendar" above.
 
 ### Audit / health / dashboard
 - `GET /api/audit?limit=100` → latest events.

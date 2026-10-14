@@ -44,6 +44,7 @@ model Organization {
   payments         Payment[]
   ledgerEntries    LedgerEntry[]
   webhookEvents    WebhookEvent[]
+  integrations     Integration[]
   knowledgeDocs    KnowledgeDoc[]
   conversations    Conversation[]
   outbox           OutboxMessage[]
@@ -353,12 +354,14 @@ model Message {
 model OutboxMessage {
   id           String   @id @default(cuid())
   orgId        String
-  channel      String   @default("email") // email | sms | inapp
+  channel      String   @default("email") // email | sms | whatsapp | webhook | inapp
   recipient    String
   subject      String   @default("")
   body         String
+  html         String   @default("") // rich HTML body (email only); dispatcher sends when non-empty
   status       String   @default("queued") // queued | sent | failed | skipped
   statusReason String   @default("") // e.g. "no channel configured" — honest states only
+  attempts     Int      @default(0) // delivery attempts by the dispatcher (backoff: 2^n minutes, max 5)
   relatedType  String   @default("") // invoice | booking | conversation
   relatedId    String   @default("")
   dedupeKey    String?  @unique
@@ -444,6 +447,32 @@ model AutomationRun {
   automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
   @@unique([automationId, dedupeKey])
   @@index([orgId, scheduledFor])
+}
+
+/**
+ * Third-party integration (BYOK — bring your own key).
+ * kind: smtp | twilio_sms | twilio_whatsapp | stripe | webhook_out
+ * configJson: non-secret config (host, port, from address, destination URL, events…)
+ * secretsEnc: AES-256-GCM encrypted JSON of secret fields — NEVER returned to the client.
+ * Singleton per kind is enforced in code for smtp / twilio_sms / twilio_whatsapp / stripe;
+ * webhook_out allows many rows (one per destination URL).
+ */
+model Integration {
+  id            String    @id @default(cuid())
+  orgId         String
+  kind          String
+  label         String    @default("")
+  configJson    String    @default("{}")
+  secretsEnc    String    @default("")
+  enabled       Boolean   @default(false)
+  lastTestAt    DateTime?
+  lastTestOk    Boolean   @default(false)
+  lastTestError String    @default("")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  organization  Organization @relation(fields: [orgId], references: [id])
+  @@index([orgId])
+  @@index([orgId, kind])
 }
 
 model AuditEvent {

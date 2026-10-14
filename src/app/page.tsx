@@ -15,6 +15,7 @@ import { KnowledgeSection } from '@/components/sections/knowledge-section'
 import { AutomationsSection } from '@/components/sections/automations-section'
 import { AiSection } from '@/components/sections/ai-section'
 import { BusinessSection } from '@/components/sections/business-section'
+import { IntegrationsSection } from '@/components/sections/integrations-section'
 import { DiagnosticsSection } from '@/components/sections/diagnostics-section'
 import { SetupSection } from '@/components/sections/setup-section'
 import { Loader2 } from 'lucide-react'
@@ -32,6 +33,7 @@ function SectionRouter() {
     case 'automations': return <AutomationsSection />
     case 'ai': return <AiSection />
     case 'business': return <BusinessSection />
+    case 'integrations': return <IntegrationsSection />
     case 'diagnostics': return <DiagnosticsSection />
     case 'setup': return <SetupSection />
     default: return <DashboardSection />

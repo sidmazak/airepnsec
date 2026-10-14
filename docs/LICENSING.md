@@ -19,6 +19,8 @@ license decision is **Planned** (tracked in [IMPLEMENTATION_PLAN.md](./IMPLEMENT
 | next | 16.1.3 | MIT | Yes (App Router, API routes) |
 | react / react-dom | 19.2.3 | MIT | Yes |
 | prisma / @prisma/client | 6.19.2 | Apache-2.0 | Yes (DB layer) |
+| nodemailer | 10.1.1 | **MIT-0** | Yes (SMTP connector: email test + send) |
+| @types/nodemailer | 8.0.2 | MIT | Yes (dev types for nodemailer) |
 | zod | 4.3.5 | MIT | Yes (validation) |
 | tailwindcss | 4.1.18 | MIT | Yes |
 | lucide-react | 0.525.0 | ISC | Yes (icons) |
@@ -96,7 +98,7 @@ BYO-terms**.
 
 ## 6. Compliance summary
 
-- All bundled open-source dependencies are MIT / ISC / Apache-2.0 / Unlicense — compatible with
+- All bundled open-source dependencies are MIT / MIT-0 / ISC / Apache-2.0 / Unlicense — compatible with
   commercial self-hosting; no copyleft (GPL/AGPL) runtime dependencies are present.
 - Retain upstream copyright notices (standard practice: keep `LICENSE` files reachable in
   distributed artifacts).

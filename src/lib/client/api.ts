@@ -152,7 +152,27 @@ export type AutomationRun = {
 export type OutboxRow = {
   id: string; channel: string; recipient: string; subject: string; body: string
   status: string; statusReason: string; relatedType: string; createdAt: string; sentAt: string | null
+  html?: string; attempts?: number; relatedId?: string
 }
+
+/**
+ * Public integration row (secrets never returned by the API).
+ * `configured` means credentials exist server-side; `enabled` means the
+ * dispatcher may actively use it. See docs/API.md.
+ */
+export type IntegrationInfo = {
+  id: string; kind: string; label: string
+  config: Record<string, unknown>
+  configured: boolean; enabled: boolean
+  lastTestAt: string | null; lastTestOk: boolean; lastTestError: string
+  createdAt: string
+}
+
+export type OutboxDispatchStats = {
+  processed: number; sent: number; failed: number; waiting: number
+}
+
+export type IntegrationTestResult = { ok: boolean; detail: string }
 
 export type AuditRow = {
   id: string; ts: string; actorType: string; actorId: string; action: string

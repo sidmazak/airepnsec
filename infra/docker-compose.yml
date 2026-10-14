@@ -1,0 +1,54 @@
+# infra/docker-compose.yml — AI Secretary self-host stack (app + Postgres/pgvector)
+#
+# Postgres+pgvector is the production target; set DATABASE_URL accordingly.
+# The SQLite dev database is used when DATABASE_URL=file:… (the Dockerfile's default).
+#
+# NOTE (honest): delivered but not verified inside the build sandbox (no Docker
+# daemon). See infra/README.md for the host-side smoke test.
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    environment:
+      # Production target: Postgres. Built from the POSTGRES_* vars below unless
+      # DATABASE_URL is set explicitly in infra/.env.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ais}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-ais}?schema=public}
+      # Leave empty to generate/persist a key file in the app-data volume instead.
+      APP_SECRET: ${APP_SECRET:-}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # .data/ holds secret.key when APP_SECRET is unset — persist it.
+      - app_data:/app/.data
+      # backups/ receives POST /api/admin/backup snapshots.
+      - app_backups:/app/backups
+      # .models/ caches the local ONNX embedding model (downloaded on first boot).
+      - app_models:/app/.models
+    restart: unless-stopped
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ais}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-ais}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ais} -d ${POSTGRES_DB:-ais}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  app_data:
+  app_backups:
+  app_models:

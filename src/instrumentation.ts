@@ -24,6 +24,20 @@ export async function register() {
   setInterval(run, 60_000)
   console.log('[worker] automation worker started (60s interval)')
 
+  // Outbox dispatcher: delivers queued messages through configured integrations
+  // (SMTP / Twilio / outbound webhooks). 10s after boot, then every 30s.
+  const { dispatchOutbox } = await import('@/lib/integrations/dispatcher')
+  const dispatch = async () => {
+    try {
+      await dispatchOutbox()
+    } catch (err) {
+      console.error('[worker] outbox dispatch failed:', err instanceof Error ? err.message : err)
+    }
+  }
+  setTimeout(dispatch, 10_000)
+  setInterval(dispatch, 30_000)
+  console.log('[worker] outbox dispatcher started (30s interval)')
+
   // Pre-load the local embedding model so the first knowledge search / AI answer is fast.
   // Fire-and-forget: a failed load is logged and search degrades to lexical scoring.
   void (async () => {

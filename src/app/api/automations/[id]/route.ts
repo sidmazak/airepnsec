@@ -10,7 +10,7 @@ const conditionSchema = z.object({
 })
 
 const actionSchema = z.object({
-  type: z.enum(['send_invoice_reminder', 'notify_inapp', 'flag_for_review']),
+  type: z.enum(['send_invoice_reminder', 'notify_inapp', 'flag_for_review', 'send_email', 'send_sms', 'send_webhook']),
   cfg: z.record(z.string(), z.unknown()).optional(),
 })
 

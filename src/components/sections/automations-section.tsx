@@ -45,6 +45,9 @@ const ACTION_LABELS: Record<string, string> = {
   send_invoice_reminder: 'Send invoice reminder',
   notify_inapp: 'In-app notification',
   flag_for_review: 'Flag for review',
+  send_email: 'Send email (outbox)',
+  send_sms: 'Send SMS (outbox)',
+  send_webhook: 'Post webhook',
 }
 
 const RUN_BADGE: Record<string, string> = {
@@ -60,7 +63,7 @@ const OUTBOX_BADGE: Record<string, string> = {
   failed: 'bg-rose-100 text-rose-900',
 }
 
-type DraftAction = { key: number; type: string; channel: string; template: string; body: string }
+type DraftAction = { key: number; type: string; channel: string; template: string; body: string; subject: string; destinationId: string }
 type DraftCondition = { key: number; field: string; op: string; value: string }
 
 type EditorState = {
@@ -87,6 +90,8 @@ const newAction = (type = 'send_invoice_reminder'): DraftAction => ({
   channel: 'email',
   template: 'Hi {{customer_name}}, a friendly reminder that invoice {{invoice_number}} ({{amount_due}}) was due on {{due_date}}. You can settle it any time — just reply here. — {{business_name}}',
   body: 'A new event needs your attention.',
+  subject: '',
+  destinationId: '',
 })
 
 function emptyEditor(): EditorState {
@@ -132,6 +137,8 @@ function editorFromAutomation(a: Automation): EditorState {
         channel: String(ac.cfg?.channel ?? 'email'),
         template: String(ac.cfg?.template ?? ac.cfg?.body ?? ''),
         body: String(ac.cfg?.body ?? ''),
+        subject: String(ac.cfg?.subject ?? ''),
+        destinationId: String(ac.cfg?.destinationId ?? ''),
       }))
       : [newAction()],
     maxRunsPerDay: a.maxRunsPerDay ?? 20,
@@ -147,6 +154,14 @@ function describeActions(a: Automation): string[] {
   return actions.map((ac) => {
     const base = ACTION_LABELS[ac.type] ?? ac.type
     if (ac.type === 'send_invoice_reminder') return `${base} · ${String(ac.cfg?.channel ?? 'email')}`
+    if (ac.type === 'send_email') {
+      const subject = String(ac.cfg?.subject ?? '').trim()
+      return subject ? `${base} · ${subject}` : base
+    }
+    if (ac.type === 'send_sms') {
+      const body = String(ac.cfg?.body ?? '').trim()
+      return body ? `${base} · ${body.slice(0, 24)}${body.length > 24 ? '…' : ''}` : base
+    }
     return base
   })
 }
@@ -181,6 +196,9 @@ export function AutomationsSection() {
   const [outboxLoading, setOutboxLoading] = useState(false)
   const [outboxError, setOutboxError] = useState('')
 
+  // webhook_out destinations for the send_webhook action editor (loaded when the editor opens)
+  const [webhookDests, setWebhookDests] = useState<Array<{ id: string; url: string }>>([])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -209,6 +227,23 @@ export function AutomationsSection() {
 
   useEffect(() => { void load() }, [load])
   useEffect(() => { if (tab === 'outbox') void loadOutbox() }, [tab, loadOutbox])
+
+  useEffect(() => {
+    if (!editorOpen) return
+    let cancelled = false
+    api.get<{ integrations: Array<{ id: string; kind: string; config: Record<string, unknown> }> }>('/api/integrations')
+      .then((d) => {
+        if (cancelled) return
+        setWebhookDests(
+          d.integrations
+            .filter((i) => i.kind === 'webhook_out')
+            .map((i) => ({ id: i.id, url: typeof i.config?.url === 'string' ? i.config.url : '' }))
+            .filter((w) => w.url !== '')
+        )
+      })
+      .catch(() => { if (!cancelled) setWebhookDests([]) })
+    return () => { cancelled = true }
+  }, [editorOpen])
 
   const toggleHistory = async (id: string) => {
     const isOpen = historyOpen[id]
@@ -275,12 +310,23 @@ export function AutomationsSection() {
         triggerCfg: editor.triggerType === 'invoice_overdue' ? { minDaysOverdue: Math.max(0, Math.floor(editor.minDaysOverdue)) } : {},
         conditions,
         delayMinutes: Math.max(0, Math.floor(editor.delayMinutes)),
-        actions: editor.actions.map((a) => ({
-          type: a.type,
-          cfg: a.type === 'send_invoice_reminder'
-            ? { channel: a.channel, template: a.template }
-            : a.type === 'notify_inapp' ? { body: a.body } : {},
-        })),
+        actions: editor.actions.map((a) => {
+          if (a.type === 'send_invoice_reminder') return { type: a.type, cfg: { channel: a.channel, template: a.template } }
+          if (a.type === 'notify_inapp') return { type: a.type, cfg: { body: a.body } }
+          if (a.type === 'send_email') {
+            const cfg: Record<string, string> = { body: a.body }
+            if (a.subject.trim()) cfg.subject = a.subject.trim()
+            return { type: a.type, cfg }
+          }
+          if (a.type === 'send_sms') return { type: a.type, cfg: { body: a.body } }
+          if (a.type === 'send_webhook') {
+            const cfg: Record<string, string> = {}
+            if (a.destinationId) cfg.destinationId = a.destinationId
+            if (a.body.trim()) cfg.body = a.body
+            return { type: a.type, cfg }
+          }
+          return { type: a.type, cfg: {} }
+        }),
         maxRunsPerDay: Math.max(1, Math.floor(editor.maxRunsPerDay)),
         quietHours: { start: editor.quietStart, end: editor.quietEnd },
         testMode: editor.testMode,
@@ -729,6 +775,80 @@ export function AutomationsSection() {
                         placeholder="A conversation was escalated — check the inbox."
                       />
                     </div>
+                  )}
+                  {a.type === 'send_email' && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`esubj-${a.key}`}>Subject (optional)</Label>
+                        <Input
+                          id={`esubj-${a.key}`} value={a.subject}
+                          onChange={(e) => setEditor((s) => ({ ...s, actions: s.actions.map((x) => x.key === a.key ? { ...x, subject: e.target.value } : x) }))}
+                          placeholder="Update on {{invoice_number}} — {{business_name}}"
+                          className="min-h-[44px]"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`ebody-${a.key}`}>Email body</Label>
+                        <Textarea
+                          id={`ebody-${a.key}`} rows={3} value={a.body}
+                          onChange={(e) => setEditor((s) => ({ ...s, actions: s.actions.map((x) => x.key === a.key ? { ...x, body: e.target.value } : x) }))}
+                          placeholder={'Hi {{customer_name}}, your booking for {{service_name}} at {{start_time}} is confirmed. — {{business_name}}'}
+                        />
+                        <p className="text-xs text-muted-foreground">Placeholders: {'{{customer_name}} {{business_name}} {{invoice_number}} {{amount_due}} {{due_date}} {{service_name}} {{start_time}}'}</p>
+                      </div>
+                    </>
+                  )}
+                  {a.type === 'send_sms' && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`sbody-${a.key}`}>SMS text</Label>
+                      <Textarea
+                        id={`sbody-${a.key}`} rows={2} maxLength={160} value={a.body}
+                        onChange={(e) => setEditor((s) => ({ ...s, actions: s.actions.map((x) => x.key === a.key ? { ...x, body: e.target.value } : x) }))}
+                        placeholder={'Hi {{customer_name}} — reminder for {{service_name}} at {{start_time}}. — {{business_name}}'}
+                      />
+                      <p className="text-xs text-muted-foreground">{a.body.length}/160 characters — keep it to one SMS segment. Same placeholders as email.</p>
+                    </div>
+                  )}
+                  {a.type === 'send_webhook' && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label>Destination</Label>
+                        <Select
+                          value={a.destinationId || undefined}
+                          onValueChange={(v) => setEditor((s) => ({ ...s, actions: s.actions.map((x) => x.key === a.key ? { ...x, destinationId: v } : x) }))}
+                        >
+                          <SelectTrigger aria-label="Webhook destination" className="min-h-[44px]">
+                            <SelectValue placeholder="Choose a webhook destination…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {webhookDests.length === 0 ? (
+                              <SelectItem value="__unavailable" disabled>No destinations configured — add one in Integrations</SelectItem>
+                            ) : (
+                              webhookDests.map((w) => (
+                                <SelectItem key={w.id} value={w.id}>
+                                  <span className="block max-w-[280px] truncate">{w.url}</span>
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Destinations live in Integrations → Webhooks. Posts carry an x-signature header when a signing secret is set.
+                          {a.destinationId === '' && ' Without a destination the run is skipped (logged honestly).'}
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`wbody-${a.key}`}>Payload message (optional)</Label>
+                        <Textarea
+                          id={`wbody-${a.key}`} rows={2} value={a.body}
+                          onChange={(e) => setEditor((s) => ({ ...s, actions: s.actions.map((x) => x.key === a.key ? { ...x, body: e.target.value } : x) }))}
+                          placeholder={'Optional template text stored with the event payload'}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          The dispatcher POSTs the standard automation payload (event, automation name, trigger input) to the destination URL.
+                        </p>
+                      </div>
+                    </>
                   )}
                   {a.type === 'flag_for_review' && (
                     <p className="text-xs text-muted-foreground">Marks the related record for a human to review. No message is sent.</p>

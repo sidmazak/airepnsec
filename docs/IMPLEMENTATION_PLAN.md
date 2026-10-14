@@ -38,9 +38,17 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ tsc + ESLint clean; browser E2E of the golden path; local-only blocking test; duplicate-webhook dedupe; overpay rejection; already-reversed 409; opt-out honored; demo seed idempotent.
 ✅ This docs set; README/AGENTS guidance.
 ⏳ Automated test suite (Vitest): the sandbox build forbids test-framework code — TEST_PLAN.md documents the full case matrix to add outside the sandbox.
-⏳ Docker Compose production packaging: infra/ scripts and compose file are the next step outside the sandbox (SQLite dev here; Postgres target documented).
+
+## Phase 8 — Third-party integration layer (2026-10-14)
+✅ Real BYOK connectors: SMTP (nodemailer), Twilio SMS/WhatsApp (Messages API), Stripe (Payment Links + webhook), signed outbound webhooks — secrets AES-256-GCM, never returned.
+✅ Outbox dispatcher (30s worker + manual flush): exponential backoff (2^n min, max 5 attempts), 10-min recheck on unconfigured channels, nudge-on-enable, honest statusReason on every row.
+✅ Invoice emails (text+HTML, optional Stripe "Pay now" button, per-invoice-per-day dedupe), reminder/direct-send automation actions with template vars, ICS calendar feed + per-booking .ics.
+✅ Stripe webhooks (Stripe-Signature t=,v1= HMAC, event dedupe, currency-mismatch/overpay protections) + generic inbound payment webhooks (x-signature HMAC, 202 honest results).
+🟡 Self-host packaging delivered-unverified-in-sandbox: infra/ Dockerfile + docker-compose.yml (Postgres/pgvector target) written but no Docker daemon here — smoke test on your host (infra/README.md).
 
 ## Honest capability ledger
+
+Updated 2026-10-14 (integration layer delivered — see [INTEGRATIONS.md](./INTEGRATIONS.md)).
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -52,8 +60,13 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 | Ledger + reversals + export | ✅ | Append-only; corrections are reversal entries |
 | Knowledge/FAQ retrieval (RAG) | ✅ | Built-in local neural embeddings (MiniLM ONNX, no key, zero egress) + hybrid BM25 fusion; Ollama/OpenAI-compatible BYOK embedders; controlled reindex |
 | Automations (overdue reminders, escalation) | ✅ | Test mode, dedupe, retries, quiet hours, daily caps |
-| Outbound email/SMS sending | 🟡 | Outbox queues with honest status; no SMTP/SMS sender wired in this build |
-| External calendar sync | ⏳ | Optional connector design documented |
-| Payment-provider integrations | 🟡 | Generic signed-webhook adapter + test harness; no specific PSP wired |
-| PostgreSQL + Docker Compose deployment | ⏳ | Sandbox runs SQLite; schema portable; production packaging documented |
+| Outbound email sending (SMTP BYOK) | ✅ DELIVERED | nodemailer connector; outbox dispatcher (30s, backoff 2^n min max 5 attempts, 10-min recheck, nudge-on-enable); invoice emails text+HTML with optional Stripe pay button |
+| Outbound SMS/WhatsApp (Twilio BYOK) | ✅ DELIVERED | Real Messages API sends; WhatsApp `from` normalization; sanitized Twilio errors in statusReason |
+| Payment provider (Stripe BYOK) | ✅ DELIVERED | Real Payment Links (metadata org_slug/invoice_id/invoice_number) + signature-verified webhook (checkout.session.completed, payment_intent.succeeded), event-id dedupe, currency-mismatch & overpay protection |
+| Outbound webhooks (Zapier/Make/generic) | ✅ DELIVERED | Per-destination signed POSTs (hex HMAC-SHA256, `x-ais-event`, `none` when unsigned); automation `send_webhook` action |
+| ICS calendar | ✅ DELIVERED | Subscribable bookings feed + per-booking .ics (RFC 5545, VALARM −60 min); two-way sync ⏳ deferred |
+| Inbound payment webhooks (generic) | ✅ | x-signature HMAC with org secret, 202 honest results, idempotent |
+| PostgreSQL + Docker Compose deployment | 🟡 | `infra/` Dockerfile + compose (pgvector/pg16) **delivered-unverified-in-sandbox** — no Docker daemon here; smoke test on your host |
 | Backups | ✅ | `VACUUM INTO` file backups + JSON export; scheduled backup scripts are infra work |
+
+**Remaining honest gaps** (2026-10-14): real inbound telephony (voice/SMS phone numbers — browser voice test only), two-way calendar sync (CalDAV / Google OAuth), Vitest suites outside the sandbox, Docker smoke test on real hosts, two-way messaging inbox channels beyond web/voice-test.

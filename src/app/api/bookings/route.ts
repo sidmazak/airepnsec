@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { withAuth, json, parseBody, ApiError } from '@/lib/api'
 import { db } from '@/lib/db'
 import { createBooking } from '@/lib/business/booking'
+import { emitEvent } from '@/lib/automation/engine'
 
 function parseDateOr422(raw: string | null, label: string): Date | undefined {
   if (!raw) return undefined
@@ -74,6 +75,19 @@ export const POST = withAuth(async (req, ctx) => {
     },
     { type: 'user', id: ctx.user.id }
   )
+
+  // Trigger booking_created automations (fire-and-forget semantics — the run is
+  // deduped + scheduled inside emitEvent; a failure must not fail the booking).
+  await emitEvent(ctx.org.id, 'booking_created', {
+    entityId: booking.id,
+    bookingId: booking.id,
+    customerId: booking.customerId,
+    serviceId: booking.serviceId,
+    startAt: booking.startAt.toISOString(),
+    endAt: booking.endAt.toISOString(),
+  }).catch((err: unknown) => {
+    console.error('[bookings] emitEvent booking_created failed:', err instanceof Error ? err.message : err)
+  })
 
   return json(booking, 201)
 })

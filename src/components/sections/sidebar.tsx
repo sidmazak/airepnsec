@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   LayoutDashboard, Inbox, CalendarDays, Users, Receipt, BookOpen, BookMarked,
-  Workflow, Bot, Store, Activity, LogOut, Menu, Bot as Logo, X,
+  Workflow, Bot, Store, Activity, LogOut, Menu, Bot as Logo, Plug, X,
 } from 'lucide-react'
 
 const NAV: Array<{ id: SectionId; label: string; icon: typeof LayoutDashboard; group: string }> = [
@@ -21,6 +21,7 @@ const NAV: Array<{ id: SectionId; label: string; icon: typeof LayoutDashboard; g
   { id: 'automations', label: 'Automations', icon: Workflow, group: 'AI' },
   { id: 'ai', label: 'AI Providers', icon: Bot, group: 'Settings' },
   { id: 'business', label: 'Business Profile', icon: Store, group: 'Settings' },
+  { id: 'integrations', label: 'Integrations', icon: Plug, group: 'Settings' },
   { id: 'diagnostics', label: 'Diagnostics', icon: Activity, group: 'Settings' },
   { id: 'setup', label: 'Setup Wizard', icon: Menu, group: 'Settings' },
 ]

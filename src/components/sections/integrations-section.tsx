@@ -1,0 +1,1160 @@
+'use client'
+
+/**
+ * Integrations hub — BYOK connectors (SMTP, Twilio SMS/WhatsApp, Stripe,
+ * outbound webhooks), the outbox with real dispatch, the iCalendar feed and
+ * the inbound payment webhook secret.
+ *
+ * Honesty rules mirrored from the backend:
+ * - Secrets are encrypted at rest (AES-256-GCM) and are NEVER returned after
+ *   saving — the UI only knows whether credentials exist (`configured`).
+ * - Saving a credential field replaces the whole stored credential set, so the
+ *   dialog says so explicitly and only sends fields the user typed.
+ * - Delivery states come straight from the outbox rows (queued/sent/failed/
+ *   skipped + statusReason). Nothing here claims "sent" unless the API did.
+ */
+
+import { useCallback, useEffect, useState } from 'react'
+import {
+  api, formatDateTime,
+  type IntegrationInfo, type IntegrationTestResult, type OutboxDispatchStats, type OutboxRow,
+} from '@/lib/client/api'
+import { useAppStore } from '@/lib/client/store'
+import { useToast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Switch } from '@/components/ui/switch'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
+  Mail, MessageSquare, Phone, Plug, RefreshCw, Send, Trash2, Webhook as WebhookIcon, XCircle,
+} from 'lucide-react'
+
+/* ------------------------------ helpers ------------------------------ */
+
+function friendlyApiErrorLocal(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message
+  return fallback
+}
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v : v == null ? '' : String(v)
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
+/** window.location.origin — this section only mounts client-side (after auth), so a lazy initializer is hydration-safe. */
+function useOrigin(): string {
+  const [origin] = useState(() => (typeof window !== 'undefined' ? window.location.origin : ''))
+  return origin
+}
+
+const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: string; needsCredentials: boolean }> = {
+  smtp: {
+    title: 'Email (SMTP)',
+    icon: Mail,
+    blurb: 'Outgoing email for invoices, reminders and receipts. Point it at your own SMTP server or relay.',
+    needsCredentials: false,
+  },
+  twilio_sms: {
+    title: 'SMS (Twilio)',
+    icon: MessageSquare,
+    blurb: 'Text messages for reminders and escalations, sent from your own Twilio account.',
+    needsCredentials: true,
+  },
+  twilio_whatsapp: {
+    title: 'WhatsApp (Twilio)',
+    icon: Phone,
+    blurb: 'WhatsApp messages via Twilio (requires a WhatsApp-enabled sender).',
+    needsCredentials: true,
+  },
+  stripe: {
+    title: 'Payments (Stripe)',
+    icon: CreditCard,
+    blurb: 'Real Stripe payment links on invoices. Callbacks are verified against your signing secret.',
+    needsCredentials: true,
+  },
+  webhook_out: {
+    title: 'Webhooks',
+    icon: WebhookIcon,
+    blurb: 'Zapier / Make / custom endpoints that receive signed events.',
+    needsCredentials: false,
+  },
+}
+
+const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'stripe'] as const
+
+const OUTBOX_STATUS_CLASS: Record<string, string> = {
+  sent: 'bg-emerald-100 text-emerald-900',
+  queued: 'bg-amber-100 text-amber-900',
+  failed: 'bg-rose-100 text-rose-900',
+  skipped: 'bg-muted text-muted-foreground border',
+}
+
+function CopyButton({ value, label, className }: { value: string; label: string; className?: string }) {
+  const { toast } = useToast()
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      type="button" variant="outline" size="sm"
+      className={cn('min-h-[44px]', className)}
+      aria-label={label}
+      disabled={!value}
+      onClick={async () => {
+        const ok = await copyText(value)
+        setCopied(ok)
+        if (ok) toast({ title: 'Copied to clipboard' })
+        else toast({ title: 'Copy failed', description: 'Select the text and copy it manually.', variant: 'destructive' })
+        setTimeout(() => setCopied(false), 2000)
+      }}
+    >
+      {copied ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
+  )
+}
+
+/* ------------------------------ drafts ------------------------------ */
+
+type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string }
+type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string }
+
+const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '' }
+const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '' }
+
+function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
+  if (kind === 'smtp') {
+    return { host: d.host.trim(), port: Number.parseInt(d.port, 10) || 0, secure: d.secure, from: d.from.trim() }
+  }
+  if (kind === 'twilio_sms' || kind === 'twilio_whatsapp') return { from: d.from.trim() }
+  if (kind === 'webhook_out') return { url: d.url.trim() }
+  return {} // stripe — config only holds secrets
+}
+
+/**
+ * Only fields the user actually typed are sent. The backend treats `secrets`
+ * as FULL replacement, so sending nothing keeps the stored set intact.
+ */
+function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  if (kind === 'smtp') {
+    if (d.user.trim()) out.user = d.user.trim()
+    if (d.pass) out.pass = d.pass
+  } else if (kind === 'twilio_sms' || kind === 'twilio_whatsapp') {
+    if (d.accountSid.trim()) out.accountSid = d.accountSid.trim()
+    if (d.authToken) out.authToken = d.authToken
+  } else if (kind === 'stripe') {
+    if (d.secretKey) out.secretKey = d.secretKey
+    if (d.webhookSecret) out.webhookSecret = d.webhookSecret
+  } else if (kind === 'webhook_out') {
+    if (d.secret) out.secret = d.secret
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/* ------------------------------ connector card (singletons) ------------------------------ */
+
+function ConnectorCard({
+  kind, row, canManage, onChanged,
+}: {
+  kind: string
+  row: IntegrationInfo | null
+  canManage: boolean
+  onChanged: () => Promise<void> | void
+}) {
+  const { toast } = useToast()
+  const meta = KIND_META[kind]
+  const Icon = meta.icon
+
+  const [dlgOpen, setDlgOpen] = useState(false)
+  const [initialCfg, setInitialCfg] = useState<ConfigDraft>(EMPTY_CONFIG)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<IntegrationTestResult | null>(null)
+  const [toggling, setToggling] = useState(false)
+
+  /** Snapshot the row's config at open time — later refreshes must not reset the dialog mid-edit. */
+  const openDialog = () => {
+    const c = row?.config ?? {}
+    setInitialCfg({
+      host: str(c.host), port: c.port != null ? String(c.port) : '', secure: c.secure === true,
+      from: str(c.from), url: str(c.url),
+    })
+    setDlgOpen(true)
+  }
+
+  const runTest = async () => {
+    if (!row) return
+    setTesting(true)
+    try {
+      const r = await api.post<IntegrationTestResult>(`/api/integrations/${row.id}/test`)
+      setTestResult(r)
+      await onChanged()
+    } catch (err) {
+      setTestResult({ ok: false, detail: friendlyApiErrorLocal(err, 'Test failed') })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const toggleEnabled = async (next: boolean) => {
+    if (!row) return
+    setToggling(true)
+    try {
+      await api.patch(`/api/integrations/${row.id}`, { enabled: next })
+      await onChanged()
+      toast({
+        title: next ? `${meta.title} enabled` : `${meta.title} disabled`,
+        description: next ? 'The dispatcher will use this channel for queued messages.' : undefined,
+      })
+    } catch (err) {
+      toast({ title: next ? 'Could not enable' : 'Could not disable', description: friendlyApiErrorLocal(err, 'Update failed'), variant: 'destructive' })
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  const switchLocked = Boolean(row && !row.configured && meta.needsCredentials)
+
+  return (
+    <Card className="flex flex-col">
+      <CardHeader>
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Icon className="h-4 w-4 shrink-0" aria-hidden /> {meta.title}
+            </CardTitle>
+            <CardDescription className="mt-1">{meta.blurb}</CardDescription>
+          </div>
+          {row && (
+            <label className="flex flex-col items-center gap-1 shrink-0 min-h-[44px]" title={switchLocked ? 'Add credentials before enabling' : undefined}>
+              <Switch
+                checked={row.enabled}
+                disabled={!canManage || toggling || switchLocked}
+                onCheckedChange={(v) => void toggleEnabled(v)}
+                aria-label={`${row.enabled ? 'Disable' : 'Enable'} ${meta.title}`}
+              />
+              <span className="text-[10px] text-muted-foreground">{row.enabled ? 'Enabled' : 'Disabled'}</span>
+            </label>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 flex-1">
+        {row ? (
+          <>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge className={cn('text-[10px]', row.enabled ? 'bg-emerald-100 text-emerald-900' : 'bg-muted text-muted-foreground border')}>
+                {row.enabled ? 'Enabled' : 'Disabled'}
+              </Badge>
+              {row.configured ? (
+                <Badge variant="outline" className="text-[10px] gap-1"><KeyRound className="h-3 w-3" aria-hidden /> Credentials saved</Badge>
+              ) : meta.needsCredentials ? (
+                <Badge className="bg-amber-100 text-amber-900 text-[10px]">No credentials yet</Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px]">Optional credentials</Badge>
+              )}
+            </div>
+
+            {kind === 'smtp' && (
+              <p className="text-xs text-muted-foreground break-all">
+                {str(row.config.host) ? `${str(row.config.host)}${row.config.port ? `:${str(row.config.port)}` : ''} · from ${str(row.config.from) || '—'}` : 'No server configured yet.'}
+              </p>
+            )}
+            {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
+              <p className="text-xs text-muted-foreground break-all">Sender: {str(row.config.from) || 'not set'}</p>
+            )}
+
+            {testResult ? (
+              <Alert role="status" className={testResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}>
+                {testResult.ok ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <XCircle className="h-4 w-4" aria-hidden />}
+                <AlertDescription>{testResult.ok ? 'Test passed. ' : 'Test failed. '}{testResult.detail}</AlertDescription>
+              </Alert>
+            ) : row.lastTestAt && !row.lastTestOk && row.lastTestError ? (
+              <Alert role="alert" className="border-rose-200 bg-rose-50 text-rose-900">
+                <XCircle className="h-4 w-4" aria-hidden />
+                <AlertDescription>
+                  Last test failed ({formatDateTime(row.lastTestAt)}) — {row.lastTestError}
+                </AlertDescription>
+              </Alert>
+            ) : row.lastTestAt ? (
+              <p className="text-xs text-emerald-700 flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                Last test passed · {formatDateTime(row.lastTestAt)}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">Not tested yet — the test makes a real connection and may take a few seconds.</p>
+            )}
+          </>
+        ) : (
+          <div className="rounded-md border border-dashed p-4 text-center space-y-2">
+            <p className="text-sm font-medium">Not configured</p>
+            <p className="text-xs text-muted-foreground">Nothing is saved for this connector yet.</p>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 mt-auto pt-1">
+          <Button variant="outline" className="min-h-[44px]" onClick={openDialog} aria-label={`Configure ${meta.title}`}>
+            <Plug className="h-4 w-4" aria-hidden /> Configure
+          </Button>
+          {row && (
+            <Button
+              variant="outline" className="min-h-[44px]"
+              onClick={() => void runTest()}
+              disabled={testing || !canManage}
+              title={canManage ? 'Real network test — may take a few seconds' : 'Owner or admin only'}
+              aria-label={`Test ${meta.title} connection`}
+            >
+              {testing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+              Test connection
+            </Button>
+          )}
+        </div>
+        {!canManage && <p className="text-xs text-muted-foreground">Read-only — owner/admin can edit.</p>}
+      </CardContent>
+
+      <ConfigureDialog
+        kind={kind}
+        existing={row}
+        initialConfig={initialCfg}
+        open={dlgOpen}
+        onOpenChange={setDlgOpen}
+        canManage={canManage}
+        onSaved={onChanged}
+      />
+    </Card>
+  )
+}
+
+/* ------------------------------ configure dialog ------------------------------ */
+
+function ConfigureDialog({
+  kind, existing, initialConfig, open, onOpenChange, canManage, onSaved,
+}: {
+  kind: string
+  existing: IntegrationInfo | null
+  initialConfig: ConfigDraft
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  canManage: boolean
+  onSaved: () => Promise<void> | void
+}) {
+  const { toast } = useToast()
+  const origin = useOrigin()
+  const meta = KIND_META[kind]
+  const [cfg, setCfg] = useState<ConfigDraft>(EMPTY_CONFIG)
+  const [sec, setSec] = useState<SecretsDraft>(EMPTY_SECRETS)
+  const [saving, setSaving] = useState(false)
+  const [savingTest, setSavingTest] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [error, setError] = useState('')
+  const [testResult, setTestResult] = useState<IntegrationTestResult | null>(null)
+
+  // Reset only when the dialog is (re)opened — `initialConfig` identity changes exactly then.
+  useEffect(() => {
+    if (!open) return
+    setCfg(initialConfig)
+    setSec(EMPTY_SECRETS)
+    setError('')
+    setTestResult(null)
+  }, [open, initialConfig])
+
+  const save = async (alsoTest: boolean): Promise<boolean> => {
+    setSaving(true)
+    setSavingTest(alsoTest)
+    setError('')
+    try {
+      const secrets = collectSecrets(kind, sec)
+      let rowId = existing?.id ?? ''
+      if (existing) {
+        const body: Record<string, unknown> = { config: buildConfig(kind, cfg) }
+        if (secrets) body.secrets = secrets
+        const d = await api.patch<{ integration: IntegrationInfo }>(`/api/integrations/${existing.id}`, body)
+        rowId = d.integration.id
+      } else {
+        const body: Record<string, unknown> = { kind, config: buildConfig(kind, cfg) }
+        if (secrets) body.secrets = secrets
+        const d = await api.post<{ integration: IntegrationInfo }>('/api/integrations', body)
+        rowId = d.integration.id
+      }
+      await onSaved()
+
+      if (alsoTest) {
+        // Real network test — may take up to ~10s; keep the dialog open to show it.
+        const r = await api.post<IntegrationTestResult>(`/api/integrations/${rowId}/test`)
+        setTestResult(r)
+        await onSaved()
+        toast({ title: r.ok ? `${meta.title} saved — test passed` : `${meta.title} saved — test failed`, description: r.detail, variant: r.ok ? 'default' : 'destructive' })
+        return false
+      }
+      toast({ title: `${meta.title} saved` })
+      return true
+    } catch (err) {
+      setError(friendlyApiErrorLocal(err, 'Save failed'))
+      return false
+    } finally {
+      setSaving(false)
+      setSavingTest(false)
+    }
+  }
+
+  const clearCredentials = async () => {
+    if (!existing) return
+    setClearing(true)
+    setError('')
+    try {
+      await api.patch(`/api/integrations/${existing.id}`, { secrets: null })
+      await onSaved()
+      setSec(EMPTY_SECRETS)
+      toast({ title: 'Credentials cleared', description: 'The stored credential set was deleted and the integration was disabled.' })
+    } catch (err) {
+      setError(friendlyApiErrorLocal(err, 'Could not clear credentials'))
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  const idBase = `int-${kind}`
+  const busy = saving || savingTest || clearing
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto" aria-describedby={`int-desc-${kind}`}>
+        <DialogHeader>
+          <DialogTitle>{existing ? `Configure ${meta.title}` : `Set up ${meta.title}`}</DialogTitle>
+          <DialogDescription id={`int-desc-${kind}`}>
+            {existing ? 'Changes apply to future sends immediately. Saved credentials are never shown again.' : meta.blurb}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+
+          {kind === 'smtp' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-host`}>SMTP host</Label>
+                <Input id={`${idBase}-host`} value={cfg.host} onChange={(e) => setCfg((s) => ({ ...s, host: e.target.value }))} placeholder="smtp.example.com" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-port`}>Port</Label>
+                  <Input id={`${idBase}-port`} type="number" min={1} max={65535} value={cfg.port} onChange={(e) => setCfg((s) => ({ ...s, port: e.target.value }))} placeholder="587" className="min-h-[44px]" />
+                </div>
+                <label className="flex items-center gap-3 text-sm rounded-md border p-3 min-h-[44px]">
+                  <Switch checked={cfg.secure} onCheckedChange={(v) => setCfg((s) => ({ ...s, secure: v }))} aria-label="Use implicit TLS (port 465)" />
+                  Use implicit TLS (port 465)
+                </label>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-from`}>From address</Label>
+                <Input id={`${idBase}-from`} type="email" value={cfg.from} onChange={(e) => setCfg((s) => ({ ...s, from: e.target.value }))} placeholder="invoices@yourdomain.com" className="min-h-[44px]" />
+              </div>
+            </div>
+          )}
+
+          {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idBase}-from`}>From {kind === 'twilio_whatsapp' ? '(whatsapp:+E.164)' : '(+E.164)'}</Label>
+              <Input
+                id={`${idBase}-from`} value={cfg.from}
+                onChange={(e) => setCfg((s) => ({ ...s, from: e.target.value }))}
+                placeholder={kind === 'twilio_whatsapp' ? 'whatsapp:+15551234567' : '+15551234567'}
+                autoComplete="off" className="min-h-[44px]"
+              />
+            </div>
+          )}
+
+          {kind === 'webhook_out' && (
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idBase}-url`}>Destination URL</Label>
+              <Input id={`${idBase}-url`} type="url" value={cfg.url} onChange={(e) => setCfg((s) => ({ ...s, url: e.target.value }))} placeholder="https://hooks.zapier.com/hooks/catch/…" autoComplete="off" className="min-h-[44px]" />
+            </div>
+          )}
+
+          {kind === 'stripe' && (
+            <div className="rounded-md border p-3 space-y-2">
+              <p className="text-sm font-medium">Stripe webhook endpoint</p>
+              <p className="text-xs text-muted-foreground">
+                Point Stripe&apos;s webhook endpoint at this URL; payments are then verified against the signing secret (whsec_…) below.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="text-xs bg-muted rounded px-2 py-1.5 break-all flex-1 min-w-0">{origin ? `${origin}/api/stripe/webhook` : '/api/stripe/webhook'}</code>
+                <CopyButton value={origin ? `${origin}/api/stripe/webhook` : ''} label="Copy Stripe webhook URL" />
+              </div>
+            </div>
+          )}
+
+          {/* credentials */}
+          <div className="space-y-3 rounded-md border p-3">
+            <p className="text-sm font-medium flex items-center gap-1.5"><KeyRound className="h-4 w-4" aria-hidden /> Credentials</p>
+
+            {kind === 'smtp' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-user`}>Username (optional)</Label>
+                  <Input id={`${idBase}-user`} value={sec.user} onChange={(e) => setSec((s) => ({ ...s, user: e.target.value }))} autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-pass`}>Password (optional)</Label>
+                  <Input id={`${idBase}-pass`} type="password" value={sec.pass} onChange={(e) => setSec((s) => ({ ...s, pass: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                </div>
+                <p className="text-xs text-muted-foreground">Leave empty for anonymous relays.</p>
+              </>
+            )}
+
+            {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-sid`}>Account SID</Label>
+                  <Input id={`${idBase}-sid`} value={sec.accountSid} onChange={(e) => setSec((s) => ({ ...s, accountSid: e.target.value }))} placeholder="AC…" autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-token`}>Auth token</Label>
+                  <Input id={`${idBase}-token`} type="password" value={sec.authToken} onChange={(e) => setSec((s) => ({ ...s, authToken: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                </div>
+              </>
+            )}
+
+            {kind === 'stripe' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-sk`}>Secret key</Label>
+                  <Input id={`${idBase}-sk`} type="password" value={sec.secretKey} onChange={(e) => setSec((s) => ({ ...s, secretKey: e.target.value }))} placeholder="sk_test_… / sk_live_…" autoComplete="new-password" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-whsec`}>Webhook signing secret (optional)</Label>
+                  <Input id={`${idBase}-whsec`} type="password" value={sec.webhookSecret} onChange={(e) => setSec((s) => ({ ...s, webhookSecret: e.target.value }))} placeholder="whsec_…" autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">Set it to verify Stripe callbacks against the endpoint shown above.</p>
+                </div>
+              </>
+            )}
+
+            {kind === 'webhook_out' && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-secret`}>Signing secret (optional)</Label>
+                <Input id={`${idBase}-secret`} type="password" value={sec.secret} onChange={(e) => setSec((s) => ({ ...s, secret: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">Every automation can also post to these URLs, signed with your secret (x-signature header).</p>
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              {existing?.configured
+                ? 'Credentials are saved and never shown again. Saving any credential field replaces the whole stored set — fill in every field you want kept.'
+                : 'Saved credentials are never shown again. Saving any credential field replaces the whole stored set.'}
+            </p>
+
+            {existing?.configured && (
+              <Button
+                type="button" variant="ghost" size="sm"
+                className="min-h-[44px] text-destructive hover:text-destructive"
+                onClick={() => void clearCredentials()} disabled={busy || !canManage}
+                aria-label={`Clear saved credentials for ${meta.title}`}
+              >
+                {clearing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
+                Clear saved credentials
+              </Button>
+            )}
+          </div>
+
+          {testResult && (
+            <Alert role="status" className={testResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}>
+              {testResult.ok ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <XCircle className="h-4 w-4" aria-hidden />}
+              <AlertDescription>{testResult.ok ? 'Test passed. ' : 'Test failed. '}{testResult.detail}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+
+        <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <Button variant="outline" className="min-h-[44px]" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            className="min-h-[44px]"
+            disabled={!canManage || busy}
+            onClick={async () => { if (await save(false)) onOpenChange(false) }}
+            aria-label={`Save ${meta.title}`}
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+            Save
+          </Button>
+          <Button
+            variant="outline"
+            className="min-h-[44px]"
+            disabled={!canManage || busy}
+            onClick={() => void save(true)}
+            aria-label={`Save and test ${meta.title}`}
+          >
+            {savingTest ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+            Save &amp; test
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ------------------------------ webhook destinations (list card) ------------------------------ */
+
+function WebhookDestinationsCard({
+  rows, canManage, onChanged,
+}: {
+  rows: IntegrationInfo[]
+  canManage: boolean
+  onChanged: () => Promise<void> | void
+}) {
+  const { toast } = useToast()
+  const [addOpen, setAddOpen] = useState(false)
+  const [url, setUrl] = useState('')
+  const [secret, setSecret] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [testBusy, setTestBusy] = useState<string | null>(null)
+  const [testResults, setTestResults] = useState<Record<string, IntegrationTestResult>>({})
+  const [deleteTarget, setDeleteTarget] = useState<IntegrationInfo | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const body: Record<string, unknown> = { kind: 'webhook_out', config: { url: url.trim() } }
+      if (secret) body.secrets = { secret }
+      await api.post('/api/integrations', body)
+      await onChanged()
+      toast({ title: 'Webhook destination added', description: 'Automations can now post signed events to it.' })
+      setUrl(''); setSecret(''); setAddOpen(false)
+    } catch (err) {
+      setError(friendlyApiErrorLocal(err, 'Could not add destination'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const runTest = async (row: IntegrationInfo) => {
+    setTestBusy(row.id)
+    try {
+      const r = await api.post<IntegrationTestResult>(`/api/integrations/${row.id}/test`)
+      setTestResults((t) => ({ ...t, [row.id]: r }))
+      await onChanged()
+    } catch (err) {
+      setTestResults((t) => ({ ...t, [row.id]: { ok: false, detail: friendlyApiErrorLocal(err, 'Test failed') } }))
+    } finally {
+      setTestBusy(null)
+    }
+  }
+
+  const doDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await api.delete(`/api/integrations/${deleteTarget.id}`)
+      await onChanged()
+      toast({ title: 'Webhook destination deleted' })
+      setDeleteTarget(null)
+    } catch (err) {
+      toast({ title: 'Delete failed', description: friendlyApiErrorLocal(err, 'Unknown error'), variant: 'destructive' })
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Card className="flex flex-col">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2"><WebhookIcon className="h-4 w-4" aria-hidden /> Webhooks (Zapier / Make / custom)</CardTitle>
+        <CardDescription>Outbound destinations for automation events. Posts are signed with your secret in the x-signature header.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 flex-1">
+        {rows.length === 0 ? (
+          <div className="rounded-md border border-dashed p-4 text-center space-y-2">
+            <p className="text-sm font-medium">No destinations yet</p>
+            <p className="text-xs text-muted-foreground">Add one to receive signed events from automations.</p>
+          </div>
+        ) : (
+          <ul className="space-y-2 max-h-96 overflow-y-auto" aria-label="Webhook destinations">
+            {rows.map((row) => {
+              const t = testResults[row.id]
+              return (
+                <li key={row.id} className="rounded-md border p-3 space-y-2">
+                  <div className="flex flex-wrap items-start gap-2">
+                    <p className="text-sm break-all min-w-0 flex-1">{str(row.config.url) || '(no URL)'}</p>
+                    <Badge className={cn('text-[10px]', row.enabled ? 'bg-emerald-100 text-emerald-900' : 'bg-muted text-muted-foreground border')}>
+                      {row.enabled ? 'Enabled' : 'Disabled'}
+                    </Badge>
+                  </div>
+                  {t && (
+                    <Alert role="status" className={t.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}>
+                      {t.ok ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <XCircle className="h-4 w-4" aria-hidden />}
+                      <AlertDescription className="text-xs">{t.ok ? 'Delivered. ' : 'Failed. '}{t.detail}</AlertDescription>
+                    </Alert>
+                  )}
+                  {!t && row.lastTestAt && !row.lastTestOk && row.lastTestError && (
+                    <p className="text-xs text-rose-700">Last test failed — {row.lastTestError}</p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm" variant="outline" className="min-h-[44px]"
+                      onClick={() => void runTest(row)} disabled={testBusy === row.id || !canManage}
+                      aria-label={`Test webhook ${str(row.config.url)}`}
+                    >
+                      {testBusy === row.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+                      Test
+                    </Button>
+                    <Button
+                      size="sm" variant="ghost"
+                      className="min-h-[44px] text-destructive hover:text-destructive"
+                      onClick={() => setDeleteTarget(row)} disabled={!canManage}
+                      aria-label={`Delete webhook ${str(row.config.url)}`}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden /> Delete
+                    </Button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+
+        <Button className="min-h-[44px] w-full sm:w-auto" onClick={() => { setError(''); setAddOpen(true) }} disabled={!canManage} aria-label="Add webhook destination">
+          <Plug className="h-4 w-4" aria-hidden /> Add destination
+        </Button>
+        {!canManage && <p className="text-xs text-muted-foreground">Read-only — owner/admin can edit.</p>}
+        <p className="text-xs text-muted-foreground">Every automation can also post to these URLs, signed with your secret (x-signature header).</p>
+      </CardContent>
+
+      {/* add destination dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-md" aria-describedby="webhook-add-desc">
+          <DialogHeader>
+            <DialogTitle>Add webhook destination</DialogTitle>
+            <DialogDescription id="webhook-add-desc">
+              Automation events are POSTed as JSON to this URL, signed with your secret (x-signature header) when one is set.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={add} className="space-y-3" aria-label="Add webhook destination form">
+            {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+            <div className="space-y-1.5">
+              <Label htmlFor="wh-url">Destination URL</Label>
+              <Input id="wh-url" type="url" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://hooks.zapier.com/hooks/catch/…" autoComplete="off" className="min-h-[44px]" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="wh-secret">Signing secret (optional)</Label>
+              <Input id="wh-secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="new-password" className="min-h-[44px]" />
+              <p className="text-xs text-muted-foreground">Saved credentials are never shown again.</p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setAddOpen(false)}>Cancel</Button>
+              <Button type="submit" className="min-h-[44px]" disabled={saving || !url.trim()}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plug className="h-4 w-4" aria-hidden />}
+                Add destination
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* delete confirm */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this webhook destination?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget ? `${str(deleteTarget.config.url)} will stop receiving events. Its encrypted signing secret is deleted with it.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-[44px]">Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-[44px] bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => { e.preventDefault(); void doDelete() }}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
+              Delete destination
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
+  )
+}
+
+/* ------------------------------ outbox tab ------------------------------ */
+
+function OutboxTab({ canManage }: { canManage: boolean }) {
+  const { toast } = useToast()
+  const [messages, setMessages] = useState<OutboxRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [dispatching, setDispatching] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const d = await api.get<{ messages: OutboxRow[] }>('/api/outbox')
+      setMessages(d.messages)
+      setError('')
+    } catch (err) {
+      setError(friendlyApiErrorLocal(err, 'Could not load the outbox'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  const dispatch = async () => {
+    setDispatching(true)
+    try {
+      const r = await api.post<{ ok: boolean; stats: OutboxDispatchStats }>('/api/outbox/dispatch')
+      const s = r.stats
+      toast({
+        title: 'Outbox dispatched',
+        description: `${s.processed} processed · ${s.sent} sent · ${s.failed} failed · ${s.waiting} waiting`,
+      })
+      await load()
+    } catch (err) {
+      toast({ title: 'Dispatch failed', description: friendlyApiErrorLocal(err, 'Unknown error'), variant: 'destructive' })
+    } finally {
+      setDispatching(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm text-muted-foreground mr-auto">Every outbound message with its real delivery state — queued rows say why.</p>
+        {canManage && (
+          <Button onClick={() => void dispatch()} disabled={dispatching} className="min-h-[44px]" aria-label="Dispatch the outbox now">
+            {dispatching ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+            Dispatch now
+          </Button>
+        )}
+        <Button variant="outline" onClick={() => void load()} disabled={loading} className="min-h-[44px]" aria-label="Refresh outbox">
+          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} aria-hidden /> Refresh
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="space-y-2" aria-label="Loading outbox">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
+        </div>
+      ) : error ? (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="space-y-2">
+            <p>{error}</p>
+            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+          </AlertDescription>
+        </Alert>
+      ) : messages.length === 0 ? (
+        <Card>
+          <CardContent className="p-8 text-center space-y-2">
+            <Send className="h-8 w-8 mx-auto text-muted-foreground" aria-hidden />
+            <p className="text-sm text-muted-foreground">Nothing queued yet — invoice sends, reminders and automation messages appear here with honest delivery states.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <div className="max-h-96 overflow-y-auto">
+              <Table aria-label="Outbox messages">
+                <TableHeader className="sticky top-0 bg-background">
+                  <TableRow>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Channel</TableHead>
+                    <TableHead>Recipient</TableHead>
+                    <TableHead className="hidden sm:table-cell">Subject</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {messages.map((m) => (
+                    <TableRow key={m.id}>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(m.createdAt)}</TableCell>
+                      <TableCell><Badge variant="secondary" className="font-normal text-[11px]">{m.channel}</Badge></TableCell>
+                      <TableCell className="text-sm break-all max-w-[180px]">{m.recipient || '—'}</TableCell>
+                      <TableCell className="hidden sm:table-cell text-sm max-w-[240px]"><p className="truncate" title={m.subject}>{m.subject || '—'}</p></TableCell>
+                      <TableCell>
+                        <Badge className={cn('text-[10px] px-1.5', OUTBOX_STATUS_CLASS[m.status] ?? 'bg-muted')}>{m.status}</Badge>
+                        {typeof m.attempts === 'number' && m.attempts > 0 && (
+                          <p className="text-[10px] text-muted-foreground mt-1">attempt {m.attempts}</p>
+                        )}
+                        {m.statusReason && <p className="text-xs text-muted-foreground mt-1 max-w-[220px]">{m.statusReason}</p>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------ calendar tab ------------------------------ */
+
+function CalendarTab() {
+  const origin = useOrigin()
+  const feedUrl = `${origin}/api/calendar/bookings.ics`
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2"><CalendarDays className="h-4 w-4" aria-hidden /> Calendar feed (iCalendar)</CardTitle>
+        <CardDescription>
+          Your bookings are available as an iCalendar feed — subscribe from Google Calendar, Apple Calendar or Outlook using &ldquo;Add calendar from URL&rdquo;.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="text-xs bg-muted rounded px-2 py-2 break-all flex-1 min-w-0">{origin ? feedUrl : '/api/calendar/bookings.ics'}</code>
+          <CopyButton value={feedUrl} label="Copy calendar feed URL" />
+          <Button
+            variant="outline" size="sm" className="min-h-[44px]"
+            disabled={!origin}
+            onClick={() => window.open(feedUrl, '_blank', 'noopener')}
+            aria-label="Open calendar feed"
+          >
+            <ExternalLink className="h-4 w-4" aria-hidden /> Open feed
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Links work inside your network; when self-hosting publicly they work anywhere. Each booking also has its own .ics link.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ------------------------------ inbound webhook tab ------------------------------ */
+
+function InboundWebhookTab({ canManage }: { canManage: boolean }) {
+  const origin = useOrigin()
+  const { toast } = useToast()
+  const [secret, setSecret] = useState('')
+  const [secretState, setSecretState] = useState<'loading' | 'ready' | 'none'>(() => (canManage ? 'loading' : 'none'))
+  const [rotating, setRotating] = useState(false)
+
+  useEffect(() => {
+    if (!canManage) return
+    let cancelled = false
+    api.get<{ secret?: string }>('/api/webhook-secret')
+      .then((d) => {
+        if (cancelled) return
+        if (d && typeof d.secret === 'string' && d.secret) { setSecret(d.secret); setSecretState('ready') }
+        else setSecretState('none')
+      })
+      .catch(() => { if (!cancelled) setSecretState('none') })
+    return () => { cancelled = true }
+  }, [canManage])
+
+  const rotate = async () => {
+    setRotating(true)
+    try {
+      const d = await api.put<{ secret: string }>('/api/webhook-secret')
+      setSecret(d.secret)
+      setSecretState('ready')
+      toast({ title: 'Webhook secret rotated', description: 'The new value is shown once — copy it now.' })
+    } catch (err) {
+      toast({ title: 'Could not rotate secret', description: friendlyApiErrorLocal(err, 'Unknown error'), variant: 'destructive' })
+    } finally {
+      setRotating(false)
+    }
+  }
+
+  const webhookUrl = `${origin}/api/payments/webhook`
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2"><WebhookIcon className="h-4 w-4" aria-hidden /> Inbound payment webhook</CardTitle>
+        <CardDescription>Receive signed payment events from any provider into your ledger.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label>Webhook URL</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="text-xs bg-muted rounded px-2 py-2 break-all flex-1 min-w-0">{origin ? webhookUrl : '/api/payments/webhook'}</code>
+            <CopyButton value={webhookUrl} label="Copy payment webhook URL" />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Any payment provider that can POST JSON with <code>org_slug</code> and an <code>x-signature</code> header works out of the box.
+            Stripe users should point Stripe at <code>/api/stripe/webhook</code> instead — it is verified with the signing secret in the Stripe card above.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1.5"><KeyRound className="h-3.5 w-3.5" aria-hidden /> Signing secret (x-signature)</Label>
+          {!canManage ? (
+            <p className="text-sm text-muted-foreground">Owner/admin only — sign in as owner or admin to view or rotate the secret.</p>
+          ) : secretState === 'loading' ? (
+            <Skeleton className="h-10 w-full max-w-md" />
+          ) : secretState === 'ready' ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="text-xs bg-muted rounded px-2 py-2 break-all flex-1 min-w-0" aria-label="Webhook signing secret">{secret}</code>
+                <CopyButton value={secret} label="Copy webhook signing secret" />
+              </div>
+              <p className="text-xs text-muted-foreground">Keep this private — anyone holding it can post payment claims to your webhook.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                No secret is retrievable right now. Rotate to generate a new one — the value is displayed exactly once, so copy it immediately.
+              </p>
+              <Button onClick={() => void rotate()} disabled={rotating} className="min-h-[44px]" aria-label="Rotate webhook signing secret">
+                {rotating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+                Rotate secret
+              </Button>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ------------------------------ section ------------------------------ */
+
+export function IntegrationsSection() {
+  const session = useAppStore((s) => s.session)
+  const canManage = session?.user?.role === 'owner' || session?.user?.role === 'admin'
+
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [rows, setRows] = useState<IntegrationInfo[]>([])
+
+  /**
+   * Refresh never flips `loading` back to true — a skeleton swap would unmount
+   * connector cards mid-interaction (closing open dialogs). Initial load shows
+   * the skeleton; later failures keep the stale data and surface an inline alert.
+   */
+  const load = useCallback(async () => {
+    try {
+      const d = await api.get<{ integrations: IntegrationInfo[] }>('/api/integrations')
+      setRows(d.integrations)
+      setError('')
+    } catch (err) {
+      setError(friendlyApiErrorLocal(err, 'Could not load integrations'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  const singleton = (kind: string) => rows.find((r) => r.kind === kind) ?? null
+  const webhookRows = rows.filter((r) => r.kind === 'webhook_out')
+
+  if (loading) {
+    return (
+      <div className="space-y-6" aria-busy="true" aria-label="Loading integrations">
+        <Skeleton className="h-8 w-72" />
+        <Skeleton className="h-12 w-full max-w-2xl" />
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-56 w-full" />)}
+        </div>
+      </div>
+    )
+  }
+
+  if (error && rows.length === 0) {
+    return (
+      <div className="space-y-4">
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="space-y-2">
+            <p>{error}</p>
+            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6" aria-label="Integrations">
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="mr-auto">
+          <h2 className="text-lg font-semibold tracking-tight">Integrations</h2>
+          <p className="text-sm text-muted-foreground max-w-3xl">
+            Bring your own keys — everything is optional; the assistant works fully without any of these. Credentials are
+            encrypted at rest (AES-256-GCM) and are never returned after saving.
+          </p>
+        </div>
+        {!canManage && <Badge variant="outline">read-only — owner/admin can edit</Badge>}
+      </div>
+
+      {error && rows.length > 0 && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="space-y-2">
+            <p>Refresh failed, showing the last known state — {error}</p>
+            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {SINGLETON_KINDS.map((kind) => (
+          <ConnectorCard
+            key={kind}
+            kind={kind}
+            row={singleton(kind)}
+            canManage={canManage}
+            onChanged={load}
+          />
+        ))}
+        <WebhookDestinationsCard rows={webhookRows} canManage={canManage} onChanged={load} />
+      </div>
+
+      <Tabs defaultValue="outbox">
+        <TabsList aria-label="Integration tools">
+          <TabsTrigger value="outbox" className="min-h-[44px]"><Send className="h-4 w-4 mr-1.5" aria-hidden /> Outbox</TabsTrigger>
+          <TabsTrigger value="calendar" className="min-h-[44px]"><CalendarDays className="h-4 w-4 mr-1.5" aria-hidden /> Calendar</TabsTrigger>
+          <TabsTrigger value="inbound" className="min-h-[44px]"><WebhookIcon className="h-4 w-4 mr-1.5" aria-hidden /> Inbound webhook</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="outbox" className="mt-4">
+          <OutboxTab canManage={canManage} />
+        </TabsContent>
+
+        <TabsContent value="calendar" className="mt-4">
+          <CalendarTab />
+        </TabsContent>
+
+        <TabsContent value="inbound" className="mt-4">
+          <InboundWebhookTab canManage={canManage} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}

@@ -1,0 +1,533 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useState } from 'react'
+     4→import { api, formatDateTime, type ProviderConfigPublic } from '@/lib/client/api'
+     5→import { useAppStore } from '@/lib/client/store'
+     6→import { useToast } from '@/hooks/use-toast'
+     7→import { cn } from '@/lib/utils'
+     8→import { Button } from '@/components/ui/button'
+     9→import { Input } from '@/components/ui/input'
+    10→import { Label } from '@/components/ui/label'
+    11→import { Badge } from '@/components/ui/badge'
+    12→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    13→import { Alert, AlertDescription } from '@/components/ui/alert'
+    14→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    15→import { Switch } from '@/components/ui/switch'
+    16→import { Skeleton } from '@/components/ui/skeleton'
+    17→import { Separator } from '@/components/ui/separator'
+    18→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    19→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+    20→import {
+    21→  Bot, CheckCircle2, Database, Globe, KeyRound, Loader2, PlugZap, RefreshCw,
+    22→  ShieldAlert, ShieldCheck, XCircle,
+    23→} from 'lucide-react'
+    24→
+    25→/* ------------------------------ helpers ------------------------------ */
+    26→
+    27→const PROVIDER_LABELS: Record<string, string> = {
+    28→  managed: 'Managed AI gateway (external)',
+    29→  ollama: 'Ollama (local)',
+    30→  openai_compatible: 'OpenAI-compatible endpoint',
+    31→  browser: 'In-browser',
+    32→  local_neural: 'Built-in neural model (local)',
+    33→  local_lexical: 'Legacy keyword index (local)',
+    34→  none: 'Disabled',
+    35→}
+    36→
+    37→const DATA_MODES: Array<{ id: string; title: string; description: string }> = [
+    38→  { id: 'local_only', title: 'Strict — local only', description: 'Never call cloud AI — requires local Ollama or a compatible local endpoint.' },
+    39→  { id: 'hybrid', title: 'Hybrid', description: 'Local + cloud allowed; you choose per capability.' },
+    40→  { id: 'cloud_first', title: 'Cloud first', description: 'Prefer cloud models where a cloud provider is configured.' },
+    41→]
+    42→
+    43→function isCloudProvider(p: string): boolean {
+    44→  return p === 'managed' || p === 'openai_compatible'
+    45→}
+    46→
+    47→type CapabilityInfo = { label: string; description: string; kinds: string[] }
+    48→type TestResult = { ok: boolean; message: string; latencyMs: number }
+    49→type AiLog = {
+    50→  id?: string; ts: string; capability: string; provider: string; model: string
+    51→  latencyMs: number; tokensIn: number; tokensOut: number; ok: boolean; errorSanitized: string
+    52→}
+    53→type Draft = { provider: string; baseUrl: string; model: string; apiKey: string | null; enabled: boolean }
+    54→
+    55→/* ------------------------------ section ------------------------------ */
+    56→
+    57→export function AiSection() {
+    58→  const { toast } = useToast()
+    59→  const session = useAppStore((s) => s.session)
+    60→  const canManage = session?.user?.role === 'owner' || session?.user?.role === 'admin'
+    61→
+    62→  const [loading, setLoading] = useState(true)
+    63→  const [error, setError] = useState('')
+    64→  const [capabilities, setCapabilities] = useState<Record<string, ProviderConfigPublic>>({})
+    65→  const [capabilityInfo, setCapabilityInfo] = useState<Record<string, CapabilityInfo>>({})
+    66→  const [dataMode, setDataMode] = useState('hybrid')
+    67→
+    68→  const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+    69→  const [savingCap, setSavingCap] = useState<string | null>(null)
+    70→  const [testingCap, setTestingCap] = useState<string | null>(null)
+    71→  const [testResults, setTestResults] = useState<Record<string, TestResult>>({})
+    72→
+    73→  const [tab, setTab] = useState('providers')
+    74→  const [logs, setLogs] = useState<AiLog[]>([])
+    75→  const [logsLoading, setLogsLoading] = useState(false)
+    76→  const [logsError, setLogsError] = useState('')
+    77→
+    78→  const [channels, setChannels] = useState<{ email: boolean; sms: boolean } | null>(null)
+    79→  const [channelsBusy, setChannelsBusy] = useState(false)
+    80→
+    81→  const load = useCallback(async () => {
+    82→    setLoading(true)
+    83→    try {
+    84→      const d = await api.get<{ capabilities: Record<string, ProviderConfigPublic>; dataMode: string; capabilityInfo: Record<string, CapabilityInfo> }>('/api/providers')
+    85→      setCapabilities(d.capabilities)
+    86→      setCapabilityInfo(d.capabilityInfo ?? {})
+    87→      setDataMode(d.dataMode)
+    88→      setDrafts(Object.fromEntries(
+    89→        Object.entries(d.capabilities).map(([cap, cfg]) => [cap, {
+    90→          provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: null, enabled: cfg.enabled,
+    91→        }]),
+    92→      ))
+    93→      setError('')
+    94→    } catch (err) {
+    95→      setError(err instanceof Error ? err.message : 'Could not load AI provider settings')
+    96→    } finally {
+    97→      setLoading(false)
+    98→    }
+    99→  }, [])
+   100→
+   101→  const loadLogs = useCallback(async () => {
+   102→    setLogsLoading(true)
+   103→    try {
+   104→      const d = await api.get<{ logs: AiLog[] }>('/api/ai/logs?limit=30')
+   105→      setLogs(d.logs)
+   106→      setLogsError('')
+   107→    } catch (err) {
+   108→      setLogsError(err instanceof Error ? err.message : 'Could not load the activity log')
+   109→    } finally {
+   110→      setLogsLoading(false)
+   111→    }
+   112→  }, [])
+   113→
+   114→  const loadChannels = useCallback(async () => {
+   115→    try {
+   116→      const d = await api.get<{ email: boolean; sms: boolean }>('/api/settings/channels')
+   117→      setChannels(d)
+   118→    } catch { /* non-fatal */ }
+   119→  }, [])
+   120→
+   121→  useEffect(() => { void load() }, [load])
+   122→  useEffect(() => { void loadChannels() }, [loadChannels])
+   123→  useEffect(() => { if (tab === 'logs') void loadLogs() }, [tab, loadLogs])
+   124→
+   125→  const setDataModeValue = async (mode: string) => {
+   126→    if (!canManage) return
+   127→    try {
+   128→      await api.put('/api/settings/data-mode', { dataMode: mode })
+   129→      setDataMode(mode)
+   130→      toast({
+   131→        title: 'Data mode updated',
+   132→        description: mode === 'local_only' ? 'Cloud AI calls are now blocked server-side.' : 'Cloud AI calls follow your per-capability settings.',
+   133→      })
+   134→    } catch (err) {
+   135→      toast({ title: 'Could not change data mode', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+   136→    }
+   137→  }
+   138→
+   139→  const setDraft = (cap: string, patch: Partial<Draft>) => {
+   140→    setDrafts((d) => ({ ...d, [cap]: { ...d[cap], ...patch } }))
+   141→  }
+   142→
+   143→  const saveCapability = async (cap: string) => {
+   144→    const draft = drafts[cap]
+   145→    if (!draft) return
+   146→    setSavingCap(cap)
+   147→    try {
+   148→      const body: Record<string, unknown> = {
+   149→        provider: draft.provider,
+   150→        baseUrl: draft.baseUrl.trim(),
+   151→        model: draft.model.trim(),
+   152→        enabled: draft.enabled,
+   153→      }
+   154→      if (draft.apiKey !== null) body.apiKey = draft.apiKey // '' clears, non-empty replaces, null keeps
+   155→      const d = await api.put<{ config: ProviderConfigPublic }>(`/api/providers/${cap}`, body)
+   156→      setCapabilities((c) => ({ ...c, [cap]: d.config }))
+   157→      setDrafts((dr) => ({ ...dr, [cap]: { ...dr[cap], provider: d.config.provider, baseUrl: d.config.baseUrl, model: d.config.model, apiKey: null, enabled: d.config.enabled } }))
+   158→      toast({ title: `${capabilityInfo[cap]?.label ?? cap} saved` })
+   159→    } catch (err) {
+   160→      toast({ title: 'Save failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+   161→    } finally {
+   162→      setSavingCap(null)
+   163→    }
+   164→  }
+   165→
+   166→  const testCapability = async (cap: string) => {
+   167→    setTestingCap(cap)
+   168→    try {
+   169→      const r = await api.post<TestResult>(`/api/providers/${cap}/test`)
+   170→      setTestResults((t) => ({ ...t, [cap]: r }))
+   171→      await load()
+   172→    } catch (err) {
+   173→      setTestResults((t) => ({
+   174→        ...t,
+   175→        [cap]: { ok: false, message: err instanceof Error ? err.message : 'Test failed', latencyMs: 0 },
+   176→      }))
+   177→    } finally {
+   178→      setTestingCap(null)
+   179→    }
+   180→  }
+   181→
+   182→  const toggleChannel = async (key: 'email' | 'sms', value: boolean) => {
+   183→    if (!channels || !canManage) return
+   184→    setChannelsBusy(true)
+   185→    const next = { ...channels, [key]: value }
+   186→    try {
+   187→      const d = await api.put<{ email: boolean; sms: boolean }>('/api/settings/channels', next)
+   188→      setChannels(d)
+   189→      toast({
+   190→        title: value ? `${key.toUpperCase()} channel marked configured` : `${key.toUpperCase()} channel disabled`,
+   191→        description: value ? 'Queued outbox messages will use it once a sender is wired.' : undefined,
+   192→      })
+   193→    } catch (err) {
+   194→      toast({ title: 'Could not update channels', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+   195→    } finally {
+   196→      setChannelsBusy(false)
+   197→    }
+   198→  }
+   199→
+   200→  if (loading) {
+   201→    return (
+   202→      <div className="space-y-4" aria-label="Loading AI settings">
+   203→        <Skeleton className="h-8 w-64" />
+   204→        <div className="grid gap-4 lg:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-32 w-full" />)}</div>
+   205→        <div className="grid gap-4 lg:grid-cols-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-64 w-full" />)}</div>
+   206→      </div>
+   207→    )
+   208→  }
+   209→
+   210→  if (error) {
+   211→    return (
+   212→      <Alert variant="destructive" role="alert">
+   213→        <AlertDescription className="space-y-2">
+   214→          <p>{error}</p>
+   215→          <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+   216→        </AlertDescription>
+   217→      </Alert>
+   218→    )
+   219→  }
+   220→
+   221→  const caps = Object.entries(capabilities)
+   222→
+   223→  return (
+   224→    <div className="space-y-4" aria-label="AI providers and privacy">
+   225→      <div className="flex flex-wrap items-center gap-2">
+   226→        <div className="mr-auto">
+   227→          <h2 className="text-lg font-semibold tracking-tight">AI Providers &amp; privacy</h2>
+   228→          <p className="text-sm text-muted-foreground">Which models run each capability, where your data flows, and proof that it works.</p>
+   229→        </div>
+   230→        {!canManage && <Badge variant="outline">read-only — owner/admin can edit</Badge>}
+   231→      </div>
+   232→
+   233→      <Tabs value={tab} onValueChange={setTab}>
+   234→        <TabsList aria-label="AI settings tabs">
+   235→          <TabsTrigger value="providers" className="min-h-[44px]"><Bot className="h-4 w-4 mr-1.5" aria-hidden /> Providers</TabsTrigger>
+   236→          <TabsTrigger value="logs" className="min-h-[44px]"><RefreshCw className="h-4 w-4 mr-1.5" aria-hidden /> AI activity log</TabsTrigger>
+   237→        </TabsList>
+   238→
+   239→        <TabsContent value="providers" className="space-y-4 mt-4">
+   240→          {/* data mode */}
+   241→          <Card>
+   242→            <CardHeader>
+   243→              <CardTitle className="text-base flex items-center gap-2"><Globe className="h-4 w-4" aria-hidden /> Data mode</CardTitle>
+   244→              <CardDescription>Controls whether any cloud AI may be contacted, org-wide.</CardDescription>
+   245→            </CardHeader>
+   246→            <CardContent>
+   247→              <div className="grid gap-3 sm:grid-cols-3" role="radiogroup" aria-label="Data mode">
+   248→                {DATA_MODES.map((m) => {
+   249→                  const selected = dataMode === m.id
+   250→                  return (
+   251→                    <button
+   252→                      key={m.id}
+   253→                      type="button"
+   254→                      role="radio"
+   255→                      aria-checked={selected}
+   256→                      disabled={!canManage}
+   257→                      onClick={() => void setDataModeValue(m.id)}
+   258→                      className={cn(
+   259→                        'text-left rounded-lg border p-3 min-h-[44px] transition-colors disabled:opacity-60',
+   260→                        selected ? 'border-primary bg-muted/50' : 'hover:bg-muted/40',
+   261→                      )}
+   262→                    >
+   263→                      <div className="flex items-center gap-2">
+   264→                        {m.id === 'local_only'
+   265→                          ? <ShieldCheck className={cn('h-4 w-4', selected ? 'text-emerald-700' : 'text-muted-foreground')} aria-hidden />
+   266→                          : <ShieldAlert className={cn('h-4 w-4', selected && m.id !== 'hybrid' ? 'text-amber-700' : 'text-muted-foreground')} aria-hidden />}
+   267→                        <span className="font-medium text-sm">{m.title}</span>
+   268→                      </div>
+   269→                      <p className="text-xs text-muted-foreground mt-1">{m.description}</p>
+   270→                    </button>
+   271→                  )
+   272→                })}
+   273→              </div>
+   274→              {dataMode === 'local_only' && (
+   275→                <p className="mt-2 text-xs text-emerald-800 flex items-center gap-1.5">
+   276→                  <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Strict mode is enforced server-side — cloud calls are blocked even if configured.
+   277→                </p>
+   278→              )}
+   279→            </CardContent>
+   280→          </Card>
+   281→
+   282→          {/* capability cards */}
+   283→          <div className="grid gap-4 lg:grid-cols-2">
+   284→            {caps.map(([cap, cfg]) => {
+   285→              const info = capabilityInfo[cap]
+   286→              const draft = drafts[cap] ?? { provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: null, enabled: cfg.enabled }
+   287→              const test = testResults[cap]
+   288→              const cloud = isCloudProvider(draft.provider)
+   289→              const needsBaseUrl = draft.provider === 'ollama' || draft.provider === 'openai_compatible'
+   290→              const needsKey = draft.provider === 'openai_compatible'
+   291→              return (
+   292→                <Card key={cap}>
+   293→                  <CardHeader>
+   294→                    <div className="flex items-start gap-2">
+   295→                      <div className="min-w-0 flex-1">
+   296→                        <CardTitle className="text-base">{info?.label ?? cap}</CardTitle>
+   297→                        <CardDescription>{info?.description}</CardDescription>
+   298→                      </div>
+   299→                      <label className="flex items-center gap-2 text-sm shrink-0">
+   300→                        <Switch
+   301→                          checked={draft.enabled}
+   302→                          disabled={!canManage}
+   303→                          onCheckedChange={(v) => setDraft(cap, { enabled: v })}
+   304→                          aria-label={`Enable ${info?.label ?? cap}`}
+   305→                        />
+   306→                        {draft.enabled ? 'On' : 'Off'}
+   307→                      </label>
+   308→                    </div>
+   309→                  </CardHeader>
+   310→                  <CardContent className="space-y-3">
+   311→                    <div className="space-y-1.5">
+   312→                      <Label htmlFor={`prov-${cap}`}>Provider</Label>
+   313→                      <Select value={draft.provider} disabled={!canManage} onValueChange={(v) => setDraft(cap, { provider: v })}>
+   314→                        <SelectTrigger id={`prov-${cap}`} className="min-h-[44px]" aria-label={`Provider for ${info?.label ?? cap}`}>
+   315→                          <SelectValue />
+   316→                        </SelectTrigger>
+   317→                        <SelectContent>
+   318→                          {(info?.kinds ?? Object.keys(PROVIDER_LABELS)).map((k) => (
+   319→                            <SelectItem key={k} value={k}>{PROVIDER_LABELS[k] ?? k}</SelectItem>
+   320→                          ))}
+   321→                        </SelectContent>
+   322→                      </Select>
+   323→                    </div>
+   324→
+   325→                    {needsBaseUrl && (
+   326→                      <div className="space-y-1.5">
+   327→                        <Label htmlFor={`url-${cap}`}>Base URL</Label>
+   328→                        <Input
+   329→                          id={`url-${cap}`} value={draft.baseUrl} disabled={!canManage}
+   330→                          onChange={(e) => setDraft(cap, { baseUrl: e.target.value })}
+   331→                          placeholder="http://localhost:11434"
+   332→                          className="min-h-[44px]"
+   333→                        />
+   334→                      </div>
+   335→                    )}
+   336→
+   337→                    {(needsBaseUrl || draft.provider === 'managed') && (
+   338→                      <div className="space-y-1.5">
+   339→                        <Label htmlFor={`model-${cap}`}>Model</Label>
+   340→                        <Input
+   341→                          id={`model-${cap}`} value={draft.model} disabled={!canManage}
+   342→                          onChange={(e) => setDraft(cap, { model: e.target.value })}
+   343→                          placeholder={draft.provider === 'managed' ? '(gateway default)' : cap === 'embedding' ? 'e.g. nomic-embed-text / text-embedding-3-small' : 'e.g. llama3.1:8b'}
+   344→                          className="min-h-[44px]"
+   345→                        />
+   346→                      </div>
+   347→                    )}
+   348→
+   349→                    {needsKey && (
+   350→                      <div className="space-y-1.5">
+   351→                        <Label htmlFor={`key-${cap}`} className="flex items-center gap-1.5"><KeyRound className="h-3.5 w-3.5" aria-hidden /> API key</Label>
+   352→                        <Input
+   353→                          id={`key-${cap}`} type="password" disabled={!canManage}
+   354→                          value={draft.apiKey ?? ''}
+   355→                          onChange={(e) => setDraft(cap, { apiKey: e.target.value })}
+   356→                          placeholder={cfg.apiKeyPresent ? '•••••••• (saved — leave blank to keep)' : 'Paste key'}
+   357→                          autoComplete="off"
+   358→                          className="min-h-[44px]"
+   359→                        />
+   360→                        <p className="text-xs text-muted-foreground">
+   361→                          {cfg.apiKeyPresent
+   362→                            ? 'A key is saved. Leave blank to keep it — type a new one to replace it, or empty the field and save to remove it.'
+   363→                            : 'Stored server-side, never echoed back to the browser.'}
+   364→                        </p>
+   365→                      </div>
+   366→                    )}
+   367→
+   368→                    <div className="rounded-md border p-2.5 text-xs flex items-start gap-2" aria-label="Data flow">
+   369→                      {cloud
+   370→                        ? <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" aria-hidden />
+   371→                        : <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" aria-hidden />}
+   372→                      <span className={cloud ? 'text-amber-900' : 'text-emerald-900'}>{cfg.processesDataWhere || `Data is processed ${cloud ? 'by the external provider' : 'locally'}.`}</span>
+   373→                    </div>
+   374→
+   375→                    <div className="flex flex-wrap items-center gap-2">
+   376→                      <Button
+   377→                        size="sm" onClick={() => void saveCapability(cap)} disabled={!canManage || savingCap === cap}
+   378→                        className="min-h-[44px]" aria-label={`Save ${info?.label ?? cap} configuration`}
+   379→                      >
+   380→                        {savingCap === cap ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PlugZap className="h-4 w-4" aria-hidden />}
+   381→                        Save
+   382→                      </Button>
+   383→                      <Button
+   384→                        size="sm" variant="outline" onClick={() => void testCapability(cap)}
+   385→                        disabled={testingCap === cap || !canManage}
+   386→                        className="min-h-[44px]" aria-label={`Test connection for ${info?.label ?? cap}`}
+   387→                      >
+   388→                        {testingCap === cap ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+   389→                        Test connection
+   390→                      </Button>
+   391→                    </div>
+   392→
+   393→                    {test && (
+   394→                      <Alert
+   395→                        role="status"
+   396→                        className={test.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}
+   397→                      >
+   398→                        {test.ok ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <XCircle className="h-4 w-4" aria-hidden />}
+   399→                        <AlertDescription>
+   400→                          {test.message || (test.ok ? 'Connection OK.' : 'Test failed.')} {test.latencyMs ? `(${test.latencyMs} ms)` : ''}
+   401→                        </AlertDescription>
+   402→                      </Alert>
+   403→                    )}
+   404→
+   405→                    {!test && cfg.lastTestAt && (
+   406→                      <p className={cn('text-xs flex items-center gap-1.5', cfg.lastTestOk ? 'text-emerald-700' : 'text-rose-700')}>
+   407→                        {cfg.lastTestOk ? <CheckCircle2 className="h-3.5 w-3.5" aria-hidden /> : <XCircle className="h-3.5 w-3.5" aria-hidden />}
+   408→                        Last test {cfg.lastTestOk ? 'passed' : 'failed'} · {formatDateTime(cfg.lastTestAt)}
+   409→                        {cfg.lastTestError && !cfg.lastTestOk ? ` — ${cfg.lastTestError}` : ''}
+   410→                      </p>
+   411→                    )}
+   412→                  </CardContent>
+   413→                </Card>
+   414→              )
+   415→            })}
+   416→          </div>
+   417→
+   418→          {/* channels mini-card */}
+   419→          <Card>
+   420→            <CardHeader>
+   421→              <CardTitle className="text-base flex items-center gap-2"><Database className="h-4 w-4" aria-hidden /> Channels</CardTitle>
+   422→              <CardDescription>Mark email/SMS as configured for queued delivery.</CardDescription>
+   423→            </CardHeader>
+   424→            <CardContent className="space-y-3">
+   425→              {channels ? (
+   426→                <div className="grid gap-3 sm:grid-cols-2">
+   427→                  {(['email', 'sms'] as const).map((ch) => (
+   428→                    <label key={ch} className="flex items-center gap-3 rounded-md border p-3 text-sm">
+   429→                      <Switch
+   430→                        checked={channels[ch]}
+   431→                        disabled={!canManage || channelsBusy}
+   432→                        onCheckedChange={(v) => void toggleChannel(ch, v)}
+   433→                        aria-label={`${channels[ch] ? 'Disable' : 'Enable'} ${ch} channel`}
+   434→                      />
+   435→                      <span className="capitalize font-medium">{ch}</span>
+   436→                      <Badge variant={channels[ch] ? 'secondary' : 'outline'} className="ml-auto text-[10px]">
+   437→                        {channels[ch] ? 'configured' : 'not configured'}
+   438→                      </Badge>
+   439→                    </label>
+   440→                  ))}
+   441→                </div>
+   442→              ) : (
+   443→                <Skeleton className="h-16 w-full" />
+   444→              )}
+   445→              <Alert className="border-amber-200 bg-amber-50 text-amber-900" role="note">
+   446→                <ShieldAlert className="h-4 w-4" aria-hidden />
+   447→                <AlertDescription>
+   448→                  In this build, enabling marks the channel as configured for queued outbox delivery; no external sender is wired.
+   449→                </AlertDescription>
+   450→              </Alert>
+   451→            </CardContent>
+   452→          </Card>
+   453→        </TabsContent>
+   454→
+   455→        <TabsContent value="logs" className="space-y-3 mt-4">
+   456→          <div className="flex items-center gap-2">
+   457→            <p className="text-sm text-muted-foreground mr-auto">Every AI call is logged with metrics only — never conversation content.</p>
+   458→            <Button size="sm" variant="outline" onClick={() => void loadLogs()} disabled={logsLoading} className="min-h-[44px]" aria-label="Refresh activity log">
+   459→              {logsLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+   460→              Refresh
+   461→            </Button>
+   462→          </div>
+   463→
+   464→          {logsLoading && logs.length === 0 ? (
+   465→            <div className="space-y-2" aria-label="Loading activity log">
+   466→              {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
+   467→            </div>
+   468→          ) : logsError ? (
+   469→            <Alert variant="destructive" role="alert">
+   470→              <AlertDescription className="space-y-2">
+   471→                <p>{logsError}</p>
+   472→                <Button size="sm" variant="outline" onClick={() => void loadLogs()} className="min-h-[44px]">Retry</Button>
+   473→              </AlertDescription>
+   474→            </Alert>
+   475→          ) : logs.length === 0 ? (
+   476→            <Card>
+   477→              <CardContent className="p-8 text-center space-y-2">
+   478→                <Bot className="h-8 w-8 mx-auto text-muted-foreground" aria-hidden />
+   479→                <p className="text-sm text-muted-foreground">No AI calls yet. Chat with the receptionist in the Inbox and activity will appear here.</p>
+   480→              </CardContent>
+   481→            </Card>
+   482→          ) : (
+   483→            <Card>
+   484→              <CardContent className="p-0">
+   485→                <div className="max-h-96 overflow-y-auto">
+   486→                  <Table aria-label="AI activity log">
+   487→                    <TableHeader>
+   488→                      <TableRow>
+   489→                        <TableHead>Time</TableHead>
+   490→                        <TableHead>Capability</TableHead>
+   491→                        <TableHead className="hidden sm:table-cell">Provider / model</TableHead>
+   492→                        <TableHead>Latency</TableHead>
+   493→                        <TableHead className="hidden md:table-cell">Tokens (in/out)</TableHead>
+   494→                        <TableHead>Result</TableHead>
+   495→                      </TableRow>
+   496→                    </TableHeader>
+   497→                    <TableBody>
+   498→                      {logs.map((l, i) => (
+   499→                        <TableRow key={l.id ?? i}>
+   500→                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(l.ts)}</TableCell>
+   501→                          <TableCell className="text-sm">{l.capability}</TableCell>
+   502→                          <TableCell className="hidden sm:table-cell text-sm">
+   503→                            {l.provider}
+   504→                            <span className="text-muted-foreground"> · {l.model || '—'}</span>
+   505→                          </TableCell>
+   506→                          <TableCell className="text-sm">{l.latencyMs} ms</TableCell>
+   507→                          <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{l.tokensIn} / {l.tokensOut}</TableCell>
+   508→                          <TableCell>
+   509→                            {l.ok ? (
+   510→                              <Badge className="bg-emerald-100 text-emerald-900 text-[10px]">ok</Badge>
+   511→                            ) : (
+   512→                              <span>
+   513→                                <Badge className="bg-rose-100 text-rose-900 text-[10px]">failed</Badge>
+   514→                                {l.errorSanitized && <p className="text-[10px] text-rose-700 max-w-[200px] mt-1">{l.errorSanitized}</p>}
+   515→                              </span>
+   516→                            )}
+   517→                          </TableCell>
+   518→                        </TableRow>
+   519→                      ))}
+   520→                    </TableBody>
+   521→                  </Table>
+   522→                </div>
+   523→              </CardContent>
+   524→            </Card>
+   525→          )}
+   526→          <Separator />
+   527→          <p className="text-xs text-muted-foreground">Logs are written by the AI platform for transparency. Sanitized errors only — no customer data.</p>
+   528→        </TabsContent>
+   529→      </Tabs>
+   530→    </div>
+   531→  )
+   532→}
+   533→
