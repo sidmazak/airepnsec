@@ -229,7 +229,7 @@ export async function seedDemo(): Promise<{ orgId: string; email: string; passwo
     data: { orgId: org.id, capability: 'llm', provider: 'managed', label: 'Managed AI gateway', enabled: true },
   })
   await db.providerConfig.create({
-    data: { orgId: org.id, capability: 'embedding', provider: 'local_lexical', label: 'Local lexical retriever (built-in)', enabled: true },
+    data: { orgId: org.id, capability: 'embedding', provider: 'local_neural', label: 'Built-in neural embeddings (local)', enabled: true },
   })
 
   // a demo inbox conversation

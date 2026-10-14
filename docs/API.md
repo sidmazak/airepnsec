@@ -83,9 +83,11 @@ All handlers live in `src/app/api/**/route.ts`. Single-page frontend at `/` call
 - `GET /api/customers/[id]/statement` → `{customer, invoices:[{number,total,paid,outstanding,status}], ledgerRows}`.
 
 ### Knowledge (auth)
-- `GET /api/knowledge` → docs with chunk counts. `POST /api/knowledge` `{title, content, approved?, tags?}` → indexDocument. Audit.
+- `GET /api/knowledge` → docs with chunk counts. `POST /api/knowledge` `{title, content, approved?, tags?}` → indexDocument (response includes `chunkCount` + `embeddingModel`). Audit.
 - `PATCH /api/knowledge/[id]` (re-index on content/approved change), `DELETE /api/knowledge/[id]`.
-- `GET /api/knowledge/search?q=` → searchKnowledge hits (approved only).
+- `GET /api/knowledge/search?q=` → hybrid search hits (approved only): `{docId, docTitle, chunkId, text, score, scores:{dense|null, lexical}}`.
+- `GET /api/knowledge/index` → index status `{provider, model, enabled, docs, approvedDocs, totalChunks, chunksWithCurrentModel, needsReindex, neuralReady}`.
+- `POST /api/knowledge/reindex` (owner/admin) → re-embed all docs with the active embedding provider; audited; returns honest summary `{docs, chunks, model, dim, ms, errors[]}`.
 
 ### Conversations / inbox (auth)
 - `GET /api/conversations?status=` → with last message preview + customer name.

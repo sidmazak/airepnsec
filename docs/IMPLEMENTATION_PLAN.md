@@ -22,7 +22,7 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 
 ## Phase 4 — AI receptionist + voice test
 ✅ Strict-JSON tool loop over typed provider adapters (managed gateway / Ollama / OpenAI-compatible); tools: list_services, check_availability, quote_price, create_booking, my_bookings, cancel_booking, search_knowledge, payment_claim, take_message, escalate — every tool validated, every failure reported honestly to the customer.
-✅ Local lexical knowledge retrieval (approved docs only),AiLog with latency/usage metrics (no secrets).
+✅ **Neural RAG retrieval**: built-in local ONNX embedder (all-MiniLM-L6-v2, 384-d) with hybrid dense+BM25 search, per-chunk model tagging, controlled reindex + stale-index detection, boot-time model warm-up, protocol-tolerant tool dispatch. AiLog with latency/usage metrics (no secrets).
 ✅ Browser-based test calling via Web Speech API (STT + TTS, interruption-safe toggles, honest unsupported-browser fallback). Text inbox with human takeover.
 
 ## Phase 5 — Automations + collections
@@ -50,7 +50,7 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 | Customers + CSV import | ✅ | Templates downloadable |
 | Invoices + verified payments | ✅ | Claims pend verification; webhooks idempotent |
 | Ledger + reversals + export | ✅ | Append-only; corrections are reversal entries |
-| Knowledge/FAQ retrieval | ✅ | Local lexical engine; neural embeddings via BYOK adapters |
+| Knowledge/FAQ retrieval (RAG) | ✅ | Built-in local neural embeddings (MiniLM ONNX, no key, zero egress) + hybrid BM25 fusion; Ollama/OpenAI-compatible BYOK embedders; controlled reindex |
 | Automations (overdue reminders, escalation) | ✅ | Test mode, dedupe, retries, quiet hours, daily caps |
 | Outbound email/SMS sending | 🟡 | Outbox queues with honest status; no SMTP/SMS sender wired in this build |
 | External calendar sync | ⏳ | Optional connector design documented |

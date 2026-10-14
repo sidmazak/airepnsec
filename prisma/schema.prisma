@@ -312,10 +312,13 @@ model KnowledgeChunk {
   docId    String
   ord      Int
   text     String
-  vector   String @default("[]") // JSON float[] — local lexical/semantic vector; swap for pgvector in production
+  vector   String @default("[]") // JSON float[] — dense embedding (neural) or hashed lexical fallback; swap for pgvector in production
+  model    String @default("") // embedding model identifier used for this vector ("Xenova/all-MiniLM-L6-v2", ollama model, endpoint model, or "local_lexical_hash")
+  dim      Int    @default(0) // vector dimension; dense cosine is only computed when chunk.model === active model and dim matches
   doc      KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
   @@index([docId])
   @@index([orgId])
+  @@index([model])
 }
 
 model Conversation {

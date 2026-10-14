@@ -21,8 +21,8 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import {
-  BookMarked, CheckCircle2, ChevronDown, ChevronUp, FileQuestion, Loader2,
-  Pencil, Plus, Search, ShieldAlert, Trash2,
+  BookMarked, CheckCircle2, ChevronDown, ChevronUp, Database, FileQuestion, Loader2,
+  Pencil, Plus, RefreshCw, Search, ShieldAlert, Trash2,
 } from 'lucide-react'
 
 type DocForm = {
@@ -39,16 +39,35 @@ type DocRow = KnowledgeDocRow & { contentPreview: string }
 
 const EMPTY_FORM: DocForm = { id: null, title: '', content: '', tags: '', approved: true, contentTouched: false }
 
-type Hit = { docId?: string; docTitle: string; chunkId?: string; text: string; score: number }
+type Hit = { docId?: string; docTitle: string; chunkId?: string; text: string; score: number; scores?: { dense: number | null; lexical: number } }
+
+type IndexStatus = {
+  provider: string
+  model: string
+  enabled: boolean
+  providerLabel: string
+  docs: number
+  approvedDocs: number
+  totalChunks: number
+  chunksWithCurrentModel: number
+  needsReindex: boolean
+  neuralReady: boolean
+}
 
 export function KnowledgeSection() {
   const { toast } = useToast()
   const setActiveSection = useAppStore((s) => s.setActiveSection)
+  const role = useAppStore((s) => s.session?.user?.role)
+  const canManage = role === 'owner' || role === 'admin'
 
   const [docs, setDocs] = useState<DocRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+
+  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null)
+  const [reindexing, setReindexing] = useState(false)
+  const [reindexMsg, setReindexMsg] = useState('')
 
   const [formOpen, setFormOpen] = useState(false)
   const [form, setForm] = useState<DocForm>(EMPTY_FORM)
@@ -64,8 +83,12 @@ export function KnowledgeSection() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const d = await api.get<{ docs: DocRow[] }>('/api/knowledge')
+      const [d, idx] = await Promise.all([
+        api.get<{ docs: DocRow[] }>('/api/knowledge'),
+        api.get<{ index: IndexStatus }>('/api/knowledge/index').catch(() => null),
+      ])
       setDocs(d.docs)
+      setIndexStatus(idx?.index ?? null)
       setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load knowledge documents')
@@ -146,6 +169,23 @@ export function KnowledgeSection() {
     }
   }
 
+  const reindex = async () => {
+    setReindexing(true)
+    setReindexMsg('')
+    try {
+      const d = await api.post<{ ok: boolean; message: string }>('/api/knowledge/reindex', {})
+      setReindexMsg(d.message)
+      toast({ title: 'Reindex complete', description: d.message })
+      await load()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Reindex failed'
+      setReindexMsg(msg)
+      toast({ title: 'Reindex failed', description: msg, variant: 'destructive' })
+    } finally {
+      setReindexing(false)
+    }
+  }
+
   const approvedCount = docs.filter((d) => d.approved).length
 
   return (
@@ -161,6 +201,68 @@ export function KnowledgeSection() {
           <Plus className="h-4 w-4" aria-hidden /> New document
         </Button>
       </div>
+
+      {/* embedding index status */}
+      {loading ? (
+        <Skeleton className="h-20 w-full" />
+      ) : indexStatus ? (
+        <Card aria-label="Knowledge index status">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" aria-hidden />
+              <p className="font-medium text-sm">Search index</p>
+              <Badge variant="secondary" className="font-mono text-[11px]">{indexStatus.model}</Badge>
+              {indexStatus.provider === 'local_neural' && (
+                <Badge className="bg-emerald-100 text-emerald-900">Semantic · on this machine</Badge>
+              )}
+              {indexStatus.provider === 'local_lexical' && (
+                <Badge variant="outline" className="text-amber-800 border-amber-300">Keyword only</Badge>
+              )}
+              <span className="text-xs text-muted-foreground ml-auto">
+                {indexStatus.totalChunks} chunk{indexStatus.totalChunks === 1 ? '' : 's'} indexed · {indexStatus.approvedDocs} of {indexStatus.docs} doc{indexStatus.docs === 1 ? '' : 's'} approved
+              </span>
+            </div>
+
+            {indexStatus.provider === 'local_neural' && !indexStatus.neuralReady && (
+              <Alert className="border-amber-200 bg-amber-50 text-amber-900" role="status">
+                <ShieldAlert className="h-4 w-4" aria-hidden />
+                <AlertDescription>
+                  The local embedding model could not be loaded — search is falling back to keyword scoring until it is available.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {indexStatus.needsReindex ? (
+              <Alert className="border-amber-200 bg-amber-50 text-amber-900" role="status">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 shrink-0" aria-hidden />
+                  <AlertDescription className="flex-1 min-w-[12rem]">
+                    {indexStatus.chunksWithCurrentModel} of {indexStatus.totalChunks} chunks use the current model ({indexStatus.model}). Re-index to restore full semantic quality — documents stay available during reindex.
+                  </AlertDescription>
+                  {canManage && (
+                    <Button size="sm" onClick={() => void reindex()} disabled={reindexing} className="min-h-[44px]" aria-label="Reindex knowledge with the current embedding model">
+                      {reindexing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+                      Reindex
+                    </Button>
+                  )}
+                </div>
+              </Alert>
+            ) : (
+              reindexMsg ? (
+                <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900" role="status">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden />
+                  <AlertDescription>{reindexMsg}</AlertDescription>
+                </Alert>
+              ) : (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+                  Every indexed chunk was embedded with the current model. Retrieval mixes semantic similarity (72%) with keyword matching (28%).
+                </p>
+              )
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_minmax(300px,380px)]">
         {/* documents list */}
@@ -299,7 +401,15 @@ export function KnowledgeSection() {
                     <li key={h.chunkId ?? i} className="rounded-md border p-2.5 text-sm">
                       <div className="flex items-center justify-between gap-2">
                         <p className="font-medium truncate">{h.docTitle}</p>
-                        <Badge variant="secondary" className="text-[10px] shrink-0">score {h.score.toFixed(3)}</Badge>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {h.scores?.dense != null && (
+                            <Badge variant="outline" className="text-[10px] font-mono" title="Semantic similarity (dense embedding)">dense {(h.scores.dense * 100).toFixed(0)}%</Badge>
+                          )}
+                          {h.scores && (
+                            <Badge variant="outline" className="text-[10px] font-mono" title="Keyword match (BM25, normalized)">kw {(h.scores.lexical * 100).toFixed(0)}%</Badge>
+                          )}
+                          <Badge variant="secondary" className="text-[10px]">score {h.score.toFixed(3)}</Badge>
+                        </div>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-4">{h.text}</p>
                     </li>
@@ -312,7 +422,11 @@ export function KnowledgeSection() {
             <div className="space-y-1.5 text-xs text-muted-foreground">
               <p className="flex items-start gap-1.5">
                 <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 text-emerald-600 shrink-0" aria-hidden />
-                Retrieval uses the built-in local lexical engine. For semantic search connect an embedding model in AI Providers.
+                {indexStatus?.provider === 'local_neural'
+                  ? 'Semantic search runs on a built-in neural embedding model (MiniLM, 384-d) — entirely on this machine, no API key, no data leaves the server.'
+                  : indexStatus?.provider === 'ollama' || indexStatus?.provider === 'openai_compatible'
+                    ? `Semantic search uses your ${indexStatus.provider === 'ollama' ? 'local Ollama' : 'OpenAI-compatible'} embedding model (${indexStatus.model}).`
+                    : 'Search currently uses the legacy keyword engine — switch the embedding provider to the built-in neural model for true semantic search.'}
               </p>
               <button
                 type="button"

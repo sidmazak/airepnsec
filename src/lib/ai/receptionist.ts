@@ -357,20 +357,34 @@ export async function handleReceptionistTurn(org: Organization, conversationId: 
   let aiError: string | undefined
 
   try {
+    let lastRaw = ''
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const result = await chatComplete(org.id, llmMessages, { temperature: 0.3, conversationId })
+      lastRaw = result.content
       const parsed = extractJson(result.content)
 
       if (!parsed) {
         finalReply = result.content.trim().slice(0, 2000)
         break
       }
+
+      // Protocol-tolerant dispatch. Models occasionally violate the documented shape —
+      // e.g. {"action":"search_knowledge","args":{...}} (tool name in `action`) — and a
+      // strict parser turns that into an opaque non-answer. Accept the known variants.
       if (parsed.action === 'reply') {
         finalReply = (parsed.message ?? '').slice(0, 2000)
         break
       }
-      if (parsed.action === 'tool') {
-        const tool = TOOLS.find((t) => t.name === parsed.tool)
+
+      const toolName =
+        typeof parsed.tool === 'string' && parsed.tool.trim()
+          ? parsed.tool.trim()
+          : TOOLS.some((t) => t.name === parsed.action)
+            ? parsed.action
+            : ''
+
+      if (parsed.action === 'tool' || toolName) {
+        const tool = TOOLS.find((t) => t.name === toolName)
         if (!tool) {
           llmMessages.push({ role: 'assistant', content: result.content })
           llmMessages.push({ role: 'user', content: `TOOL_ERROR: unknown tool "${parsed.tool}". Available: ${TOOLS.map((t) => t.name).join(', ')}` })
@@ -390,6 +404,7 @@ export async function handleReceptionistTurn(org: Organization, conversationId: 
         llmMessages.push({ role: 'user', content: `TOOL_RESULT(${tool.name}): ${JSON.stringify(toolResult).slice(0, 3000)}` })
         continue
       }
+
       finalReply = (parsed.message ?? '').slice(0, 2000)
       break
     }
@@ -397,6 +412,11 @@ export async function handleReceptionistTurn(org: Organization, conversationId: 
     if (!finalReply && toolCalls.length >= MAX_TOOL_ROUNDS) {
       finalReply = 'I had trouble completing that request. A staff member will follow up shortly.'
       await db.conversation.update({ where: { id: conversationId }, data: { status: 'waiting_human' } })
+    }
+    if (!finalReply) {
+      // Observability: never swallow the raw model output silently — log it (sanitized) so
+      // protocol violations are diagnosable instead of producing an opaque fallback reply.
+      console.warn(`[receptionist] empty finalReply (conversation ${conversationId}); raw model output: ${JSON.stringify(lastRaw).slice(0, 500)}`)
     }
   } catch (err) {
     aiError = err instanceof Error ? err.message : 'AI unavailable'

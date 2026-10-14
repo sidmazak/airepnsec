@@ -23,4 +23,16 @@ export async function register() {
   setTimeout(run, 5_000)
   setInterval(run, 60_000)
   console.log('[worker] automation worker started (60s interval)')
+
+  // Pre-load the local embedding model so the first knowledge search / AI answer is fast.
+  // Fire-and-forget: a failed load is logged and search degrades to lexical scoring.
+  void (async () => {
+    try {
+      const { warmEmbeddingModel } = await import('@/lib/ai/embeddings')
+      const ok = await warmEmbeddingModel()
+      console.log(ok ? '[ai] local embedding model ready' : '[ai] local embedding model FAILED to load — search will fall back to lexical scoring')
+    } catch (err) {
+      console.error('[ai] embedding warmup error:', err instanceof Error ? err.message : err)
+    }
+  })()
 }

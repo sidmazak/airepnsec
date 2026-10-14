@@ -29,9 +29,9 @@ export const PATCH = withAuth(async (req, ctx, params) => {
     },
   })
 
-  let chunkCount: number | null = null
+  let indexed: Awaited<ReturnType<typeof indexDocument>> | null = null
   if (body.content !== undefined || body.approved !== undefined) {
-    chunkCount = await indexDocument(ctx.org.id, doc.id, updated.content)
+    indexed = await indexDocument(ctx.org.id, doc.id, updated.content)
   }
 
   await audit({
@@ -41,14 +41,21 @@ export const PATCH = withAuth(async (req, ctx, params) => {
     action: 'knowledge.updated',
     entity: 'knowledge_doc',
     entityId: doc.id,
-    meta: { title: updated.title, approved: updated.approved, reindexed: chunkCount !== null, chunkCount },
+    meta: {
+      title: updated.title,
+      approved: updated.approved,
+      reindexed: indexed !== null,
+      chunkCount: indexed?.chunkCount ?? null,
+      embeddingModel: indexed?.model ?? null,
+    },
   })
 
   return json({
     doc: {
       ...updated,
       tags: parseJson<string[]>(updated.tags, []),
-      chunkCount: chunkCount ?? (await db.knowledgeChunk.count({ where: { docId: doc.id } })),
+      chunkCount: indexed?.chunkCount ?? (await db.knowledgeChunk.count({ where: { docId: doc.id } })),
+      embeddingModel: indexed?.model ?? null,
     },
   })
 })

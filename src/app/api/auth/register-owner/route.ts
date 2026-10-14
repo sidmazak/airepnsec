@@ -95,7 +95,7 @@ export const POST = withPublic(async (req) => {
   await db.providerConfig.createMany({
     data: [
       { orgId: org.id, capability: 'llm', provider: 'managed', enabled: true },
-      { orgId: org.id, capability: 'embedding', provider: 'local_lexical', enabled: true },
+      { orgId: org.id, capability: 'embedding', provider: 'local_neural', enabled: true },
     ],
   })
 

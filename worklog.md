@@ -131,3 +131,29 @@ Work Log:
 
 Stage Summary:
 - DELIVERED: AI Secretary vertical slice — auth+RBAC, setup wizard with real E2E test runner, customers/services/staff/availability, transactional booking engine, invoices/payments/claims/webhooks, append-only ledger, knowledge+retrieval, AI receptionist (text + browser voice test), native automations with worker, diagnostics/backups/export, demo mode. Honest gaps documented (email/SMS senders, telephony, PSPs, Postgres+Docker packaging, Vitest suites) in docs/IMPLEMENTATION_PLAN.md.
+
+---
+Task ID: 8
+Agent: coordinator (Z.ai Code)
+Task: Proper RAG embeddings + full-stack verification pass (continuation request)
+
+Work Log:
+- Re-surveyed repo/worklog; dev server healthy; golden path previously accepted. User asked to continue, ensure everything works, and use proper RAG embeddings.
+- Chose embedding strategy: sandbox SDK has NO embeddings endpoint; installed @huggingface/transformers@3.8.1 (ONNX). Verified under the actual server runtime (node): Xenova/all-MiniLM-L6-v2 q8, 384-d, ~2ms/embed; semantic sanity 0.72 paraphrase vs 0.0006 unrelated. next.config.ts gained serverExternalPackages [@huggingface/transformers, onnxruntime-node, sharp]; model cache persisted at .models/.
+- Schema: KnowledgeChunk + `model` (embedding model id per chunk) + `dim`, index on model; db:push clean.
+- Rewrote src/lib/ai/embeddings.ts: lazy singleton neural engine (transformers.js, cacheDir .models, warmEmbeddingModel()); provider-aware resolveEmbedder (local_neural default | ollama /api/embed→/api/embeddings fallback | openai_compatible /embeddings with assertAiPolicy cloud gate | local_lexical hash); heading/sentence-aware chunker; indexDocument batches + persists model/dim per chunk with honest lexical fallback on provider failure; hybrid search = dense cosine (only when chunk.model===active model) fused 72/28 with BM25; getKnowledgeIndexStatus (needsReindex, neuralReady, per-model coverage); reindexOrgKnowledge with per-doc error reporting.
+- providers.ts: +local_neural kind (default+enabled for new orgs, incl. register-owner + demo seed), data-flow label "text never leaves the server", capability-aware testProvider — embedding tests now do a REAL embed (neural dim report, ollama embeddings call, openai /embeddings call); runAndStoreTest passes capability.
+- New routes: GET /api/knowledge/index (status), POST /api/knowledge/reindex (owner/admin, audited, partial-failure 500 with per-doc errors). knowledge POST/PATCH return chunkCount + embeddingModel.
+- instrumentation.ts warms the embedding model at boot ("[ai] local embedding model ready").
+- UI: knowledge-section got a Search index card (model badge, "Semantic · on this machine" / "Keyword only", coverage line, amber needsReindex banner + owner/admin Reindex button, neural-not-ready warning), retrieval tester now shows dense%/kw% breakdown chips + dynamic engine footnote; ai-section labels + embedding model placeholder; PROVIDER_LABELS updated.
+- Demo org migrated live via real API flow: PUT providers/embedding → local_neural → test (384-d, 207ms) → reindex (4 docs, 174ms).
+- Verification (curl + agent-browser): semantic paraphrase retrieval ("where should I leave my car"→Parking kw=0.000 dense=0.321; "am I allowed to reschedule without paying"→Cancellation dense 62%/kw 0% in UI); receptionist answers parking/products questions from approved docs via search_knowledge; local_only + cloud embedding provider → outbound call BLOCKED by policy gate, search degrades to keyword-only honestly; needsReindex banner + UI Reindex button round-trip (lexical↔neural) verified in browser; new doc creation auto-indexes with neural and is instantly semantically findable ("voucher"→Gift cards); doc delete works.
+- Found+fixed a real receptionist bug: model sometimes emits {"action":"search_knowledge","args":{...}} (tool name in `action`) — strict parser dropped it producing "Could you tell me a bit more..." fallback. Protocol-tolerant dispatch added (accepts tool-name-in-action, action:'tool' variants; keeps TOOL_ERROR feedback loop) + empty-finalReply raw-output console.warn for observability. Retest: correct RAG-grounded product/return answer with search_knowledge tool badge.
+- Closed debug conversations; lint clean; tsc zero src errors; browser console clean; dev.log shows only the intentional local-only enforcement log; health ok.
+- Docs updated: ARCHITECTURE.md (RAG pipeline section), DATA_MODEL.md (chunk model/dim), API.md (new endpoints + hit shape), IMPLEMENTATION_PLAN.md (Phase 4 + capability ledger).
+
+Stage Summary:
+- Knowledge retrieval is now REAL RAG: local neural embeddings (no key, zero egress) + hybrid BM25, with controlled reindex and honest degradation at every layer (provider fail→lexical, model switch→needsReindex banner, local_only→cloud embed blocked).
+- Chunk vectors are only comparable within the same embedding model — chunk.model/dim make that explicit; reindex is the user-facing remedy.
+- searchKnowledge hit shape is additive ({scores:{dense,lexical}} added); existing consumers unaffected.
+- Known honest gaps unchanged (senders, telephony, PSPs, Postgres/Docker packaging) — see docs/IMPLEMENTATION_PLAN.md.

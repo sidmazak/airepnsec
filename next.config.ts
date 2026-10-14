@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  /* config options here */
+  // Native/heavy AI packages must stay outside the server bundle (loaded at runtime via require)
+  serverExternalPackages: ["@huggingface/transformers", "onnxruntime-node", "sharp"],
   typescript: {
     ignoreBuildErrors: true,
   },

@@ -29,7 +29,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   ollama: 'Ollama (local)',
   openai_compatible: 'OpenAI-compatible endpoint',
   browser: 'In-browser',
-  local_lexical: 'Built-in local retriever',
+  local_neural: 'Built-in neural model (local)',
+  local_lexical: 'Legacy keyword index (local)',
   none: 'Disabled',
 }
 
@@ -339,7 +340,7 @@ export function AiSection() {
                         <Input
                           id={`model-${cap}`} value={draft.model} disabled={!canManage}
                           onChange={(e) => setDraft(cap, { model: e.target.value })}
-                          placeholder={draft.provider === 'managed' ? '(gateway default)' : 'e.g. llama3.1:8b'}
+                          placeholder={draft.provider === 'managed' ? '(gateway default)' : cap === 'embedding' ? 'e.g. nomic-embed-text / text-embedding-3-small' : 'e.g. llama3.1:8b'}
                           className="min-h-[44px]"
                         />
                       </div>

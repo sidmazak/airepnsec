@@ -32,7 +32,7 @@ cents, no DB-specific types.
 | `Payment` | Money received against an invoice | Implemented |
 | `WebhookEvent` | Inbound webhook log (dedupe + replay safety) | Implemented |
 | `LedgerEntry` | Append-only financial ledger | Implemented |
-| `KnowledgeItem` | FAQ/knowledge for assistant grounding | Implemented |
+| `KnowledgeItem` | FAQ/knowledge for assistant grounding (`KnowledgeChunk` now stores per-chunk embedding `model` + `dim`; vectors are neural by default, lexical hash as fallback) | Implemented |
 | `Conversation` / `Message` | Assistant transcripts incl. tool calls | Implemented |
 | `AssistantRun` | Per-turn provider/latency/error metadata | Implemented |
 | `AutomationRule` / `AutomationRun` | Automation definitions and executions | Implemented |

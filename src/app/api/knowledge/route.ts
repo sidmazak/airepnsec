@@ -52,7 +52,7 @@ export const POST = withAuth(async (req, ctx) => {
     },
   })
 
-  const chunkCount = await indexDocument(ctx.org.id, doc.id, body.content)
+  const indexed = await indexDocument(ctx.org.id, doc.id, body.content)
 
   await audit({
     orgId: ctx.org.id,
@@ -61,7 +61,7 @@ export const POST = withAuth(async (req, ctx) => {
     action: 'knowledge.created',
     entity: 'knowledge_doc',
     entityId: doc.id,
-    meta: { title: doc.title, approved: doc.approved, chunkCount },
+    meta: { title: doc.title, approved: doc.approved, chunkCount: indexed.chunkCount, embeddingModel: indexed.model },
   })
 
   return json(
@@ -69,7 +69,8 @@ export const POST = withAuth(async (req, ctx) => {
       doc: {
         ...doc,
         tags: parseJson<string[]>(doc.tags, []),
-        chunkCount,
+        chunkCount: indexed.chunkCount,
+        embeddingModel: indexed.model,
       },
     },
     201

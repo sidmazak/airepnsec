@@ -5,11 +5,11 @@ import { encryptSecret, decryptSecret } from '@/lib/crypto'
 export type Capability = 'llm' | 'embedding' | 'stt' | 'tts' | 'rerank' | 'vision'
 export const CAPABILITIES: Capability[] = ['llm', 'embedding', 'stt', 'tts', 'rerank', 'vision']
 
-export type ProviderKind = 'managed' | 'ollama' | 'openai_compatible' | 'browser' | 'local_lexical' | 'none'
+export type ProviderKind = 'managed' | 'ollama' | 'openai_compatible' | 'browser' | 'local_neural' | 'local_lexical' | 'none'
 
 export const CAPABILITY_INFO: Record<Capability, { label: string; description: string; kinds: ProviderKind[] }> = {
   llm: { label: 'Conversation model (LLM)', description: 'Powers the AI receptionist chat and voice replies.', kinds: ['managed', 'ollama', 'openai_compatible', 'none'] },
-  embedding: { label: 'Knowledge retrieval', description: 'Indexes business documents so the assistant can answer from your approved content.', kinds: ['local_lexical', 'ollama', 'openai_compatible'] },
+  embedding: { label: 'Knowledge retrieval (RAG embeddings)', description: 'Embeds and retrieves your approved documents. The built-in neural model runs entirely on this machine.', kinds: ['local_neural', 'ollama', 'openai_compatible', 'local_lexical'] },
   stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations.', kinds: ['browser', 'openai_compatible'] },
   tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode.', kinds: ['browser', 'openai_compatible'] },
   rerank: { label: 'Reranking (optional)', description: 'Improves ordering of retrieved knowledge. Optional.', kinds: ['none', 'openai_compatible'] },
@@ -38,7 +38,8 @@ function dataFlowLabel(provider: string, baseUrl: string): string {
     case 'ollama': return `Local inference on this machine (${baseUrl || 'Ollama'}) — data stays local`
     case 'openai_compatible': return `External OpenAI-compatible endpoint (${baseUrl || 'custom'}) — data leaves this machine`
     case 'browser': return 'In the browser (this device) — no server round-trip for media'
-    case 'local_lexical': return 'Built-in local retriever — indexing and search run entirely on this machine'
+    case 'local_neural': return 'Runs on this machine (built-in ONNX embedding model) — text never leaves the server'
+    case 'local_lexical': return 'Legacy keyword index — runs entirely on this machine, no model'
     default: return 'Disabled — no data is sent anywhere'
   }
 }
@@ -68,7 +69,16 @@ export async function getProviderRow(orgId: string, capability: Capability) {
   let row = await db.providerConfig.findUnique({ where: { orgId_capability: { orgId, capability } } })
   if (!row) {
     row = await db.providerConfig.create({
-      data: { orgId, capability, provider: capability === 'llm' ? 'managed' : capability === 'embedding' ? 'none' : 'browser', enabled: capability === 'llm' },
+      data: {
+        orgId,
+        capability,
+        provider: capability === 'llm'
+          ? 'managed'
+          : capability === 'embedding'
+            ? 'local_neural' // real semantic RAG works out of the box, fully local
+            : 'browser',
+        enabled: capability === 'llm' || capability === 'embedding',
+      },
     })
   }
   return row
@@ -131,10 +141,54 @@ async function fetchWithTimeout(url: string, init: RequestInit & { timeoutMs?: n
 }
 
 /** Real connectivity/model test for a provider configuration. */
-export async function testProvider(row: { provider: string; baseUrl: string; model: string; apiKeyEnc: string }): Promise<TestResult> {
+export async function testProvider(
+  row: { provider: string; baseUrl: string; model: string; apiKeyEnc: string },
+  capability: Capability = 'llm'
+): Promise<TestResult> {
   const started = Date.now()
   const key = getApiKey(row)
   try {
+    // Embedding capability gets provider-specific live tests against the actual embed call.
+    if (capability === 'embedding') {
+      switch (row.provider) {
+        case 'local_neural': {
+          const { embedNeural } = await import('@/lib/ai/embeddings')
+          const [vec] = await embedNeural(['connection test'])
+          if (!vec?.length) return { ok: false, message: 'Local neural model returned an empty embedding.', latencyMs: Date.now() - started }
+          return { ok: true, message: `Local neural embedding model ready — ${vec.length}-dimensional vectors, fully on this machine.`, latencyMs: Date.now() - started, details: { dim: vec.length } }
+        }
+        case 'ollama': {
+          if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. http://localhost:11434)', latencyMs: 0 }
+          const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/api/embeddings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ model: row.model || 'nomic-embed-text', prompt: 'connection test' }),
+          })
+          if (!res.ok) return { ok: false, message: `Ollama embeddings returned HTTP ${res.status} (is "${row.model || 'nomic-embed-text'}" pulled?)`, latencyMs: Date.now() - started }
+          const data = (await res.json()) as { embedding?: number[] }
+          return data.embedding?.length
+            ? { ok: true, message: `Ollama embedded a test string (${data.embedding.length} dims).`, latencyMs: Date.now() - started, details: { dim: data.embedding.length } }
+            : { ok: false, message: 'Ollama returned an empty embedding.', latencyMs: Date.now() - started }
+        }
+        case 'openai_compatible': {
+          if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. https://api.example.com/v1)', latencyMs: 0 }
+          const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/embeddings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+            body: JSON.stringify({ model: row.model || 'text-embedding-3-small', input: ['connection test'] }),
+          })
+          if (!res.ok) return { ok: false, message: `Embedding endpoint returned HTTP ${res.status}`, latencyMs: Date.now() - started }
+          const data = (await res.json()) as { data?: Array<{ embedding: number[] }> }
+          return data.data?.[0]?.embedding?.length
+            ? { ok: true, message: `Endpoint embedded a test string (${data.data[0].embedding.length} dims).`, latencyMs: Date.now() - started, details: { dim: data.data[0].embedding.length } }
+            : { ok: false, message: 'Endpoint returned an empty embedding.', latencyMs: Date.now() - started }
+        }
+        case 'local_lexical':
+          return { ok: true, message: 'Legacy keyword index active — deterministic, no model. Switch to the built-in neural model for semantic search.', latencyMs: 0 }
+        case 'none':
+          return { ok: false, message: 'This capability is disabled.', latencyMs: 0 }
+      }
+    }
     switch (row.provider) {
       case 'managed': {
         const ZAI = (await import('z-ai-web-dev-sdk')).default
@@ -184,7 +238,7 @@ export async function testProvider(row: { provider: string; baseUrl: string; mod
 
 export async function runAndStoreTest(orgId: string, capability: Capability): Promise<TestResult> {
   const row = await getProviderRow(orgId, capability)
-  const result = await testProvider(row)
+  const result = await testProvider(row, capability)
   await db.providerConfig.update({
     where: { id: row.id },
     data: { lastTestAt: new Date(), lastTestOk: result.ok, lastTestError: result.ok ? '' : result.message },

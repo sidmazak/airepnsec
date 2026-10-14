@@ -119,8 +119,19 @@ Protocol rules:
 
 - The mode is an org-level setting, default **local-only**; changing it is an admin action that is audited.
 - The sandbox SDK adapter counts as a *cloud* provider and is therefore disabled in local-only mode.
-- Embeddings follow the same gate: local embeddings when available, otherwise lexical retrieval
-  (SQLite build), pgvector when on PostgreSQL.
+- **RAG embeddings** follow the same gate. Default is the **built-in local neural embedder**
+  (`Xenova/all-MiniLM-L6-v2`, 384-d, ONNX via transformers.js, cached in `.models/`) — real
+  semantic vectors with no API key and zero data egress. Alternatives: local Ollama
+  (`/api/embeddings`) or an OpenAI-compatible `/embeddings` endpoint (BYOK, blocked in
+  local-only mode by the policy gate). A legacy hashed keyword embedder is the last-resort
+  fallback so search never breaks.
+- Retrieval is **hybrid**: dense cosine (only when chunk.model === active model) fused with
+  BM25 lexical scoring (72/28). Chunks store their embedding model + dimension, so switching
+  models marks the index stale (`needsReindex`) and `POST /api/knowledge/reindex` re-embeds
+  under the new model with an audited, observable run. The embedding model is pre-warmed at
+  server boot (`instrumentation.ts`) so the first search is fast.
+- On PostgreSQL production, chunk vectors should move to **pgvector**; the JSON-vector layout
+  (SQLite build) is documented as the portable intermediate representation.
 - Health checks (`/api/ai/providers` status) mark providers HEALTHY/UNHEALTHY; the assistant
   refuses to start a turn with an unhealthy configured provider rather than silently failing.
 
