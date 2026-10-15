@@ -2,6 +2,7 @@ import { withAuth, json } from '@/lib/api'
 import { db } from '@/lib/db'
 import { outstandingReceivables } from '@/lib/business/ledger'
 import { parseJson } from '@/lib/org'
+import { testProvider } from '@/lib/ai/providers'
 
 /**
  * GET /api/dashboard — at-a-glance data for the home section.
@@ -69,6 +70,21 @@ export const GET = withAuth(async (req, ctx) => {
 
   const setupState = parseJson<Record<string, { done?: boolean; savedAt?: string }>>(ctx.org.setupState, {})
 
+  // REAL live check of the conversation model — a stale `lastTestOk` must never be
+  // reported as ready (see /api/setup/readiness for the same logic).
+  let llmLive: { ok: boolean; message: string } = { ok: false, message: 'no conversation model configured' }
+  if (llmRow && llmRow.enabled && llmRow.provider !== 'none') {
+    try {
+      const test = await testProvider(
+        { provider: llmRow.provider, baseUrl: llmRow.baseUrl, model: llmRow.model, apiKeyEnc: llmRow.apiKeyEnc },
+        'llm'
+      )
+      llmLive = { ok: Boolean(test.ok), message: test.message || 'live check failed' }
+    } catch (err) {
+      llmLive = { ok: false, message: err instanceof Error ? err.message.slice(0, 200) : 'live check failed' }
+    }
+  }
+
   const readinessItems = [
     { key: 'hasServices', label: 'Services defined', ok: serviceCount > 0, detail: `${serviceCount} service(s) configured` },
     { key: 'hasStaff', label: 'Staff added', ok: staffCount > 0, detail: `${staffCount} staff member(s)` },
@@ -77,8 +93,12 @@ export const GET = withAuth(async (req, ctx) => {
     {
       key: 'llmReady',
       label: 'AI model configured & tested',
-      ok: Boolean(llmRow?.enabled && llmRow?.lastTestOk),
-      detail: llmRow ? (llmRow.lastTestOk ? `last test passed (${llmRow.provider})` : llmRow.lastTestError || 'configured but not tested yet') : 'no conversation model configured',
+      ok: llmRow ? llmLive.ok : false,
+      detail: !llmRow
+        ? 'no conversation model configured'
+        : llmLive.ok
+          ? `live check passed (${llmRow.provider})`
+          : `${llmRow.lastTestOk ? 'stale test passed, but live check now fails: ' : ''}${llmLive.message || 'live check failed — see Diagnostics'}`,
     },
     { key: 'customersImported', label: 'Customers added', ok: customerCount > 0, detail: `${customerCount} customer(s) on file` },
     { key: 'webhookSecret', label: 'Webhook secret configured', ok: Boolean(secretRow), detail: secretRow ? 'secret configured' : 'rotate a secret in Settings → Security' },

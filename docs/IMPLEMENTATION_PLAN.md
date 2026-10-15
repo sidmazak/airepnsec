@@ -21,7 +21,7 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ 8-step autosaving setup wizard with back/continue, CSV templates, plain-language AI config, and a **real end-to-end test runner** (customer → service → availability → booking → invoice → verified payment → balanced ledger check) before activation.
 
 ## Phase 4 — AI receptionist + voice test
-✅ Strict-JSON tool loop over typed provider adapters (managed gateway / Ollama / OpenAI-compatible); tools: list_services, check_availability, quote_price, create_booking, my_bookings, cancel_booking, search_knowledge, payment_claim, take_message, escalate — every tool validated, every failure reported honestly to the customer.
+✅ Strict-JSON tool loop over typed provider adapters (Ollama local / OpenAI-compatible BYOK); tools: list_services, check_availability, quote_price, create_booking, my_bookings, cancel_booking, search_knowledge, payment_claim, take_message, escalate — every tool validated, every failure reported honestly to the customer.
 ✅ **Neural RAG retrieval**: built-in local ONNX embedder (all-MiniLM-L6-v2, 384-d) with hybrid dense+BM25 search, per-chunk model tagging, controlled reindex + stale-index detection, boot-time model warm-up, protocol-tolerant tool dispatch. AiLog with latency/usage metrics (no secrets).
 ✅ Browser-based test calling via Web Speech API (STT + TTS, interruption-safe toggles, honest unsupported-browser fallback). Text inbox with human takeover.
 
@@ -52,7 +52,7 @@ Updated 2026-10-14 (integration layer delivered — see [INTEGRATIONS.md](./INTE
 
 | Capability | Status | Notes |
 |---|---|---|
-| Text AI receptionist (chat) | ✅ | Managed gateway default in sandbox; Ollama/BYOK adapters included |
+| Text AI receptionist (chat) | ✅ | BYOK only: local Ollama or any OpenAI-compatible endpoint (no proprietary AI SDK) |
 | Browser voice test call | ✅ | Web Speech API; real telephony (SIP/PSTN) ⏳ deferred |
 | Booking engine | ✅ | Transactional conflict checks; conservative pool-capacity model |
 | Customers + CSV import | ✅ | Templates downloadable |

@@ -25,7 +25,6 @@ import {
 /* ------------------------------ helpers ------------------------------ */
 
 const PROVIDER_LABELS: Record<string, string> = {
-  managed: 'Managed AI gateway (external)',
   ollama: 'Ollama (local)',
   openai_compatible: 'OpenAI-compatible endpoint',
   browser: 'In-browser',
@@ -41,7 +40,7 @@ const DATA_MODES: Array<{ id: string; title: string; description: string }> = [
 ]
 
 function isCloudProvider(p: string): boolean {
-  return p === 'managed' || p === 'openai_compatible'
+  return p === 'openai_compatible'
 }
 
 type CapabilityInfo = { label: string; description: string; kinds: string[] }
@@ -334,13 +333,13 @@ export function AiSection() {
                       </div>
                     )}
 
-                    {(needsBaseUrl || draft.provider === 'managed') && (
+                    {(needsBaseUrl) && (
                       <div className="space-y-1.5">
                         <Label htmlFor={`model-${cap}`}>Model</Label>
                         <Input
                           id={`model-${cap}`} value={draft.model} disabled={!canManage}
                           onChange={(e) => setDraft(cap, { model: e.target.value })}
-                          placeholder={draft.provider === 'managed' ? '(gateway default)' : cap === 'embedding' ? 'e.g. nomic-embed-text / text-embedding-3-small' : 'e.g. llama3.1:8b'}
+                          placeholder={cap === 'embedding' ? 'e.g. nomic-embed-text / text-embedding-3-small' : 'e.g. llama3.1:8b'}
                           className="min-h-[44px]"
                         />
                       </div>

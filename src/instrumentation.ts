@@ -38,6 +38,20 @@ export async function register() {
   setInterval(dispatch, 30_000)
   console.log('[worker] outbox dispatcher started (30s interval)')
 
+  // External data-source auto-sync: re-pulls enabled sources whose interval is due.
+  // 90s after boot, then every 5 minutes (per-source interval is honored inside).
+  const { runDueDataSourceSyncs } = await import('@/lib/datasources/sync')
+  const dataSync = async () => {
+    try {
+      const { ran, failed } = await runDueDataSourceSyncs()
+      if (ran || failed) console.log(`[worker] data-source auto-sync: ${ran} synced, ${failed} failed`)
+    } catch (err) {
+      console.error('[worker] data-source auto-sync failed:', err instanceof Error ? err.message : err)
+    }
+  }
+  setTimeout(dataSync, 90_000)
+  setInterval(dataSync, 5 * 60_000)
+
   // Pre-load the local embedding model so the first knowledge search / AI answer is fast.
   // Fire-and-forget: a failed load is logged and search degrades to lexical scoring.
   void (async () => {

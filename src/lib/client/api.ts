@@ -174,6 +174,52 @@ export type OutboxDispatchStats = {
 
 export type IntegrationTestResult = { ok: boolean; detail: string }
 
+export type DataSourceKindInfo = {
+  kind: string
+  label: string
+  connectionSummary: string
+  secretFields: Array<{ key: string; label: string; placeholder: string; required: boolean }>
+  configHints: { queryLabel: string; queryHint: string; idColumnHint: string }
+  requiresDriver?: string
+  notes: string
+}
+
+export type DataSourceRow = {
+  id: string
+  name: string
+  kind: string
+  config: Record<string, unknown>
+  configured: boolean
+  enabled: boolean
+  autoSync: boolean
+  syncIntervalMin: number
+  lastTestAt: string | null
+  lastTestOk: boolean
+  lastTestError: string
+  lastSyncAt: string | null
+  lastSyncOk: boolean
+  lastSyncError: string
+  lastSyncStats: Record<string, number>
+  documentCount: number
+  chunkCount: number
+  createdAt: string
+}
+
+export type DataSourceTestResult = {
+  ok: boolean
+  message: string
+  latencyMs: number
+  rowCount?: number
+  columns?: string[]
+  preview?: Array<Record<string, unknown>>
+}
+
+export type DataSourceSyncResult = {
+  ok: boolean
+  result: { ok: boolean; stats: Record<string, number>; documentCount: number; chunkCount: number }
+  message: string
+}
+
 export type AuditRow = {
   id: string; ts: string; actorType: string; actorId: string; action: string
   entity: string; entityId: string; meta: string

@@ -7,18 +7,21 @@ import { Button } from '@/components/ui/button'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   LayoutDashboard, Inbox, CalendarDays, Users, Receipt, BookOpen, BookMarked,
-  Workflow, Bot, Store, Activity, LogOut, Menu, Bot as Logo, Plug, X, Mic,
+  Workflow, Bot, Store, Activity, LogOut, Menu, Bot as Logo, Plug, X, Mic, Database, BarChart3, Wifi,
 } from 'lucide-react'
 
 const NAV: Array<{ id: SectionId; label: string; icon: typeof LayoutDashboard; group: string }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'Overview' },
   { id: 'inbox', label: 'Inbox', icon: Inbox, group: 'Conversations' },
   { id: 'voice', label: 'Voice Console', icon: Mic, group: 'Conversations' },
+  { id: 'realtime', label: 'Realtime Voice', icon: Wifi, group: 'Conversations' },
   { id: 'bookings', label: 'Bookings', icon: CalendarDays, group: 'Operations' },
   { id: 'customers', label: 'Customers', icon: Users, group: 'Operations' },
   { id: 'invoices', label: 'Invoices & Payments', icon: Receipt, group: 'Money' },
   { id: 'ledger', label: 'Ledger', icon: BookOpen, group: 'Money' },
+  { id: 'usage', label: 'Usage & Billing', icon: BarChart3, group: 'Money' },
   { id: 'knowledge', label: 'Knowledge & FAQs', icon: BookMarked, group: 'AI' },
+  { id: 'datasources', label: 'Data Sources', icon: Database, group: 'AI' },
   { id: 'automations', label: 'Automations', icon: Workflow, group: 'AI' },
   { id: 'ai', label: 'AI Providers', icon: Bot, group: 'Settings' },
   { id: 'business', label: 'Business Profile', icon: Store, group: 'Settings' },

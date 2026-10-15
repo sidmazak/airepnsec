@@ -330,28 +330,52 @@ integration's credentials.
   push sync into an external calendar (CalDAV — Radicale/Nextcloud/Fastmail),
   see the `caldav` kind in §2.
 
-## 8. Local testing recipe (zero external services)
+## 8. Local testing recipe (bring your own capture target)
 
-The repo ships two throwaway mini-services for end-to-end integration tests:
+Nothing extra needs to be installed - point the integrations at any throwaway
+listener you already have.
+
+**Inbound payment webhook signing check (no service at all)**
+
+Capture what Twilio/your PSP sends, so you can compare signatures offline, then
+re-verify the HMAC in code with the stored secret before enabling it:
 
 ```bash
-bun mini-services/smtp-sink/index.ts     # SMTP :2525 · HTTP :2526 (in-memory, cap 200)
-bun mini-services/webhook-echo/index.ts  # HTTP :3030 (in-memory, cap 200)
+nc -l 3030 > webhook.raw
 ```
 
-1. **Email**: create an `smtp` integration with host `localhost`, port `2525`,
-   from `test@example.com`, no credentials → enable it →
-   `POST /api/invoices/<id>/send` (or trigger an automation) → inspect the
-   delivered message at `http://localhost:2526/messages` (includes extracted
-   Subject; `POST /clear` resets).
-2. **Webhooks**: create a `webhook_out` integration with url
-   `http://localhost:3030/hook` (optionally a signing secret) → deliveries are
-   recorded at `GET http://localhost:3030/deliveries` with the raw body and the
-   `x-signature` header, so you can verify the HMAC with a one-liner.
+**Email delivery to a local SMTP sink**
 
-Both services are development tools only — in-memory, unauthenticated, never
-run them in production.
+Any local SMTP listener works. Two standard options:
 
+- Python stdlib debugging server (prints the whole message to stdout):
+  ```bash
+  python -m smtpd -n -c DebuggingServer localhost:2525
+  ```
+- MailHog / Mailpit (Docker, web UI at :8025):
+  ```bash
+  docker run --rm -p 1025:1025 -p 8025:8025 mailhog/mailhog
+  ```
+
+Then create an `smtp` integration with host `localhost`, port `1025` (or `2525`
+for the Python sink), from `test@example.com`, no credentials, enable it, then
+`POST /api/invoices/<id>/send` (or trigger an automation) and read the delivered
+message from the sink's output/UI.
+
+**Outbound webhook verification**
+
+Point a `webhook_out` integration at any URL you control (an `nc -l` listener, a
+[webhook.site](https://webhook.site) bin, or your own endpoint). Every request
+carries `x-signature` = hex HMAC-SHA256 over the raw body using the destination's
+signing secret (or the literal `none` when no secret is set), so you can verify
+the HMAC yourself:
+
+```bash
+python3 -c "import hashlib,hmac;body=open('delivered-body.json','rb').read();print(hmac.new(b'your-signing-secret',body,hashlib.sha256).hexdigest())"
+```
+
+These are development tools only - never point production webhooks or mail at an
+unauthenticated listener.
 ## 9. Security notes
 
 - **Secrets are AES-256-GCM encrypted at rest** (key = SHA-256 of `APP_SECRET`

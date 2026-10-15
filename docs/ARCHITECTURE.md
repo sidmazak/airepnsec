@@ -17,6 +17,7 @@ Next.js 16 App Router deployment; the conceptual boundaries map to directories:
 | **apps/voice** — voice channel | Voice Console section (`src/components/sections/voice-section.tsx`), STT/TTS lib (`src/lib/ai/speech.ts`), telephony lib (`src/lib/telephony/twiml.ts`); routes `src/app/api/ai/{asr,tts}` + `src/app/api/telephony/**` | Browser voice console (real STT/TTS) + true phone/SMS receptionist via Twilio (see §9) |
 | package: db | `src/lib/db.ts` (Prisma client singleton) | Data access; schema in `prisma/schema.prisma` |
 | package: ai | `src/lib/ai/**` | Provider adapters (sandbox SDK, Ollama, OpenAI-compatible), embeddings, policy gate (local-only/hybrid/cloud) |
+| package: datasources — bring-your-own DB into RAG | `src/lib/datasources/**` (registry, adapters, sync) + routes `src/app/api/datasources/**` + UI `src/components/sections/data-sources-section.tsx` | Connect an external relational DB (postgres/mysql/sqlite) or JSON HTTP endpoint; normalize rows → `KnowledgeDoc`s → the shared chunk/embed pipeline. Read-only SQL enforcement, SSRF guard, encrypted credentials, idempotent re-sync, worker auto-sync |
 | package: integrations | `src/lib/integrations/**` | SMTP/Twilio/Stripe/CalDAV adapters, outbox dispatcher, ICS feed + CalDAV push sync, generic signed-webhook adapter |
 
 Boundary rules:
@@ -30,11 +31,11 @@ Boundary rules:
 
 | Concern | This build (sandbox) | Self-hosted production target |
 |---|---|---|
-| Runtime | Next.js dev server (`bun run dev`, port 3000) | Docker Compose in `infra/` (**Planned** — not in this build): web + postgres + optional ollama |
+| Runtime | Next.js dev server (`npm run dev`, port 3000; Node.js + npm — no Bun) | Docker Compose in `infra/` (**Planned** — not in this build): web + postgres + optional ollama |
 | Database | **SQLite** via Prisma (`file:.../db/custom.db`) | **PostgreSQL** (+ **pgvector** for embeddings) |
 | Migrations | `prisma db push` (sandbox convenience) | `prisma migrate deploy` with committed migrations |
 | Embeddings | Stored in-app; lexical/cosine fallback (SQLite has no vector index) | pgvector index |
-| AI SDK | `z-ai-web-dev-sdk` (platform-provided, sandbox-only, **must be replaced in production**) | BYOK adapters: Ollama local, any OpenAI-compatible endpoint |
+| AI provider | none built-in — **BYOK only**: Ollama (local) or any OpenAI-compatible endpoint | Keys AES-256-GCM encrypted server-side, never returned |
 | Rate limiting | In-memory per-process | DB/Redis-backed (multi-instance) |
 | TLS/headers termination | Caddy in sandbox routes to :3000 | Caddyfile in `infra/` with HSTS |
 
@@ -177,7 +178,7 @@ tools, audit trail, and data-mode policy gate as text chat):
 
 | Surface | Speech path | Auth |
 |---|---|---|
-| **Voice Console** (browser, `#voice` section) | Browser records audio → `POST /api/ai/asr` (real STT: managed gateway or OpenAI-compatible `/audio/transcriptions`) → receptionist turn → `POST /api/ai/tts` (real TTS: managed gateway WAV, OpenAI-compatible MP3; text chunked ≤ 1000 chars) → browser playback. Per-turn STT/AI/TTS latency badges. | Session cookie (CSRF-protected) |
+| **Voice Console** (browser, `#voice` section) | Browser records audio → `POST /api/ai/asr` (real STT: OpenAI-compatible `/audio/transcriptions`, or the device's own Web Speech API) → receptionist turn → `POST /api/ai/tts` (real TTS: OpenAI-compatible MP3; text chunked ≤ 1000 chars) → browser playback. Per-turn STT/AI/TTS latency badges. | Session cookie (CSRF-protected) |
 | **Phone** (Twilio Voice) | Twilio does the speech recognition (`<Gather input="speech">`); the app runs the full turn and answers with TwiML `<Say>`; escalation → `<Dial>` transfer or message-taken hangup; status callbacks close the call. | Twilio signature |
 | **SMS** (Twilio) | Webhook threads one conversation per sender number, records the inbound message instantly, answers asynchronously via the Twilio Messages API; send failures land in the outbox with honest status + retry/backoff. | Twilio signature |
 

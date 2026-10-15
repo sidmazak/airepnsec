@@ -6,7 +6,7 @@ daemon); verify on your host before relying on it** — see "Smoke test" below.
 
 | File | What it is |
 |---|---|
-| `Dockerfile` | Multi-stage build: `oven/bun:1` build stage (`bun install --frozen-lockfile` → `bunx prisma generate` → `bun run build`, which emits the Next.js standalone output) + `oven/bun:1-slim` runtime carrying the standalone server, the Prisma CLI and writable dirs (`db/`, `.data/`, `backups/`, `.models/`). `CMD` runs `bunx prisma db push` against `DATABASE_URL`, then `bun .next/standalone/server.js`. |
+| `Dockerfile` | Multi-stage build: `node:24-bookworm-slim` build stage (`npm ci` → `npx prisma generate` → `npm run build`, which emits the Next.js standalone output) + `node:24-bookworm-slim` runtime carrying the standalone server, the Prisma CLI and writable dirs (`db/`, `.data/`, `backups/`, `.models/`). `CMD` runs `prisma db push` against `DATABASE_URL`, then `node .next/standalone/server.js`. |
 | `docker-compose.yml` | Two services: `app` (this Dockerfile, port 3000, volumes for `.data` / `backups` / `.models`) and `db` (`pgvector/pgvector:pg16` with `pg_isready` healthcheck + `pgdata` volume). Both `restart: unless-stopped`. Postgres+pgvector is the production target; set `DATABASE_URL` accordingly — the SQLite dev database is used when `DATABASE_URL=file:…`. |
 | `.env.example` | Environment template. Copy to `infra/.env`; no real secrets inside. |
 
@@ -44,7 +44,7 @@ lexical search, but it should not be needed.
 
 ## Known unverified risks
 
-- `bunx prisma db push` at container start relies on the copied `node_modules/prisma`
+- `prisma db push` at container start relies on the copied `node_modules/prisma`
   + `node_modules/@prisma` (CLI + engines) — confirm it resolves on your arch.
 - The ONNX embedding model downloads into the `app_models` volume on first boot
   (needs outbound network at that moment; afterwards zero egress).

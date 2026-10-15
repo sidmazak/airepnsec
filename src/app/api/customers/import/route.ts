@@ -119,4 +119,4 @@ export const POST = withAuth(async (req, ctx) => {
   })
 
   return json({ created, errors })
-})
+}, { roles: ['owner', 'admin'] })

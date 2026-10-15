@@ -69,7 +69,7 @@ export const GET = withAuth(async (req, ctx, params) => {
   })
 })
 
-/** PATCH /api/customers/[id] — any subset of fields. */
+/** PATCH /api/customers/[id] — any subset of fields (owner/admin/agent). */
 export const PATCH = withAuth(async (req, ctx, params) => {
   const customer = await requireCustomer(ctx.org.id, params.id)
   const body = await parseBody(req, patchSchema)
@@ -97,10 +97,10 @@ export const PATCH = withAuth(async (req, ctx, params) => {
   })
 
   return json({ ...updated, tags: parseJson<string[]>(updated.tags, []) })
-})
+}, { roles: ['owner', 'admin', 'agent'] })
 
 /**
- * DELETE /api/customers/[id]
+ * DELETE /api/customers/[id] (owner/admin)
  * Financial history is never destroyed: any invoice blocks deletion.
  * Active (pending/confirmed) bookings must be cancelled first; once clear,
  * the customer's remaining booking rows are removed, then the customer.
@@ -154,4 +154,4 @@ export const DELETE = withAuth(async (req, ctx, params) => {
   })
 
   return json({ ok: true })
-})
+}, { roles: ['owner', 'admin'] })

@@ -127,7 +127,7 @@ The product passes acceptance when this slice completes end-to-end **without any
 
 | # | Step | Pass condition |
 |---|---|---|
-| 1 | Install & run | `bun install`, `.env` with `DATABASE_URL`, `bun run db:push`, `bun run dev` → app serves on port 3000 with no runtime errors in `dev.log` |
+| 1 | Install & run | `npm install`, `.env` with `DATABASE_URL`, `npm run db:push`, `npm run dev` → app serves on port 3000 with no runtime errors in `dev.log` |
 | 2 | Setup wizard | All 8 steps complete; progress survives reload; wizard is completable with zero external integrations (AI provider optional at this stage) |
 | 3 | Customer + service | A customer and a bookable service exist, created via UI or CSV import, scoped to the organization |
 | 4 | Booking via real engine | Booking created against business hours + staff/resource; an overlapping booking attempt is **rejected with 409** (conflict logic in the service layer inside a transaction, not UI-only) |

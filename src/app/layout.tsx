@@ -14,24 +14,20 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Z.ai Code Scaffold - AI-Powered Development",
-  description: "Modern Next.js scaffold optimized for AI-powered development with Z.ai. Built with TypeScript, Tailwind CSS, and shadcn/ui.",
-  keywords: ["Z.ai", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
-  authors: [{ name: "Z.ai Team" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+  title: "AI Secretary — self-hosted AI receptionist & back office",
+  description: "Self-hosted AI receptionist with real bookings, invoices, ledger, knowledge retrieval and phone support. Bring your own AI provider (local Ollama or OpenAI-compatible) — your data stays yours.",
+  keywords: ["AI receptionist", "AI secretary", "bookings", "invoices", "self-hosted", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui"],
+  authors: [{ name: "AI Secretary" }],
+  icons: { icon: "/favicon.ico" },
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "AI Secretary",
+    description: "Self-hosted AI receptionist with real bookings, invoices and ledger",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
+    title: "AI Secretary",
+    description: "Self-hosted AI receptionist with real bookings, invoices and ledger",
   },
 };
 

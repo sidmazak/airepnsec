@@ -46,12 +46,15 @@ model Organization {
   webhookEvents    WebhookEvent[]
   integrations     Integration[]
   knowledgeDocs    KnowledgeDoc[]
+  dataSources      DataSource[]
   conversations    Conversation[]
   outbox           OutboxMessage[]
   providerConfigs  ProviderConfig[]
   aiLogs           AiLog[]
   automations      Automation[]
   auditEvents      AuditEvent[]
+  telephonyLines   TelephonyLine[]
+  telephonyCalls   TelephonyCall[]
   settings         AppSetting[]
 }
 
@@ -296,14 +299,56 @@ model KnowledgeDoc {
   id        String   @id @default(cuid())
   orgId     String
   title     String
-  source    String   @default("manual") // manual | paste | file
+  source    String   @default("manual") // manual | paste | file | datasource
   content   String
   approved  Boolean  @default(false) // only approved docs are served to the AI
   tags      String   @default("[]")
+  dataSourceId String? // set when the row was ingested from an external data source
+  externalId   String @default("") // stable row id in the source (idempotent sync key)
+  contentHash  String @default("") // sha256 of extracted text; unchanged rows are skipped on re-sync
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   organization Organization @relation(fields: [orgId], references: [id])
+  dataSource DataSource? @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
   chunks    KnowledgeChunk[]
+  @@unique([dataSourceId, externalId])
+  @@index([orgId])
+  @@index([dataSourceId])
+}
+
+/**
+ * Bring-your-own data source for RAG. Connects to an external relational/SQL
+ * database or a JSON HTTP endpoint, extracts rows as documents, and indexes them
+ * into the same knowledge/RAG pipeline (chunked + embedded with the org's
+ * embedding provider). Secrets (connection strings / credentials) are stored
+ * AES-256-GCM encrypted in connectionEnc and NEVER returned to the client.
+ *
+ * kind: sqlite | postgres | mysql | http_json
+ * configJson: { query | table, idColumn, titleColumn, textColumns[], contentType, limit, allowPrivate? }
+ */
+model DataSource {
+  id              String   @id @default(cuid())
+  orgId           String
+  name            String
+  kind            String   // sqlite | postgres | mysql | http_json
+  connectionEnc   String   @default("") // AES-256-GCM encrypted JSON of connection fields (host/url/user/password/path)
+  configJson      String   @default("{}") // query/table + column mapping
+  enabled         Boolean  @default(false)
+  autoSync        Boolean  @default(false)
+  syncIntervalMin Int      @default(360) // scheduled re-sync interval (used when autoSync is on)
+  lastTestAt      DateTime?
+  lastTestOk      Boolean  @default(false)
+  lastTestError   String   @default("")
+  lastSyncAt      DateTime?
+  lastSyncOk      Boolean  @default(false)
+  lastSyncError   String   @default("")
+  lastSyncStats   String   @default("{}") // JSON: { fetched, created, updated, deleted, unchanged, failed, ms }
+  documentCount   Int      @default(0)
+  chunkCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  organization    Organization @relation(fields: [orgId], references: [id])
+  documents       KnowledgeDoc[]
   @@index([orgId])
 }
 
@@ -475,6 +520,41 @@ model Integration {
   organization  Organization @relation(fields: [orgId], references: [id])
   @@index([orgId])
   @@index([orgId, kind])
+}
+
+model TelephonyLine {
+  id               String   @id @default(cuid())
+  orgId            String
+  integrationId    String   @default("")
+  label            String   @default("")
+  phoneNumber      String   @default("") // agent's direct line / extension E.164
+  destinationKind  String   @default("phone") // phone | user | department
+  destinationValue String   @default("") // phone number or user/queue id
+  priority         Int      @default(100)
+  enabled          Boolean  @default(true)
+  acceptingCalls   Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  organization     Organization @relation(fields: [orgId], references: [id])
+  @@index([orgId])
+  @@index([orgId, enabled])
+}
+
+model TelephonyCall {
+  id          String    @id @default(cuid())
+  orgId       String
+  callSid     String    @default("")
+  from        String    @default("")
+  to          String    @default("")
+  lineId      String    @default("")
+  status      String    @default("started") // started | answered | completed | failed | missed
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  durationSec Int       @default(0)
+  meta        String    @default("{}")
+  organization Organization @relation(fields: [orgId], references: [id])
+  @@index([orgId, startedAt])
+  @@index([orgId, status])
 }
 
 model AuditEvent {

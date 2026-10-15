@@ -112,6 +112,18 @@ All handlers live in `src/app/api/**/route.ts`. Single-page frontend at `/` call
 - `GET /api/knowledge/index` → index status `{provider, model, enabled, docs, approvedDocs, totalChunks, chunksWithCurrentModel, needsReindex, neuralReady}`.
 - `POST /api/knowledge/reindex` (owner/admin) → re-embed all docs with the active embedding provider; audited; returns honest summary `{docs, chunks, model, dim, ms, errors[]}`.
 
+### Data sources — bring-your-own DB into RAG (auth; owner/admin for mutations)
+
+Connects an external relational database or JSON HTTP endpoint and ingests its rows as knowledge documents in the **same** chunk/embedding pipeline the assistant answers from. Kinds: `postgres`, `mysql`, `sqlite` (Node built-in `node:sqlite`, read-only), `http_json`. Credentials are encrypted (AES-256-GCM) and never returned; SQL is restricted to a single read-only `SELECT`/`WITH` and the result set is capped; `http_json` blocks private/loopback addresses unless `allowPrivate` is set (SSRF guard).
+
+- `GET /api/datasources` → `{sources: PublicDataSource[], kinds: KindInfo[]}` (public source shape excludes connection details; includes `configured`, `documentCount`, `chunkCount`, `lastTest*`, `lastSync*`, `lastSyncStats`).
+- `POST /api/datasources` (owner/admin) `{name, kind, connection (per-kind secrets), config?, enabled?, autoSync?, syncIntervalMin?}` → `201 {source}`. `connection` validated per kind; encrypted before storage. Audit `datasource.created`.
+- `PATCH /api/datasources/[id]` (owner/admin) — partial update; `connection:null` clears credentials and disables the source; enabling without a stored connection → `400 not_configured`. Audit `datasource.updated`.
+- `DELETE /api/datasources/[id]` (owner/admin) → removes the source (its ingested `KnowledgeDoc`s cascade-delete with their chunks). Audit `datasource.deleted`.
+- `POST /api/datasources/[id]/test` (owner/admin) → connects, runs the configured query (capped), returns `{result: {ok, message, latencyMs, rowCount?, columns?, preview?}}` and records `lastTest*`. Audit `datasource.tested`.
+- `POST /api/datasources/[id]/sync` (owner/admin) → pulls rows, upserts docs by `(dataSourceId, externalId)`, skips unchanged rows (content hash), deletes docs whose rows disappeared, (re)embeds changed docs, records `lastSync*` + `lastSyncStats` + document/chunk counts. Returns `{ok, result:{ok, stats}, message}`. Audit `datasource.synced`.
+- Auto-sync: the background worker (`src/instrumentation.ts`) runs `runDueDataSourceSyncs()` every 5 min for `enabled && autoSync` sources whose interval is due.
+
 ### Conversations / inbox (auth)
 - `GET /api/conversations?status=` → with last message preview + customer name.
 - `POST /api/conversations` `{contactName?, customerId?, channel?}` → open conversation.
@@ -122,10 +134,10 @@ All handlers live in `src/app/api/**/route.ts`. Single-page frontend at `/` call
 
 ### Voice / speech (auth) — Voice Console
 
-Real STT/TTS routed through the same BYOK provider layer as chat (capabilities `stt`/`tts`; server-side providers `managed` (built-in gateway) or `openai_compatible`; the legacy `browser` kind cannot serve speech server-side). Untouched legacy `browser` rows are lazily migrated to `managed` on `GET /api/providers` and before each call, so the voice console works out of the box. Every call writes an `AiLog` row (metrics only, no content). `local_only` data mode blocks `managed`/`openai_compatible` speech via the AI policy gate → honest `403`. No audio is ever persisted.
+Real STT/TTS routed through the same BYOK provider layer as chat (capabilities `stt`/`tts`; the only server-side speech provider is `openai_compatible` — there is no proprietary AI SDK. The `browser` kind uses the device's built-in Web Speech API and needs no server round-trip). Legacy `managed` rows (retired provider kind) are reset to `browser` on `GET /api/providers` and before each call, so the voice console stays honest instead of pointing at a provider that cannot run. Every call writes an `AiLog` row (metrics only, no content). `local_only` data mode blocks `openai_compatible` speech via the AI policy gate → honest `403`. No audio is ever persisted.
 
-- `POST /api/ai/asr` `{b64: string, mime?: string}` → `{text, provider, model, latencyMs}`. Base64 audio decoded server-side (max ~12 MB raw → `413`; decodes to zero bytes → `400`). `managed` → gateway `audio.asr`; `openai_compatible` → `POST {baseUrl}/audio/transcriptions` (multipart, model default `whisper-1`, 60 s timeout). Empty transcript → `502 stt_failed` (sanitized upstream message). Only the transcript is returned.
-- `POST /api/ai/tts` `{text (≤4000 chars), voice?, speed? (0.5–2.0)}` → `{audio: [{mime, b64}], provider, model, latencyMs}`. Text is split into sentence-bounded ≤1000-char chunks; one audio chunk per upstream request. `managed` → gateway `audio.tts`, WAV (`audio/wav`), voices `tongtong chuichui xiaochen jam kazi douji luodo` (default `tongtong`); `openai_compatible` → `POST {baseUrl}/audio/speech` (model default `tts-1`, voice from `config.openaiVoice` or `alloy`, MP3). Errors: `400 empty_text`, `503 speech_not_configured | speech_provider_unsupported`, `502 tts_failed`.
+- `POST /api/ai/asr` `{b64: string, mime?: string}` → `{text, provider, model, latencyMs}`. Base64 audio decoded server-side (max ~12 MB raw → `413`; decodes to zero bytes → `400`). `openai_compatible` → `POST {baseUrl}/audio/transcriptions` (multipart, model default `whisper-1`, 60 s timeout). Empty transcript → `502 stt_failed` (sanitized upstream message). Only the transcript is returned. `browser` rows are rejected server-side with `503 speech_provider_unsupported` — use the in-browser mic path instead.
+- `POST /api/ai/tts` `{text (≤4000 chars), voice?, speed? (0.5–2.0)}` → `{audio: [{mime, b64}], provider, model, latencyMs}`. Text is split into sentence-bounded ≤1000-char chunks; one audio chunk per upstream request. `openai_compatible` → `POST {baseUrl}/audio/speech` (model default `tts-1`, voice from `config.openaiVoice` or `alloy`, MP3). Errors: `400 empty_text`, `503 speech_not_configured | speech_provider_unsupported`, `502 tts_failed`.
 
 ### Telephony (public — Twilio-signature webhooks)
 
@@ -137,7 +149,7 @@ All `/api/telephony/*` routes are PUBLIC but authenticated with Twilio's real si
 - `POST /api/telephony/sms/incoming` — inbound SMS: one `sms`-channel Conversation per sender number (`externalRef: "sms:{digits}"`); the inbound message is recorded instantly (`WebhookEvent` payload + `telephony.sms_received` audit) while Twilio gets an immediate empty TwiML. The answer is generated asynchronously through the full receptionist turn and sent via the Twilio Messages API (REST): send failure → OutboxMessage `queued` with the honest `statusReason` (dispatcher retries with backoff); no enabled `twilio_sms` integration → outbox `skipped` with a clear reason. `customer.optOut` is honored absolutely — inbound is stored, nothing is ever sent. Duplicate `MessageSid` → deduped.
 
 ### AI providers (auth; owner/admin for mutations)
-- `GET /api/providers` → `{capabilities: {llm: PublicProviderConfig, ...}, dataMode, capabilityInfo}` — never secrets. Capabilities now include `stt`/`tts` (kinds `managed | browser | openai_compatible`); GET lazily migrates untouched legacy `browser` rows for those two to `managed` so the voice console works out of the box.
+- `GET /api/providers` → `{capabilities: {llm: PublicProviderConfig, ...}, dataMode, capabilityInfo}` — never secrets. Capabilities include `stt`/`tts` (kinds `browser | openai_compatible`); GET resets any retired `managed` rows for those two to `browser` so the voice console works out of the box. `llm` kinds are `ollama | openai_compatible | none` — there is no built-in/managed model.
 - `PUT /api/providers/[capability]` `{provider, label?, baseUrl?, model?, apiKey? (''=clear, undefined=keep), enabled?, config?}`. Audit `settings.provider_updated` (meta without secrets).
 - `POST /api/providers/[capability]/test` → runAndStoreTest → `{ok, message, latencyMs}`.
 - `GET /api/ai/logs?limit=` → recent AiLog rows (no content, only metrics).

@@ -39,7 +39,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   CalendarClock, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
-  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Send, Trash2, Webhook as WebhookIcon, XCircle,
+  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Send, Smartphone, Trash2, Webhook as WebhookIcon, XCircle,
 } from 'lucide-react'
 
 /* ------------------------------ helpers ------------------------------ */
@@ -105,6 +105,14 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
     blurb: 'Point your Twilio number at this app: the AI receptionist answers real calls and texts, books, quotes prices and escalates.',
     needsCredentials: true,
   },
+  sms_gateway: {
+    title: 'SMS Gateway (bring your own)',
+    icon: Smartphone,
+    blurb: 'Send SMS through your own phone/modem or bridge — TextBee, httpSMS, android-sms-gateway, or any HTTP gateway (incl. iOS/iMessage bridges). Alternative to Twilio.',
+    // Self-hosted gateways (android-sms-gateway local mode, a LAN/iOS bridge) can be
+    // credential-less, so enabling is not blocked; the real connection test reports the truth.
+    needsCredentials: false,
+  },
   caldav: {
     title: 'Calendar Sync (CalDAV)',
     icon: CalendarClock,
@@ -125,7 +133,7 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
   },
 }
 
-const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'caldav', 'stripe'] as const
+const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'stripe'] as const
 
 const OUTBOX_STATUS_CLASS: Record<string, string> = {
   sent: 'bg-emerald-100 text-emerald-900',
@@ -159,11 +167,11 @@ function CopyButton({ value, label, className }: { value: string; label: string;
 
 /* ------------------------------ drafts ------------------------------ */
 
-type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string }
-type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string; password: string }
+type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string; baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string }
+type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string; password: string; apiKey: string; username: string; passwordGw: string; token: string; authValue: string }
 
-const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '' }
-const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '' }
+const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee', baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '' }
+const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '', apiKey: '', username: '', passwordGw: '', token: '', authValue: '' }
 
 function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
   if (kind === 'smtp') {
@@ -176,6 +184,20 @@ function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
     if (d.voiceName.trim()) out.voiceName = d.voiceName.trim()
     if (d.transferNumber.trim()) out.transferNumber = d.transferNumber.trim()
     if (d.publicBaseUrl.trim()) out.publicBaseUrl = d.publicBaseUrl.trim()
+    return out
+  }
+  if (kind === 'sms_gateway') {
+    const out: Record<string, unknown> = { provider: d.provider }
+    if (d.baseUrl.trim()) out.baseUrl = d.baseUrl.trim()
+    if (d.from.trim()) out.from = d.from.trim()
+    if (d.deviceId.trim()) out.deviceId = d.deviceId.trim()
+    if (d.provider === 'generic_http') {
+      out.url = d.url.trim()
+      out.method = d.method === 'PUT' ? 'PUT' : 'POST'
+      if (d.authHeaderName.trim()) out.authHeaderName = d.authHeaderName.trim()
+      if (d.bodyTemplate.trim()) out.bodyTemplate = d.bodyTemplate.trim()
+      if (d.testRecipient.trim()) out.testRecipient = d.testRecipient.trim()
+    }
     return out
   }
   if (kind === 'caldav') {
@@ -199,6 +221,12 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
   } else if (kind === 'twilio_sms' || kind === 'twilio_whatsapp' || kind === 'twilio_voice') {
     if (d.accountSid.trim()) out.accountSid = d.accountSid.trim()
     if (d.authToken) out.authToken = d.authToken
+  } else if (kind === 'sms_gateway') {
+    if (d.apiKey) out.apiKey = d.apiKey
+    if (d.username.trim()) out.username = d.username.trim()
+    if (d.passwordGw) out.password = d.passwordGw
+    if (d.token) out.token = d.token
+    if (d.authValue) out.authValue = d.authValue
   } else if (kind === 'caldav') {
     if (d.password) out.password = d.password
   } else if (kind === 'stripe') {
@@ -301,6 +329,9 @@ function ConnectorCard({
       from: str(c.from), url: str(c.url), username: str(c.username),
       language: str(c.language), voiceName: str(c.voiceName),
       transferNumber: str(c.transferNumber), publicBaseUrl: str(c.publicBaseUrl),
+      provider: str(c.provider) || 'textbee', baseUrl: str(c.baseUrl), deviceId: str(c.deviceId),
+      method: str(c.method) || 'POST', authHeaderName: str(c.authHeaderName),
+      bodyTemplate: str(c.bodyTemplate), testRecipient: str(c.testRecipient),
     })
     setDlgOpen(true)
   }
@@ -384,6 +415,15 @@ function ConnectorCard({
             )}
             {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
               <p className="text-xs text-muted-foreground break-all">Sender: {str(row.config.from) || 'not set'}</p>
+            )}
+
+            {kind === 'sms_gateway' && (
+              <p className="text-xs text-muted-foreground break-all">
+                {str(row.config.provider) || 'no provider selected'}
+                {str(row.config.baseUrl) ? ` · ${str(row.config.baseUrl)}` : ''}
+                {str(row.config.from) ? ` · from ${str(row.config.from)}` : ''}
+                {kind === 'sms_gateway' && str(row.config.url) ? ` · ${str(row.config.url)}` : ''}
+              </p>
             )}
 
             {kind === 'twilio_voice' && (
@@ -674,6 +714,78 @@ function ConfigureDialog({
                 <code className="text-xs bg-muted rounded px-2 py-1.5 break-all flex-1 min-w-0">{origin ? `${origin}/api/stripe/webhook` : '/api/stripe/webhook'}</code>
                 <CopyButton value={origin ? `${origin}/api/stripe/webhook` : ''} label="Copy Stripe webhook URL" />
               </div>
+            </div>
+          )}
+
+          {kind === 'sms_gateway' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-provider`}>Gateway provider</Label>
+                <select
+                  id={`${idBase}-provider`}
+                  value={cfg.provider}
+                  onChange={(e) => setCfg((s) => ({ ...s, provider: e.target.value }))}
+                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  disabled={busy || !canManage}
+                >
+                  <option value="textbee">TextBee (Android, Apache-2.0)</option>
+                  <option value="httpsms">httpSMS (Android, MIT)</option>
+                  <option value="android_sms_gateway">Android SMS Gateway Server (Apache-2.0, self-hosted or cloud)</option>
+                  <option value="generic_http">Custom HTTP gateway / bridge (incl. iOS, Gammu, Kannel, SMPP shims)</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  TextBee/httpSMS use your Android phone; Android SMS Gateway also lets you self-host the server. Custom HTTP gateway covers anything with a documented REST endpoint.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-base`}>Base URL (optional override)</Label>
+                <Input id={`${idBase}-base`} value={cfg.baseUrl} onChange={(e) => setCfg((s) => ({ ...s, baseUrl: e.target.value }))} placeholder="https://api.textbee.dev/api/v1" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-from`}>Sender identity (optional, required for httpSMS)</Label>
+                <Input id={`${idBase}-from`} value={cfg.from} onChange={(e) => setCfg((s) => ({ ...s, from: e.target.value }))} placeholder="+15551234567 (E.164)" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-device`}>Device ID (optional, TextBee multi-device)</Label>
+                <Input id={`${idBase}-device`} value={cfg.deviceId} onChange={(e) => setCfg((s) => ({ ...s, deviceId: e.target.value }))} placeholder="leave empty for default device" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              {cfg.provider === 'generic_http' && (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-url`}>Destination URL</Label>
+                    <Input id={`${idBase}-url`} type="url" value={cfg.url} onChange={(e) => setCfg((s) => ({ ...s, url: e.target.value }))} placeholder="https://your-bridge.example.com/send" autoComplete="off" className="min-h-[44px]" />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-method`}>HTTP method</Label>
+                      <select id={`${idBase}-method`} value={cfg.method} onChange={(e) => setCfg((s) => ({ ...s, method: e.target.value }))} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <option value="POST">POST</option>
+                        <option value="PUT">PUT</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-authheader`}>Custom auth header (optional)</Label>
+                      <Input id={`${idBase}-authheader`} value={cfg.authHeaderName} onChange={(e) => setCfg((s) => ({ ...s, authHeaderName: e.target.value }))} placeholder="X-Api-Key" className="min-h-[44px]" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-template`}>Body template (optional)</Label>
+                    <textarea
+                      id={`${idBase}-template`}
+                      value={cfg.bodyTemplate}
+                      onChange={(e) => setCfg((s) => ({ ...s, bodyTemplate: e.target.value }))}
+                      placeholder='{"to":"{{to}}","message":"{{message}}"}'
+                      className="min-h-[88px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">Use placeholders {"{{to}}"}, {"{{message}}"}, {"{{from}}"}; credentials go in the auth header value or body via your gateway's contract.</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-testrecipient`}>Test recipient (optional)</Label>
+                    <Input id={`${idBase}-testrecipient`} value={cfg.testRecipient} onChange={(e) => setCfg((s) => ({ ...s, testRecipient: e.target.value }))} placeholder="+15551234567" className="min-h-[44px]" />
+                    <p className="text-xs text-muted-foreground">Setting it enables a live connection test (this sends a real SMS).</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

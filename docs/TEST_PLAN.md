@@ -60,7 +60,7 @@
 Because test-framework code is forbidden in the sandbox, UI flows were verified with an automated
 browser session (Agent Browser) against the dev server on port 3000. The repeatable protocol:
 
-1. **Start clean**: `bun run dev`; confirm `dev.log` shows the server up with no compile errors.
+1. **Start clean**: `npm run dev`; confirm `dev.log` shows the server up with no compile errors.
 2. **Console gate**: open `/`; fail if any console error or uncaught exception appears at rest.
 3. **Wizard walk**: complete all 8 wizard steps through the real UI; hard-reload after each step to
    verify autosave/resume; screenshot each completed step.

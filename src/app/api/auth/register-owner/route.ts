@@ -43,7 +43,7 @@ const END_MIN = 17 * 60 // 17:00
  * POST /api/auth/register-owner — one-time bootstrap.
  * Only works while zero users exist. Creates the organization (unique slug),
  * the owner account, default Mon–Fri 9–17 working hours, sane booking policy,
- * and default provider rows (managed LLM + local lexical embeddings).
+ * and default provider rows (no LLM — the operator configures one; local neural embeddings).
  * Returns the session cookie so the new owner lands straight in the app.
  */
 export const POST = withPublic(async (req) => {
@@ -94,7 +94,7 @@ export const POST = withPublic(async (req) => {
 
   await db.providerConfig.createMany({
     data: [
-      { orgId: org.id, capability: 'llm', provider: 'managed', enabled: true },
+      { orgId: org.id, capability: 'llm', provider: 'none', enabled: false },
       { orgId: org.id, capability: 'embedding', provider: 'local_neural', enabled: true },
     ],
   })

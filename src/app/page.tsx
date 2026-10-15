@@ -8,15 +8,18 @@ import { Sidebar, MobileTopBar } from '@/components/sections/sidebar'
 import { DashboardSection } from '@/components/sections/dashboard-section'
 import { InboxSection } from '@/components/sections/inbox-section'
 import { VoiceSection } from '@/components/sections/voice-section'
+import RealtimeSection from '@/components/sections/realtime-section'
 import { BookingsSection } from '@/components/sections/bookings-section'
 import { CustomersSection } from '@/components/sections/customers-section'
 import { InvoicesSection } from '@/components/sections/invoices-section'
 import { LedgerSection } from '@/components/sections/ledger-section'
 import { KnowledgeSection } from '@/components/sections/knowledge-section'
+import { DataSourcesSection } from '@/components/sections/data-sources-section'
 import { AutomationsSection } from '@/components/sections/automations-section'
 import { AiSection } from '@/components/sections/ai-section'
 import { BusinessSection } from '@/components/sections/business-section'
 import { IntegrationsSection } from '@/components/sections/integrations-section'
+import UsageSection from '@/components/sections/usage-section'
 import { DiagnosticsSection } from '@/components/sections/diagnostics-section'
 import { SetupSection } from '@/components/sections/setup-section'
 import { Loader2 } from 'lucide-react'
@@ -27,15 +30,18 @@ function SectionRouter() {
     case 'dashboard': return <DashboardSection />
     case 'inbox': return <InboxSection />
     case 'voice': return <VoiceSection />
+    case 'realtime': return <RealtimeSection />
     case 'bookings': return <BookingsSection />
     case 'customers': return <CustomersSection />
     case 'invoices': return <InvoicesSection />
     case 'ledger': return <LedgerSection />
     case 'knowledge': return <KnowledgeSection />
+    case 'datasources': return <DataSourcesSection />
     case 'automations': return <AutomationsSection />
     case 'ai': return <AiSection />
     case 'business': return <BusinessSection />
     case 'integrations': return <IntegrationsSection />
+    case 'usage': return <UsageSection />
     case 'diagnostics': return <DiagnosticsSection />
     case 'setup': return <SetupSection />
     default: return <DashboardSection />

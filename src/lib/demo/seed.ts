@@ -224,9 +224,10 @@ export async function seedDemo(): Promise<{ orgId: string; email: string; passwo
     },
   })
 
-  // default provider config: managed gateway enabled (hybrid mode)
+  // no demo LLM credentials are shipped: the model row is left disabled so the
+  // operator configures their own. Local neural embeddings work out of the box.
   await db.providerConfig.create({
-    data: { orgId: org.id, capability: 'llm', provider: 'managed', label: 'Managed AI gateway', enabled: true },
+    data: { orgId: org.id, capability: 'llm', provider: 'none', label: 'Configure in AI Providers', enabled: false },
   })
   await db.providerConfig.create({
     data: { orgId: org.id, capability: 'embedding', provider: 'local_neural', label: 'Built-in neural embeddings (local)', enabled: true },

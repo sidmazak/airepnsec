@@ -8,12 +8,12 @@ import { parseJson } from '@/lib/org'
  * NEVER leaves the server — error messages are sanitized against secret values.
  */
 
-export type IntegrationKind = 'smtp' | 'twilio_sms' | 'twilio_whatsapp' | 'twilio_voice' | 'caldav' | 'stripe' | 'webhook_out'
+export type IntegrationKind = 'smtp' | 'twilio_sms' | 'twilio_whatsapp' | 'twilio_voice' | 'sms_gateway' | 'caldav' | 'stripe' | 'webhook_out'
 
-export const INTEGRATION_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'caldav', 'stripe', 'webhook_out']
+export const INTEGRATION_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'stripe', 'webhook_out']
 
 /** Kinds that allow only one row per org (enforced at create time). */
-export const SINGLETON_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'caldav', 'stripe']
+export const SINGLETON_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'stripe']
 
 export function isIntegrationKind(kind: string): kind is IntegrationKind {
   return (INTEGRATION_KINDS as string[]).includes(kind)
@@ -83,7 +83,8 @@ async function testSmtp(integration: { configJson: string; secretsEnc: string })
     await transport.verify()
     return { ok: true, detail: `SMTP connection verified (${host}:${port}, ${secure ? 'implicit TLS' : 'no implicit TLS'}${user ? ', authenticated' : ''})` }
   } catch (err) {
-    return { ok: false, detail: `SMTP test failed: ${sanitizeMessage(err instanceof Error ? err.message : String(err), integration)}` }
+    const e = err as { message?: string; code?: string }
+    return { ok: false, detail: `SMTP test failed: ${sanitizeMessage(e.message || e.code || 'connection failed', integration)}` }
   }
 }
 
@@ -194,6 +195,10 @@ export async function testIntegration(orgId: string, integration: { kind: string
     case 'twilio_whatsapp':
     case 'twilio_voice':
       return testTwilio(integration.kind, integration)
+    case 'sms_gateway': {
+      const { testSmsGateway } = await import('@/lib/integrations/sms')
+      return testSmsGateway(str(integrationConfig(integration), 'provider'), integrationConfig(integration), decryptSecrets(integration))
+    }
     case 'caldav': {
       const { testCaldav } = await import('@/lib/integrations/caldav')
       return testCaldav(integration)
@@ -313,4 +318,41 @@ export async function getEnabledIntegration(orgId: string, kind: IntegrationKind
 export async function getUsableIntegration(orgId: string, kind: IntegrationKind) {
   const rows = await db.integration.findMany({ where: { orgId, kind } })
   return rows.find((r) => r.enabled && r.secretsEnc) ?? rows.find((r) => r.secretsEnc) ?? null
+}
+
+/* ---------------- SMS sender resolution (Twilio OR BYO gateway) ---------------- */
+
+export type SmsSenderInfo = { channel: 'twilio' | 'gateway'; kind: IntegrationKind; integration: { kind: string; configJson: string; secretsEnc: string } }
+
+/**
+ * Resolve the org's outbound SMS sender: an enabled Twilio SMS integration
+ * takes precedence; otherwise the enabled SMS gateway. Returns null when no SMS
+ * channel can deliver. Unlike getEnabledIntegration this does NOT require stored
+ * secrets — self-hosted gateways (android-sms-gateway local mode, an unauthenticated
+ * LAN bridge) legitimately run credential-less, and the real test/send reports the truth.
+ */
+export async function getEnabledSmsSender(orgId: string): Promise<SmsSenderInfo | null> {
+  const twilio = await getEnabledIntegration(orgId, 'twilio_sms')
+  if (twilio) return { channel: 'twilio', kind: 'twilio_sms', integration: twilio }
+  const gateways = await db.integration.findMany({ where: { orgId, kind: 'sms_gateway', enabled: true }, orderBy: { createdAt: 'asc' } })
+  if (gateways[0]) return { channel: 'gateway', kind: 'sms_gateway', integration: gateways[0] }
+  return null
+}
+
+/**
+ * Send an SMS through whichever SMS channel the org has enabled. Throws a
+ * sanitized Error when none is configured or the send fails. A success means
+ * "accepted by the gateway/provider for delivery", never "delivered to a handset".
+ */
+export async function sendOrgSms(orgId: string, input: { to: string; body: string }): Promise<{ provider: string; messageId: string }> {
+  const sender = await getEnabledSmsSender(orgId)
+  if (!sender) throw new Error('No enabled SMS integration (Twilio or an SMS gateway) is configured')
+  if (sender.channel === 'twilio') {
+    const { sid } = await sendTwilio(sender.integration, input)
+    return { provider: 'twilio', messageId: sid }
+  }
+  const { sendSmsGateway } = await import('@/lib/integrations/sms')
+  const config = integrationConfig(sender.integration)
+  const result = await sendSmsGateway(str(config, 'provider'), config, decryptSecrets(sender.integration), input)
+  return { provider: result.providerId, messageId: result.messageId }
 }

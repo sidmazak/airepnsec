@@ -95,11 +95,19 @@ export async function recordPaymentClaim(
   actor: { type: 'user' | 'ai' | 'system'; id: string }
 ) {
   if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
-    throw new ApiError(422, 'Claim amount must be a positive integer (cents)', 'amount')
+    throw new ApiError(422, 'Claim amount must be a positive whole number of cents', 'amount')
   }
   const invoice = await db.invoice.findFirst({ where: { id: input.invoiceId, orgId } })
   if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
   if (invoice.status === 'void') throw new ApiError(409, 'Invoice is void', 'invoice_void')
+
+  const outstanding = invoiceOutstanding(invoice.totalCents, invoice.paidCents)
+  if (outstanding <= 0) throw new ApiError(409, 'Invoice is already fully paid', 'already_paid')
+  if (input.amountCents > outstanding) {
+    throw new ApiError(409, `Claim of ${input.amountCents} cents exceeds the outstanding balance of ${outstanding} cents`, 'overpay', {
+      outstandingCents: outstanding,
+    })
+  }
 
   const idempotencyKey = `claim:${input.invoiceId}:${input.amountCents}:${input.reference || Date.now()}`
   const existing = await db.payment.findUnique({ where: { idempotencyKey } })
@@ -133,6 +141,17 @@ export async function verifyPayment(orgId: string, paymentId: string, userId: st
 
   const invoice = await db.invoice.findFirst({ where: { id: payment.invoiceId, orgId } })
   if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
+  if (invoice.status === 'void') throw new ApiError(409, 'Cannot verify payment on a voided invoice', 'invoice_void')
+
+  const outstanding = invoiceOutstanding(invoice.totalCents, invoice.paidCents)
+  if (payment.amountCents > outstanding) {
+    throw new ApiError(
+      409,
+      `Payment of ${payment.amountCents} cents exceeds the outstanding balance of ${outstanding} cents — reject it or record the correct amount`,
+      'overpay',
+      { outstandingCents: outstanding }
+    )
+  }
 
   await db.payment.update({ where: { id: paymentId }, data: { status: 'verified', verifiedAt: new Date(), verifiedBy: userId } })
   await postEntry(orgId, {

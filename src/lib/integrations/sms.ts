@@ -1,0 +1,288 @@
+import type { TestResult } from '@/lib/integrations/connectors'
+
+/**
+ * Universal SMS gateway adapters (BYO hardware / bridges).
+ *
+ * Twilio stays a first-class integration kind (`twilio_sms`). Everything else —
+ * Android GSM modems acting as HTTP gateways (TextBee, httpSMS,
+ * android-sms-gateway) and any self-hosted HTTP bridge (iOS/iMessage bridges,
+ * Gammu/Kannel/Jasmin shims) — flows through the single `sms_gateway`
+ * integration kind, discriminated by `config.provider`.
+ *
+ * This module is deliberately dependency-free (no Prisma, no connectors import)
+ * so it is trivially unit-testable and cannot form an import cycle: callers pass
+ * already-decrypted `config`/`secrets` plain objects.
+ *
+ * Honesty: a gateway HTTP 200 only means "the gateway accepted the request for
+ * delivery" — never "the handset delivered it". Delivery receipts require the
+ * gateway's inbound webhooks, which are separate.
+ */
+
+export type SmsProviderId = 'textbee' | 'httpsms' | 'android_sms_gateway' | 'generic_http'
+
+export const SMS_PROVIDER_IDS: SmsProviderId[] = ['textbee', 'httpsms', 'android_sms_gateway', 'generic_http']
+
+export function isSmsProviderId(value: unknown): value is SmsProviderId {
+  return typeof value === 'string' && (SMS_PROVIDER_IDS as string[]).includes(value)
+}
+
+export type SmsGatewayConfig = Record<string, unknown>
+export type SmsGatewaySecrets = Record<string, string>
+export type SmsInput = { to: string; body: string }
+
+export type SmsGatewayRequest = {
+  url: string
+  method: 'GET' | 'POST' | 'PUT'
+  headers: Record<string, string>
+  body?: string
+}
+
+/** A gateway-agnostic delivery state. Never inferred from HTTP 200 alone. */
+export type SmsDeliveryState = 'created' | 'queued' | 'sending' | 'sent' | 'delivered' | 'failed' | 'expired' | 'unknown'
+
+const DEFAULT_BASE: Record<SmsProviderId, string> = {
+  textbee: 'https://api.textbee.dev/api/v1',
+  httpsms: 'https://api.httpsms.com',
+  android_sms_gateway: 'https://api.sms-gate.app',
+  generic_http: '',
+}
+
+function str(obj: Record<string, unknown>, key: string): string {
+  const v = obj[key]
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+function baseUrl(provider: SmsProviderId, config: SmsGatewayConfig): string {
+  const override = str(config, 'baseUrl')
+  return (override || DEFAULT_BASE[provider]).replace(/\/+$/, '')
+}
+
+/**
+ * Normalize a recipient to E.164-ish form: strip formatting (spaces, dashes,
+ * parens, dots) and convert a leading `00` to `+`. A leading `+` is preserved.
+ * We do NOT invent a country code — the gateway rejects what it cannot route.
+ */
+export function normalizePhone(raw: string): string {
+  const trimmed = (raw ?? '').trim()
+  const stripped = trimmed.replace(/[\s().-]/g, '')
+  if (stripped.startsWith('00')) return `+${stripped.slice(2)}`
+  return stripped
+}
+
+/** JSON-safe interpolation value (no surrounding quotes). */
+function jsonValue(value: string): string {
+  return JSON.stringify(value).slice(1, -1)
+}
+
+function authHeaders(provider: SmsProviderId, config: SmsGatewayConfig, secrets: SmsGatewaySecrets): Record<string, string> {
+  if (provider === 'textbee' || provider === 'httpsms') {
+    const apiKey = str(secrets, 'apiKey')
+    return apiKey ? { 'x-api-key': apiKey } : {}
+  }
+  if (provider === 'android_sms_gateway') {
+    const token = str(secrets, 'token')
+    if (token) return { Authorization: `Bearer ${token}` }
+    const username = str(secrets, 'username')
+    if (username) {
+      const password = str(secrets, 'password')
+      return { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` }
+    }
+    return {} // local-server mode requires no auth
+  }
+  // generic_http
+  const headerName = str(config, 'authHeaderName')
+  const authValue = str(secrets, 'authValue')
+  if (headerName && authValue) return { [headerName]: authValue }
+  return {}
+}
+
+/** Build the outgoing HTTP request for a real send. Pure + unit-testable. */
+export function buildSendRequest(
+  provider: string,
+  config: SmsGatewayConfig,
+  secrets: SmsGatewaySecrets,
+  input: SmsInput
+): SmsGatewayRequest {
+  const to = normalizePhone(input.to)
+  const id = provider as SmsProviderId
+  const json = { 'content-type': 'application/json' }
+
+  switch (id) {
+    case 'textbee': {
+      const deviceId = str(config, 'deviceId')
+      return {
+        url: `${baseUrl('textbee', config)}/gateway/send-sms`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('textbee', config, secrets) },
+        body: JSON.stringify({ recipients: [to], message: input.body, ...(deviceId ? { deviceId } : {}) }),
+      }
+    }
+    case 'httpsms': {
+      const from = str(config, 'from')
+      if (!from) throw new Error('httpSMS gateway config needs a "from" phone number (E.164)')
+      return {
+        url: `${baseUrl('httpsms', config)}/v1/messages/send`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('httpsms', config, secrets) },
+        body: JSON.stringify({ content: input.body, from: normalizePhone(from), to }),
+      }
+    }
+    case 'android_sms_gateway': {
+      return {
+        url: `${baseUrl('android_sms_gateway', config)}/3rdparty/v1/messages`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('android_sms_gateway', config, secrets) },
+        body: JSON.stringify({ phoneNumbers: [to], textMessage: { text: input.body } }),
+      }
+    }
+    case 'generic_http': {
+      const url = str(config, 'url')
+      if (!url) throw new Error('generic_http gateway config needs a destination "url"')
+      const method = str(config, 'method') === 'PUT' ? 'PUT' : 'POST'
+      const template = str(config, 'bodyTemplate')
+      const body = template
+        ? template
+            .replace(/\{\{\s*to\s*\}\}/g, jsonValue(to))
+            .replace(/\{\{\s*message\s*\}\}/g, jsonValue(input.body))
+            .replace(/\{\{\s*from\s*\}\}/g, jsonValue(str(config, 'from')))
+        : JSON.stringify({ to, message: input.body })
+      return { url, method, headers: { ...json, ...authHeaders('generic_http', config, secrets) }, body }
+    }
+    default:
+      throw new Error(`Unknown SMS gateway provider "${provider}"`)
+  }
+}
+
+/** Build a read-only connectivity probe for a gateway. Pure + unit-testable. */
+export function buildTestRequest(provider: string, config: SmsGatewayConfig, secrets: SmsGatewaySecrets): SmsGatewayRequest | null {
+  const id = provider as SmsProviderId
+  switch (id) {
+    case 'textbee':
+      return { url: `${baseUrl('textbee', config)}/gateway/devices`, method: 'GET', headers: authHeaders('textbee', config, secrets) }
+    case 'httpsms':
+      return { url: `${baseUrl('httpsms', config)}/v1/messages?limit=1`, method: 'GET', headers: authHeaders('httpsms', config, secrets) }
+    case 'android_sms_gateway':
+      return { url: `${baseUrl('android_sms_gateway', config)}/3rdparty/v1/messages?limit=1`, method: 'GET', headers: authHeaders('android_sms_gateway', config, secrets) }
+    case 'generic_http':
+      // No standardized read-only endpoint — the caller decides how to probe.
+      return null
+    default:
+      return null
+  }
+}
+
+/** Best-effort extraction of the gateway's message/batch id from a response. */
+export function extractMessageId(provider: string, data: unknown): string {
+  const d = data as Record<string, unknown> | null
+  if (!d || typeof d !== 'object') return ''
+  const inner = (d.data && typeof d.data === 'object' ? (d.data as Record<string, unknown>) : d)
+  for (const key of ['smsBatchId', 'id', 'messageId', 'sid']) {
+    const v = inner[key] ?? d[key]
+    if (typeof v === 'string' && v) return v
+  }
+  return ''
+}
+
+/**
+ * Map a provider-supplied raw status string to a gateway-agnostic delivery
+ * state. Used when a gateway's inbound webhook reports delivery — an HTTP 2xx
+ * on send NEVER maps to `delivered`.
+ */
+export function normalizeDeliveryState(provider: string, raw: unknown): SmsDeliveryState {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (!value) return 'unknown'
+  if (['delivered', 'delivery_success', 'received'].includes(value)) return 'delivered'
+  if (['sent', 'message_sent', 'success', 'succeeded', 'ok'].includes(value)) return 'sent'
+  if (['queued', 'pending', 'accepted', 'created'].includes(value)) return 'queued'
+  if (['sending', 'in_progress', 'processing'].includes(value)) return 'sending'
+  if (['failed', 'message_failed', 'error', 'undelivered', 'rejected', 'cancelled', 'canceled'].includes(value)) return 'failed'
+  if (['expired', 'timeout', 'timed_out'].includes(value)) return 'expired'
+  void provider
+  return 'unknown'
+}
+
+/** Redact any stored secret values that leaked into an error/log line. */
+function redact(text: string, secrets: SmsGatewaySecrets): string {
+  let out = text || 'unknown error'
+  for (const value of Object.values(secrets)) {
+    if (value && value.length >= 6) out = out.split(value).join('[redacted]')
+  }
+  out = out.replace(/\s+/g, ' ').trim()
+  return out.length > 300 ? `${out.slice(0, 297)}...` : out
+}
+
+export type SmsSendOutcome = { providerId: SmsProviderId; messageId: string; detail: string }
+
+/**
+ * Send one SMS through the configured gateway. Throws a sanitized Error on
+ * failure. A 2xx response means "accepted for delivery", not "delivered" —
+ * `detail` and the returned id make that explicit.
+ */
+export async function sendSmsGateway(
+  provider: string,
+  config: SmsGatewayConfig,
+  secrets: SmsGatewaySecrets,
+  input: SmsInput
+): Promise<SmsSendOutcome> {
+  if (!isSmsProviderId(provider)) throw new Error(`Unknown SMS gateway provider "${provider}"`)
+  if (!input.to) throw new Error('Message has no recipient address')
+
+  const req = buildSendRequest(provider, config, secrets, input)
+  try {
+    const res = await fetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+      signal: AbortSignal.timeout(15_000),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const message = (data as { message?: string; error?: string }).message ?? (data as { error?: string }).error
+      throw new Error(redact(`Gateway ${provider} rejected the send (HTTP ${res.status}): ${message ?? res.statusText}`, secrets))
+    }
+    const messageId = extractMessageId(provider, data)
+    return { providerId: provider, messageId, detail: `Accepted by ${provider}${messageId ? ` (id ${messageId})` : ''} — awaiting handset delivery` }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Gateway ')) throw err
+    throw new Error(redact(err instanceof Error ? err.message : String(err), secrets))
+  }
+}
+
+/** Real connectivity test. Read-only probe where possible; never claims delivery. */
+export async function testSmsGateway(provider: string, config: SmsGatewayConfig, secrets: SmsGatewaySecrets): Promise<TestResult> {
+  if (!isSmsProviderId(provider)) return { ok: false, detail: `Unknown SMS gateway provider "${provider}"` }
+
+  if (provider === 'generic_http') {
+    const testRecipient = str(config, 'testRecipient')
+    if (!testRecipient) {
+      return { ok: false, detail: 'generic_http has no standard read-only probe — set a testRecipient to run a live test (this sends a REAL SMS), then test again.' }
+    }
+    try {
+      await sendSmsGateway(provider, config, secrets, { to: testRecipient, body: 'AI Secretary test message — gateway connectivity check.' })
+      return { ok: true, detail: `generic_http accepted a real test message for ${normalizePhone(testRecipient)} (delivery itself depends on your bridge).` }
+    } catch (err) {
+      return { ok: false, detail: `generic_http test failed: ${redact(err instanceof Error ? err.message : String(err), secrets)}` }
+    }
+  }
+
+  const req = buildTestRequest(provider, config, secrets)
+  if (!req) return { ok: false, detail: `No test probe available for ${provider}` }
+  try {
+    const res = await fetch(req.url, { method: req.method, headers: req.headers, signal: AbortSignal.timeout(10_000) })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string }
+      return { ok: false, detail: `${provider} rejected the credentials (HTTP ${res.status}): ${redact(body.message ?? body.error ?? res.statusText, secrets)}` }
+    }
+    const data = await res.json().catch(() => ({}))
+    let extra = ''
+    if (provider === 'textbee') {
+      const devices = (data as { data?: unknown[] }).data
+      extra = Array.isArray(devices) ? ` — ${devices.length} device(s) registered` : ''
+    }
+    return { ok: true, detail: `${provider} connectivity verified${extra}` }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    const timeout = reason.toLowerCase().includes('abort') || reason.toLowerCase().includes('timeout')
+    return { ok: false, detail: timeout ? `${provider} did not respond within 10s (check baseUrl/network)` : `${provider} test failed: ${redact(reason, secrets)}` }
+  }
+}

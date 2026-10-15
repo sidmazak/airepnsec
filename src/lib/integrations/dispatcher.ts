@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { decryptSecrets, getEnabledIntegration, integrationConfig, sanitizeMessage, sendEmail, sendTwilio, signWebhookPayload, str } from '@/lib/integrations/connectors'
+import { sendSmsGateway } from '@/lib/integrations/sms'
 import type { OutboxMessage } from '@prisma/client'
 
 /**
@@ -66,6 +67,7 @@ export async function nudgeChannel(orgId: string, kind: string): Promise<void> {
   const channelByKind: Record<string, string[]> = {
     smtp: ['email'],
     twilio_sms: ['sms'],
+    sms_gateway: ['sms'],
     twilio_whatsapp: ['whatsapp'],
     webhook_out: ['webhook'],
   }
@@ -87,7 +89,7 @@ async function deliver(message: OutboxMessage): Promise<Outcome> {
     case 'email':
       return deliverEmail(message)
     case 'sms':
-      return deliverTwilio(message, 'twilio_sms')
+      return deliverSms(message)
     case 'whatsapp':
       return deliverTwilio(message, 'twilio_whatsapp')
     case 'webhook':
@@ -115,6 +117,37 @@ async function deliverEmail(message: OutboxMessage): Promise<Outcome> {
     return 'sent'
   } catch (err) {
     return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), smtp))
+  }
+}
+
+/**
+ * SMS delivery: an enabled Twilio SMS integration takes precedence; otherwise
+ * the org's enabled BYO SMS gateway (TextBee / httpSMS / android-sms-gateway /
+ * any HTTP bridge). No SMS channel configured → honest "waiting" (never faked).
+ */
+async function deliverSms(message: OutboxMessage): Promise<Outcome> {
+  const twilio = await getEnabledIntegration(message.orgId, 'twilio_sms')
+  if (twilio) {
+    try {
+      await sendTwilio(twilio, { to: message.recipient, body: message.body })
+      await markSent(message)
+      return 'sent'
+    } catch (err) {
+      return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), twilio))
+    }
+  }
+
+  const gateways = await db.integration.findMany({ where: { orgId: message.orgId, kind: 'sms_gateway', enabled: true }, orderBy: { createdAt: 'asc' } })
+  const gateway = gateways[0]
+  if (!gateway) return await waitForIntegration(message, 'sms')
+
+  const config = integrationConfig(gateway)
+  try {
+    await sendSmsGateway(str(config, 'provider'), config, decryptSecrets(gateway), { to: message.recipient, body: message.body })
+    await markSent(message)
+    return 'sent'
+  } catch (err) {
+    return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), gateway))
   }
 }
 

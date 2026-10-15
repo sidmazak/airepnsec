@@ -18,6 +18,11 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     
     // React rules
     "react-hooks/exhaustive-deps": "off",
+    // Client data-loading effects (`useEffect(...)` -> fetch -> setState) are the
+    // app's standard loading pattern in every section. react-hooks v7 flags this
+    // pattern as a cascade-render perf nuance, not a bug; it is disabled for the
+    // same reason "purity" above is disabled.
+    "react-hooks/set-state-in-effect": "off",
     "react-hooks/purity": "off",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",
@@ -44,7 +49,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills"]
+  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts"]
 }];
 
 export default eslintConfig;

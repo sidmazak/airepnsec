@@ -1,6 +1,6 @@
 # infra/Dockerfile — AI Secretary (self-host packaging)
 #
-# Stage 1 builds the Next.js standalone bundle with Bun (the repo's runtime).
+# Stage 1 builds the Next.js standalone bundle with Node.js + npm.
 # Stage 2 is a slim runtime that carries the standalone output, the Prisma CLI
 # (for `db push` at container start) and the SQLite data dir.
 #
@@ -13,26 +13,26 @@
 # (see infra/README.md).
 
 # ---------------------------------------------------------------- stage 1: build
-FROM oven/bun:1 AS build
+FROM node:24-bookworm-slim AS build
 WORKDIR /app
 
 # Install dependencies first (cached layer), then the rest of the source.
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci
 
 COPY prisma ./prisma
 COPY src ./src
 COPY public ./public
 COPY next.config.ts tsconfig.json tailwind.config.ts postcss.config.mjs eslint.config.mjs ./
 
-RUN bunx prisma generate
+RUN npx prisma generate
 
 # `build` script = `next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/`
 # (output: "standalone" in next.config.ts — static assets and public/ end up inside .next/standalone)
-RUN bun run build
+RUN npm run build
 
 # --------------------------------------------------------------- stage 2: runtime
-FROM oven/bun:1-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -62,4 +62,4 @@ EXPOSE 3000
 # Apply the portable schema to the configured DATABASE_URL, then start the server.
 # --accept-data-loss matches the repo's `db:push` convention; with an empty volume
 # on first boot this is a no-op. Prisma's interactive prompt cannot run in CMD.
-CMD ["sh", "-c", "bunx prisma db push --accept-data-loss --skip-generate && exec bun .next/standalone/server.js"]
+CMD ["sh", "-c", "node ./node_modules/prisma/build/index.js db push --accept-data-loss --skip-generate && exec node .next/standalone/server.js"]

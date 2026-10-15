@@ -1018,7 +1018,7 @@ type LlmTest = { ok: boolean; message: string; latencyMs: number }
 
 function AiStep({ canManage, markStepDone }: StepProps) {
   const { toast } = useToast()
-  const [provider, setProvider] = useState<'managed' | 'ollama' | 'openai_compatible'>('managed')
+  const [provider, setProvider] = useState<'ollama' | 'openai_compatible'>('ollama')
   const [baseUrl, setBaseUrl] = useState('http://localhost:11434')
   const [model, setModel] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -1034,7 +1034,7 @@ function AiStep({ canManage, markStepDone }: StepProps) {
         const d = await api.get<{ capabilities: Record<string, { provider: string; baseUrl: string; model: string }>; dataMode: string }>('/api/providers')
         const llm = d.capabilities.llm
         if (llm) {
-          if (llm.provider === 'managed' || llm.provider === 'ollama' || llm.provider === 'openai_compatible') setProvider(llm.provider)
+          if (llm.provider === 'ollama' || llm.provider === 'openai_compatible') setProvider(llm.provider)
           setBaseUrl(llm.baseUrl || 'http://localhost:11434')
           setModel(llm.model)
         }
@@ -1094,11 +1094,10 @@ function AiStep({ canManage, markStepDone }: StepProps) {
           <CardDescription>Which model powers the AI receptionist. You can change this any time in AI Providers.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="LLM provider">
+          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="LLM provider">
             {([
-              { id: 'managed', title: 'Managed gateway', desc: 'Managed AI gateway (external) — zero config, works out of the box.' },
-              { id: 'ollama', title: 'Ollama (local)', desc: 'Runs on your machine. No data leaves this server.' },
-              { id: 'openai_compatible', title: 'OpenAI-compatible', desc: 'Bring your own endpoint and key (OpenAI, Groq, OpenRouter…).' },
+              { id: 'ollama', title: 'Ollama (local)', desc: 'Runs on your own machine — no data leaves this server. Recommended for privacy.' },
+              { id: 'openai_compatible', title: 'OpenAI-compatible', desc: 'Bring your own endpoint and key (OpenAI, Groq, OpenRouter, vLLM, LM Studio…).' },
             ] as const).map((opt) => (
               <button
                 key={opt.id}
@@ -1118,7 +1117,7 @@ function AiStep({ canManage, markStepDone }: StepProps) {
             ))}
           </div>
 
-          {(provider === 'ollama' || provider === 'openai_compatible') && (
+          {true && (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="llmUrl">Base URL</Label>
@@ -1136,10 +1135,6 @@ function AiStep({ canManage, markStepDone }: StepProps) {
               <Input id="llmKey" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste key (stored server-side, never echoed)" autoComplete="off" className="min-h-[44px]" />
             </div>
           )}
-          {provider === 'managed' && (
-            <p className="text-xs text-muted-foreground">The managed gateway is configured server-side — nothing to fill in here.</p>
-          )}
-
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => void save()} disabled={saving || !canManage} className="min-h-[44px]" aria-label="Save LLM provider">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />} Save

@@ -1,5 +1,6 @@
 import { withAuth, json } from '@/lib/api'
 import { db } from '@/lib/db'
+import { testProvider } from '@/lib/ai/providers'
 import { parseJson } from '@/lib/org'
 
 export type ReadinessItem = { key: string; label: string; ok: boolean; detail: string }
@@ -10,7 +11,7 @@ export type ReadinessItem = { key: string; label: string; ok: boolean; detail: s
  */
 export const GET = withAuth(async (req, ctx) => {
   const orgId = ctx.org.id
-  const [serviceCount, staffCount, workingHourCount, approvedKnowledgeCount, customerCount, automationCount, llmRow, secretRow] =
+  const [serviceCount, staffCount, workingHourCount, approvedKnowledgeCount, customerCount, automationCount, llmRowFromQuery, secretRow] =
     await Promise.all([
       db.service.count({ where: { orgId } }),
       db.staff.count({ where: { orgId } }),
@@ -23,6 +24,22 @@ export const GET = withAuth(async (req, ctx) => {
     ])
 
   const setupState = parseJson<Record<string, { done?: boolean; savedAt?: string }>>(ctx.org.setupState, {})
+
+  // REAL live check of the conversation model — a stale `lastTestOk` must never be
+  // reported as "ready" (the gateway can lose its config, an endpoint can go down).
+  let llmLive: { ok: boolean; message: string } = { ok: false, message: 'no conversation model configured' }
+  const llmRow = llmRowFromQuery
+  if (llmRow && llmRow.enabled && llmRow.provider !== 'none') {
+    try {
+      const test = await testProvider(
+        { provider: llmRow.provider, baseUrl: llmRow.baseUrl, model: llmRow.model, apiKeyEnc: llmRow.apiKeyEnc },
+        'llm'
+      )
+      llmLive = { ok: Boolean(test.ok), message: test.message || 'live check failed' }
+    } catch (err) {
+      llmLive = { ok: false, message: err instanceof Error ? err.message.slice(0, 200) : 'live check failed' }
+    }
+  }
 
   const items: ReadinessItem[] = [
     {
@@ -52,12 +69,12 @@ export const GET = withAuth(async (req, ctx) => {
     {
       key: 'llmReady',
       label: 'AI model configured & tested',
-      ok: Boolean(llmRow?.enabled && llmRow?.lastTestOk),
-      detail: llmRow
-        ? llmRow.lastTestOk
-          ? `last test passed (provider: ${llmRow.provider})`
-          : llmRow.lastTestError || 'configured but not tested yet'
-        : 'no conversation model configured',
+      ok: llmRow ? llmLive.ok : false,
+      detail: !llmRow
+        ? 'no conversation model configured'
+        : llmLive.ok
+          ? `live check passed (provider: ${llmRow.provider})`
+          : `${llmRow.lastTestOk ? 'stale test passed, but live check now fails: ' : ''}${llmLive.message || 'live check failed — see Diagnostics'}`,
     },
     {
       key: 'customersImported',

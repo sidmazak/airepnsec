@@ -32,7 +32,8 @@ cents, no DB-specific types.
 | `Payment` | Money received against an invoice | Implemented |
 | `WebhookEvent` | Inbound webhook log (dedupe + replay safety) | Implemented |
 | `LedgerEntry` | Append-only financial ledger | Implemented |
-| `KnowledgeItem` | FAQ/knowledge for assistant grounding (`KnowledgeChunk` now stores per-chunk embedding `model` + `dim`; vectors are neural by default, lexical hash as fallback) | Implemented |
+| `KnowledgeItem` (`KnowledgeDoc` in schema) | FAQ/knowledge for assistant grounding (`KnowledgeChunk` now stores per-chunk embedding `model` + `dim`; vectors are neural by default, lexical hash as fallback) | Implemented |
+| `DataSource` | Bring-your-own external DB/JSON endpoint ingested into the same knowledge/RAG pipeline (kind + encrypted connection + query config; rows → `KnowledgeDoc`s) | Implemented |
 | `Conversation` / `Message` | Assistant transcripts incl. tool calls | Implemented |
 | `AssistantRun` | Per-turn provider/latency/error metadata | Implemented |
 | `AutomationRule` / `AutomationRun` | Automation definitions and executions | Implemented |
@@ -56,6 +57,7 @@ Booking 1─0..1 Invoice 1─* InvoiceLine
 Invoice 1─* Payment (verified payments reduce balance)
 Invoice 1─* LedgerEntry (CHARGE)   Payment 1─1 LedgerEntry (PAYMENT)
 Organization 1─* KnowledgeItem / Conversation 1─* Message
+Organization 1─* DataSource 1─* KnowledgeItem (ingested rows; cascade-delete with the source)
 Conversation 1─* AssistantRun
 Organization 1─* AutomationRule 1─* AutomationRun
 Organization 1─* OutboundMessage / ProviderConfig / Setting / AuditEvent / WebhookEvent(provider-level org)
@@ -219,6 +221,19 @@ unless noted. `*_Json` columns are `String` holding JSON, validated by zod on re
 | tags_Json | String | Array of strings |
 | embedding_Json | String? | Float array (JSON) when embeddings available; lexical search used otherwise; pgvector column at production switch |
 | embeddingStatus | String | `NONE \| PENDING \| READY \| FAILED` |
+
+### DataSource (schema name; conceptual "external source")
+| Field | Type | Notes |
+|---|---|---|
+| name | String | Operator label |
+| kind | String | `postgres \| mysql \| sqlite \| http_json` (zod-validated) |
+| connectionEnc | String | AES-256-GCM blob of the per-kind connection (string/path/url+authHeader); never returned |
+| configJson | String | Non-secret config: `query`/`table`/`itemsPath`, `idColumn`, `titleColumn`, `textColumns[]`, `template`, `contentPrefix`, `limit`, `approved`, `allowPrivate` |
+| enabled / autoSync / syncIntervalMin | Boolean / Boolean / Int | Retrieval enablement + worker auto-sync schedule |
+| lastTestAt / lastTestOk / lastTestError | DateTime? / Boolean / String | Connection-test bookkeeping |
+| lastSyncAt / lastSyncOk / lastSyncError / lastSyncStats | DateTime? / Boolean / String / String(JSON) | Last sync result + `{fetched,created,updated,unchanged,deleted,failed,ms}` |
+| documentCount / chunkCount | Int | Denormalized index sizes for honest UI display |
+| *Invariant* | | Each ingested `KnowledgeDoc` is linked by `(dataSourceId, externalId)` `@@unique`; re-sync is idempotent (content-hash skip), removed rows cascade-delete their docs |
 
 ### Conversation / Message
 | Field | Type | Notes |

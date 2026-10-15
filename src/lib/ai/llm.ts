@@ -55,7 +55,8 @@ export async function chatComplete(
   const row = await getActiveProvider(orgId, 'llm')
   if (!row) {
     throw new AiUnavailableError(
-      'No conversation model is configured. Set one up in Settings → AI providers (local Ollama, an OpenAI-compatible endpoint, or the managed gateway).'
+      'The AI assistant is not configured yet. Enable a conversation model in Settings → AI Providers: ' +
+      'either a local Ollama server (http://localhost:11434) or an OpenAI-compatible endpoint with your own API key.'
     )
   }
   await assertAiPolicy(orgId, row.provider) // hard-blocks cloud calls in local-only mode
@@ -67,8 +68,7 @@ export async function chatComplete(
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       let result: LlmResult
-      if (row.provider === 'managed') result = await callManaged(row.model, messages, opts)
-      else if (row.provider === 'ollama') result = await callOllama(row, messages, opts)
+      if (row.provider === 'ollama') result = await callOllama(row, messages, opts)
       else if (row.provider === 'openai_compatible') result = await callOpenAiCompatible(row, messages, opts)
       else throw new AiUnavailableError(`Provider kind "${row.provider}" cannot serve conversations`)
 
@@ -88,23 +88,6 @@ export async function chatComplete(
   await logAi(orgId, { capability: 'llm', provider: row.provider, model: row.model, latencyMs: Date.now() - started, tokensIn: 0, tokensOut: 0, ok: false, errorSanitized: sanitized, conversationId: opts.conversationId })
   if (lastErr instanceof ApiError) throw lastErr
   throw new AiUnavailableError(`The AI model could not be reached: ${sanitized}`)
-}
-
-async function callManaged(model: string, messages: LlmMessage[], opts: { temperature?: number; maxTokens?: number; timeoutMs?: number }): Promise<LlmResult> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default
-  const zai = await ZAI.create()
-  const completion = (await Promise.race([
-    zai.chat.completions.create({
-      messages: messages.map((m) => ({ role: m.role === 'system' ? 'assistant' : m.role, content: m.content })),
-      thinking: { type: 'disabled' },
-      ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
-    }),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Model request timed out')), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)),
-  ])) as { choices?: Array<{ message?: { content?: string } }> }
-
-  const content = completion.choices?.[0]?.message?.content ?? ''
-  if (!content) throw new AiUnavailableError('The model returned an empty response')
-  return { content, provider: 'managed', model: model || 'managed-default', latencyMs: 0, tokensIn: 0, tokensOut: 0 }
 }
 
 async function callOllama(row: { baseUrl: string; model: string }, messages: LlmMessage[], opts: { temperature?: number; maxTokens?: number; timeoutMs?: number }): Promise<LlmResult> {

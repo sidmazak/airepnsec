@@ -5,15 +5,15 @@ import { encryptSecret, decryptSecret } from '@/lib/crypto'
 export type Capability = 'llm' | 'embedding' | 'stt' | 'tts' | 'rerank' | 'vision'
 export const CAPABILITIES: Capability[] = ['llm', 'embedding', 'stt', 'tts', 'rerank', 'vision']
 
-export type ProviderKind = 'managed' | 'ollama' | 'openai_compatible' | 'browser' | 'local_neural' | 'local_lexical' | 'none'
+export type ProviderKind = 'ollama' | 'openai_compatible' | 'browser' | 'local_neural' | 'local_lexical' | 'none'
 
 export const CAPABILITY_INFO: Record<Capability, { label: string; description: string; kinds: ProviderKind[] }> = {
-  llm: { label: 'Conversation model (LLM)', description: 'Powers the AI receptionist chat and voice replies.', kinds: ['managed', 'ollama', 'openai_compatible', 'none'] },
+  llm: { label: 'Conversation model (LLM)', description: 'Powers the AI receptionist chat and voice replies. Bring your own local Ollama model or an OpenAI-compatible endpoint.', kinds: ['ollama', 'openai_compatible', 'none'] },
   embedding: { label: 'Knowledge retrieval (RAG embeddings)', description: 'Embeds and retrieves your approved documents. The built-in neural model runs entirely on this machine.', kinds: ['local_neural', 'ollama', 'openai_compatible', 'local_lexical'] },
-  stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The built-in gateway works out of the box.', kinds: ['managed', 'browser', 'openai_compatible'] },
-  tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The built-in gateway works out of the box.', kinds: ['managed', 'browser', 'openai_compatible'] },
+  stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The browser mic path works out of the box.', kinds: ['browser', 'openai_compatible', 'ollama'] },
+  tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The browser synth path works out of the box.', kinds: ['browser', 'openai_compatible'] },
   rerank: { label: 'Reranking (optional)', description: 'Improves ordering of retrieved knowledge. Optional.', kinds: ['none', 'openai_compatible'] },
-  vision: { label: 'Vision (optional)', description: 'Understands images. Optional.', kinds: ['none', 'openai_compatible', 'managed'] },
+  vision: { label: 'Vision (optional)', description: 'Understands images. Optional.', kinds: ['none', 'openai_compatible'] },
 }
 
 export type PublicProviderConfig = {
@@ -34,7 +34,6 @@ export type PublicProviderConfig = {
 
 function dataFlowLabel(provider: string, baseUrl: string): string {
   switch (provider) {
-    case 'managed': return 'Managed AI gateway (external service) — conversation text is processed there'
     case 'ollama': return `Local inference on this machine (${baseUrl || 'Ollama'}) — data stays local`
     case 'openai_compatible': return `External OpenAI-compatible endpoint (${baseUrl || 'custom'}) — data leaves this machine`
     case 'browser': return 'In the browser (this device) — no server round-trip for media'
@@ -68,16 +67,21 @@ export function toPublicConfig(row: {
 export async function getProviderRow(orgId: string, capability: Capability) {
   let row = await db.providerConfig.findUnique({ where: { orgId_capability: { orgId, capability } } })
   if (!row) {
+    // Capability-aware defaults. Only capabilities with a real, credential-free,
+    // working-out-of-the-box path are enabled: embedding (built-in local neural
+    // model) and stt/tts (browser Web Speech). The conversation model is left
+    // DISABLED until the operator deliberately configures one — we never imply a
+    // working LLM that does not exist. Optional capabilities default to 'none'.
+    const defaultProvider =
+      capability === 'embedding' ? 'local_neural'
+      : capability === 'stt' || capability === 'tts' ? 'browser'
+      : 'none'
     row = await db.providerConfig.create({
       data: {
         orgId,
         capability,
-        provider: capability === 'llm'
-          ? 'managed'
-          : capability === 'embedding'
-            ? 'local_neural' // real semantic RAG works out of the box, fully local
-            : 'browser',
-        enabled: capability === 'llm' || capability === 'embedding',
+        provider: defaultProvider,
+        enabled: capability === 'embedding' || capability === 'stt' || capability === 'tts',
       },
     })
   }
@@ -148,6 +152,15 @@ export async function testProvider(
   const started = Date.now()
   const key = getApiKey(row)
   try {
+    // Reranking and vision are NOT yet implemented in the assistant's LLM layer.
+    // Report that honestly instead of implying a working capability.
+    if ((capability === 'rerank' || capability === 'vision') && row.provider !== 'none') {
+      return {
+        ok: false,
+        message: `${CAPABILITY_INFO[capability].label.replace(/ \(optional\)$/, '')} is not implemented yet — no request was made. Set it to "None" to disable it, or leave it off.`,
+        latencyMs: 0,
+      }
+    }
     // Embedding capability gets provider-specific live tests against the actual embed call.
     if (capability === 'embedding') {
       switch (row.provider) {
@@ -190,16 +203,6 @@ export async function testProvider(
       }
     }
     switch (row.provider) {
-      case 'managed': {
-        const ZAI = (await import('z-ai-web-dev-sdk')).default
-        const zai = await ZAI.create()
-        const res = await zai.chat.completions.create({
-          messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
-          thinking: { type: 'disabled' },
-        })
-        const text = res.choices[0]?.message?.content ?? ''
-        return { ok: text.trim().length > 0, message: text.trim() ? 'Managed gateway responded.' : 'Managed gateway returned an empty response.', latencyMs: Date.now() - started }
-      }
       case 'ollama': {
         if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. http://localhost:11434)', latencyMs: 0 }
         const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/api/tags`)
@@ -250,11 +253,11 @@ export async function runAndStoreTest(orgId: string, capability: Capability): Pr
 export async function assertAiPolicy(orgId: string, providerKind: string) {
   const org = await db.organization.findUnique({ where: { id: orgId }, select: { dataMode: true } })
   if (!org) throw new ApiError(404, 'Organization not found', 'not_found')
-  const cloudProviders = ['managed', 'openai_compatible']
+  const cloudProviders = ['openai_compatible']
   if (org.dataMode === 'local_only' && cloudProviders.includes(providerKind)) {
     throw new ApiError(
       403,
-      'Local-only mode is enabled: this request would send data to a cloud provider and was blocked. Configure a local model (e.g. Ollama) or switch the data mode in AI settings.',
+      'Local-only mode is enabled: this request would send data to an external AI provider and was blocked. Configure a local Ollama model or switch the data mode in AI settings.',
       'local_only_blocked'
     )
   }

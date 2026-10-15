@@ -448,3 +448,36 @@ export async function handleReceptionistTurn(
 
   return { reply: finalReply, toolCalls, aiUsed: !aiError, error: aiError }
 }
+
+export const REALTIME_TOOLS = TOOLS.map((t) => ({
+  type: 'function',
+  name: t.name,
+  description: t.description,
+  parameters: {
+    type: 'object',
+    properties: Object.fromEntries(Object.keys(t.args).map((k) => [k, { type: 'string', description: t.args[k] }])),
+    required: Object.keys(t.args),
+  },
+}))
+
+export async function runReceptionistTool(
+  org: Organization,
+  conversationId: string,
+  toolName: string,
+  args: Record<string, unknown>
+): Promise<unknown> {
+  const conversation = await db.conversation.findFirst({ where: { id: conversationId, orgId: org.id } })
+  if (!conversation) throw new Error('Conversation not found')
+  const customer = conversation.customerId
+    ? await db.customer.findFirst({ where: { id: conversation.customerId, orgId: org.id } })
+    : null
+  const ctx: ToolCtx = {
+    org,
+    conversationId,
+    customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email } : null,
+    actor: { type: 'ai', id: 'receptionist' },
+  }
+  const tool = TOOLS.find((t) => t.name === toolName)
+  if (!tool) return { error: `Unknown tool ${toolName}` }
+  return await tool.execute(args || {}, ctx)
+}

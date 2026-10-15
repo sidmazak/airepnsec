@@ -4,7 +4,7 @@ import { audit } from '@/lib/audit'
 import { withPublic } from '@/lib/api'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
-import { getEnabledIntegration, sendTwilio } from '@/lib/integrations/connectors'
+import { getEnabledSmsSender, sendOrgSms } from '@/lib/integrations/connectors'
 import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams,
   matchCustomerByPhone, logWebhook, plainResponse, twiml,
@@ -85,21 +85,21 @@ export const POST = withPublic(async (req: NextRequest) => {
       }
       if (!result.reply) return
 
-      const sender = await getEnabledIntegration(org.id, 'twilio_sms')
+      const sender = await getEnabledSmsSender(org.id)
       if (!sender) {
         // Keep the reply in the outbox with an honest status instead of dropping it.
         await db.outboxMessage.create({
           data: {
             orgId: org.id, channel: 'sms', recipient: from, body: result.reply,
-            status: 'skipped', statusReason: 'AI reply generated but no enabled twilio_sms integration — enable one in Integrations to deliver SMS replies',
+            status: 'skipped', statusReason: 'AI reply generated but no enabled SMS integration (Twilio or an SMS gateway) — enable one in Integrations to deliver SMS replies',
             relatedType: 'conversation', relatedId: conversationId,
           },
         })
         return
       }
       try {
-        await sendTwilio(sender, { to: from, body: result.reply })
-        await audit({ orgId: org.id, actorType: 'system', actorId: 'sms-receptionist', action: 'telephony.sms_reply_sent', entity: 'conversation', entityId: conversationId, meta: { to: from, chars: result.reply.length } })
+        await sendOrgSms(org.id, { to: from, body: result.reply })
+        await audit({ orgId: org.id, actorType: 'system', actorId: 'sms-receptionist', action: 'telephony.sms_reply_sent', entity: 'conversation', entityId: conversationId, meta: { to: from, chars: result.reply.length, via: sender.channel } })
       } catch (sendErr) {
         await db.outboxMessage.create({
           data: {

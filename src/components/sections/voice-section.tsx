@@ -518,7 +518,7 @@ function ProviderChip({ label, provider, onConfigure }: { label: string; provide
       title="Configure in AI Providers"
     >
       <span className={cn('h-1.5 w-1.5 rounded-full', ok ? 'bg-emerald-500' : 'bg-amber-500')} aria-hidden />
-      {label}: {ok ? provider?.provider === 'managed' ? 'built-in gateway' : provider?.provider.replace('_', ' ') : 'not configured'}
+      {label}: {ok ? (provider?.provider ?? '').replace('_', ' ') : 'not configured'}
     </button>
   )
 }

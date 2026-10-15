@@ -25,17 +25,17 @@ A self-hosted, local-first AI business assistant: an AI receptionist (text + bro
 ## Quick start (development)
 
 ```bash
-bun install
+npm install
 # .env: DATABASE_URL=file:/abs/path/to/db/custom.db
-bun run db:push
-bun run dev          # http://localhost:3000
+npm run db:push
+npm run dev          # http://localhost:3000
 ```
 
 First run: create the owner account (or click **Try the demo workspace** — seeds `demo@aisecretary.local` / `demo-1234` with clearly-labeled demo data). The setup wizard walks through business profile → services/staff → imports → knowledge → AI → channels → collections → end-to-end test → activation.
 
 ## The minimum vertical slice (works today)
 
-Install → sign in → wizard → create a customer + service → book via the real engine → create an invoice → record a **verified** payment → inspect the ledger — **all without any cloud AI key**. Then chat with the AI receptionist in the Inbox (managed gateway in this sandbox build, or Ollama via AI Providers) and try a browser voice test call.
+Install → sign in → wizard → create a customer + service → book via the real engine → create an invoice → record a **verified** payment → inspect the ledger — **all without any cloud AI key**. Then chat with the AI receptionist in the Inbox — connect a model under AI Providers (local Ollama, or an OpenAI-compatible endpoint with your own key; no proprietary AI SDK and no credentials are bundled) — and try a browser voice test call. Knowledge/RAG embeddings work out of the box with the built-in local model.
 
 ## Architecture (sandbox build)
 
@@ -45,7 +45,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PRODUCT_SPEC.md](docs/
 
 ## Self-hosting (production)
 
-`infra/` ships a multi-stage Docker build (Bun, Next standalone) and a compose stack with **PostgreSQL 16 + pgvector**. Honest status: packaging is **delivered but not verified inside the build sandbox** (no Docker daemon) — smoke-test it on your host. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for requirements, env vars, SQLite→Postgres notes, `APP_SECRET` rotation caveats, and backups.
+`infra/` ships a multi-stage Docker build (Node, Next standalone) and a compose stack with **PostgreSQL 16 + pgvector**. Honest status: packaging is **delivered but not verified inside the build sandbox** (no Docker daemon) — smoke-test it on your host. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for requirements, env vars, SQLite→Postgres notes, `APP_SECRET` rotation caveats, and backups.
 
 ## Honest limitations
 

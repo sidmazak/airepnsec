@@ -1,6 +1,6 @@
 # Self-hosting — AI Secretary
 
-Run the app on your own machine. One Node-compatible runtime (Bun), one
+Run the app on your own machine. One Node.js runtime, one
 database, no telemetry, no required third-party accounts.
 
 > The Docker packaging in [`infra/`](../infra/README.md) is delivered but
@@ -9,8 +9,9 @@ database, no telemetry, no required third-party accounts.
 
 ## Requirements
 
-- **Bun 1.x** (the runtime the build and docs are verified with) — or Node 20+
-  with the equivalent `next start` flow, untested here.
+- **Node.js 24+** (the runtime the build and docs are verified with) and npm.
+  Node's built-in `node:sqlite` powers the SQLite data-source adapter, so no
+  native SQLite add-on is required.
 - **PostgreSQL 16 + pgvector** for the production target (`pgvector/pgvector:pg16`
   image provided), or plain **SQLite** for a single-box dev/edge install.
 - Outbound network only for the things you opt into: your SMTP relay, Twilio,
@@ -58,7 +59,7 @@ The Prisma schema is written **portable** from day one (see
 Switching is therefore a datasource change, not a rewrite:
 
 1. Set `DATABASE_URL` to the `postgresql://…` URL.
-2. Run `bunx prisma db push` against the empty Postgres database (the Docker
+2. Run `npx prisma db push` against the empty Postgres database (the Docker
    image does this at start; the schema is created from scratch).
 3. To move *data*, export from the SQLite install via `GET /api/admin/export`
    (secrets-free JSON) or copy rows with a script — there is no automated

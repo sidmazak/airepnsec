@@ -26,6 +26,28 @@ export const twilioVoiceConfigSchema = z.object({
   publicBaseUrl: z.string().url().optional(), // the https base URL configured in the Twilio console (used for webhook signature validation)
 })
 
+export const smsGatewayConfigSchema = z
+  .object({
+    provider: z.enum(['textbee', 'httpsms', 'android_sms_gateway', 'generic_http']),
+    baseUrl: z.string().url('baseUrl must be a valid http(s) URL').optional(),
+    from: z.string().max(40).optional(),
+    deviceId: z.string().max(200).optional(),
+    // generic_http only:
+    url: z.string().url('url must be a valid http(s) URL').optional(),
+    method: z.enum(['POST', 'PUT']).optional(),
+    authHeaderName: z.string().max(60).optional(),
+    bodyTemplate: z.string().max(2000).optional(),
+    testRecipient: z.string().max(40).optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.provider === 'httpsms' && !val.from) {
+      ctx.addIssue({ code: 'custom', path: ['from'], message: 'httpSMS requires the sending phone number in "from"' })
+    }
+    if (val.provider === 'generic_http' && !val.url) {
+      ctx.addIssue({ code: 'custom', path: ['url'], message: 'generic_http requires the destination "url"' })
+    }
+  })
+
 export const caldavConfigSchema = z.object({
   url: z.string().url('url must be the CalDAV calendar collection URL'),
   username: z.string().max(200).optional(),
@@ -43,6 +65,13 @@ export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
   twilio_sms: z.object({ accountSid: z.string().min(1, 'accountSid is required'), authToken: z.string().min(1, 'authToken is required') }),
   twilio_whatsapp: z.object({ accountSid: z.string().min(1, 'accountSid is required'), authToken: z.string().min(1, 'authToken is required') }),
   twilio_voice: z.object({ accountSid: z.string().min(1, 'accountSid is required'), authToken: z.string().min(1, 'authToken is required') }),
+  sms_gateway: z.object({
+    apiKey: z.string().optional(), // TextBee / httpSMS
+    username: z.string().optional(), // android-sms-gateway (basic auth)
+    password: z.string().optional(),
+    token: z.string().optional(), // android-sms-gateway (bearer)
+    authValue: z.string().optional(), // generic_http custom auth header value
+  }),
   caldav: z.object({ password: z.string().optional() }),
   stripe: z.object({ secretKey: z.string().min(1, 'secretKey is required'), webhookSecret: z.string().optional() }),
   webhook_out: z.object({ secret: z.string().optional() }),
@@ -53,6 +82,7 @@ export const configSchemaFor: Record<string, z.ZodTypeAny> = {
   twilio_sms: twilioConfigSchema,
   twilio_whatsapp: twilioConfigSchema,
   twilio_voice: twilioVoiceConfigSchema,
+  sms_gateway: smsGatewayConfigSchema,
   caldav: caldavConfigSchema,
   stripe: stripeConfigSchema,
   webhook_out: webhookOutConfigSchema,
@@ -67,6 +97,11 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
     case 'twilio_whatsapp':
     case 'twilio_voice':
       return Boolean(secrets.accountSid && secrets.authToken)
+    case 'sms_gateway':
+      // Credentials are provider-dependent and often legitimately absent
+      // (android-sms-gateway local mode, an unauthenticated LAN/iOS bridge).
+      // The real connection test and each send report honest failures instead.
+      return true
     case 'caldav':
       return true // password optional (some local servers allow anonymous writes); PUT/PROPFIND will fail honestly otherwise
     case 'stripe':

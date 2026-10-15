@@ -56,7 +56,7 @@ export const GET = withAuth(async (req, ctx) => {
   return json({ customers })
 })
 
-/** POST /api/customers {name, email?, phone?, notes?, tags?} */
+/** POST /api/customers {name, email?, phone?, notes?, tags?} (owner/admin/agent) */
 export const POST = withAuth(async (req, ctx) => {
   const body = await parseBody(req, createSchema)
 
@@ -82,4 +82,4 @@ export const POST = withAuth(async (req, ctx) => {
   })
 
   return json({ ...customer, tags: parseJson<string[]>(customer.tags, []) }, 201)
-})
+}, { roles: ['owner', 'admin', 'agent'] })

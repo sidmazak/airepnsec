@@ -8,7 +8,7 @@ import {
   type Capability,
 } from '@/lib/ai/providers'
 
-const PROVIDER_KINDS = ['managed', 'ollama', 'openai_compatible', 'browser', 'local_neural', 'local_lexical', 'none'] as const
+const PROVIDER_KINDS = ['ollama', 'openai_compatible', 'browser', 'local_neural', 'local_lexical', 'none'] as const
 
 const putSchema = z.object({
   provider: z.enum(PROVIDER_KINDS),
