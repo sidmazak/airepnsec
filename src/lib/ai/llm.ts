@@ -59,7 +59,7 @@ export async function chatComplete(
       'either a local Ollama server (http://localhost:11434) or an OpenAI-compatible endpoint with your own API key.'
     )
   }
-  await assertAiPolicy(orgId, row.provider) // hard-blocks cloud calls in local-only mode
+  await assertAiPolicy(orgId, row.provider, row.baseUrl) // hard-blocks cloud calls in local-only mode; self-hosted endpoints stay allowed
 
   const started = Date.now()
   const attempts = 2

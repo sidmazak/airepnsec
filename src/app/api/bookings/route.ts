@@ -90,4 +90,4 @@ export const POST = withAuth(async (req, ctx) => {
   })
 
   return json(booking, 201)
-})
+}, { roles: ['owner', 'admin', 'agent'] })

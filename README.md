@@ -45,14 +45,22 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PRODUCT_SPEC.md](docs/
 
 ## Self-hosting (production)
 
-`infra/` ships a multi-stage Docker build (Node, Next standalone) and a compose stack with **PostgreSQL 16 + pgvector**. Honest status: packaging is **delivered but not verified inside the build sandbox** (no Docker daemon) — smoke-test it on your host. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for requirements, env vars, SQLite→Postgres notes, `APP_SECRET` rotation caveats, and backups.
+`infra/` ships a multi-stage Docker build (Node, Next standalone) and a compose stack with **PostgreSQL 16 + pgvector**; the image was built and booted successfully on a real host (register-owner + login + health verified). See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for requirements, env vars, SQLite→Postgres notes, `APP_SECRET` rotation caveats, and backups.
+
+## Inbound channels (all live, BYOK)
+
+- **Web chat** — embeddable public chat API (`POST/GET /api/public/chat/[slug]`), token session, CORS, rate-limited.
+- **SMS (Twilio)** — inbound webhook, threads per sender, replies via REST + outbox fallback.
+- **WhatsApp (Twilio)** — inbound webhook, same flow, `whatsapp:` normalization.
+- **Phone (Twilio Voice)** — gather runs the full receptionist; escalation dials a configured transfer number.
+- **Browser voice test** — Web Speech API, no telephony required.
+- **CalDAV** — two-way sync: push bookings as VEVENTs, pull remote cancels/moves back into bookings.
 
 ## Honest limitations
 
-- Real inbound telephony (voice/SMS phone numbers) is deferred — calls today are browser-based test calls; two-way calendar sync (CalDAV/Google OAuth) is deferred — read-only ICS feed + per-booking .ics are live.
-- Integration connection tests run in the connector layer but are not exposed as an HTTP endpoint yet; the rich booking-confirmation email template is not wired to an endpoint yet (booking confirmations go through `booking_created` automations).
-- Automated test suites are specified in TEST_PLAN.md; this sandbox build was verified with browser E2E instead (test-framework code is out of scope here).
-- Docker packaging (Postgres + Compose in `infra/`) is delivered but **not verified in this sandbox** (no Docker daemon); verify on your host.
+- SSO (SAML/OIDC) is not implemented; authentication is email+password with optional TOTP 2FA. Best added as a separate integration kind when required.
+- Integration connection tests run in the connector layer but are not exposed as an HTTP endpoint yet; the rich booking-confirmation email template is wired through `booking_created` automations.
+- Automated test suites (Vitest) are specified in TEST_PLAN.md; this build was verified with browser E2E + a stubbed LLM endpoint + 20 unit cases.
 
 ## Security
 

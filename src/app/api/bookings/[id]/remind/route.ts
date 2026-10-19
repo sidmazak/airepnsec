@@ -113,4 +113,4 @@ export const POST = withAuth(async (req, ctx, params) => {
   })
 
   return json({ queued: true, outboxId: msg.id, status: msg.status, statusReason: msg.statusReason }, 201)
-})
+}, { roles: ['owner', 'admin', 'agent'] })

@@ -73,10 +73,10 @@ async function getSpeechProvider(orgId: string, capability: 'stt' | 'tts') {
       'speech_not_configured'
     )
   }
-  if (row.provider !== 'openai_compatible' && row.provider !== 'ollama') {
-    throw new ApiError(503, `Provider "${row.provider}" cannot serve ${capability} on the server. Use an OpenAI-compatible endpoint, or the browser mic/speech path in the Voice Console.`, 'speech_provider_unsupported')
+  if (row.provider !== 'openai_compatible') {
+    throw new ApiError(503, `Provider "${row.provider}" cannot serve ${capability} on the server. Use an OpenAI-compatible endpoint (local servers like Kokoro-FastAPI, faster-whisper-server or Speaches work), or the browser mic/speech path in the Voice Console.`, 'speech_provider_unsupported')
   }
-  await assertAiPolicy(orgId, row.provider)
+  await assertAiPolicy(orgId, row.provider, row.baseUrl)
   return row
 }
 
@@ -122,7 +122,7 @@ export async function synthesizeSpeech(orgId: string, text: string, opts: { voic
   const started = Date.now()
 
   const cfg = (() => { try { return JSON.parse(row.configJson || '{}') as Record<string, unknown> } catch { return {} } })()
-  const voice = opts.voice || (typeof cfg.voice === 'string' && cfg.voice) || DEFAULT_TTS_VOICE
+  const voice = opts.voice || (typeof cfg.voice === 'string' && cfg.voice) || (typeof cfg.openaiVoice === 'string' && cfg.openaiVoice) || DEFAULT_TTS_VOICE
   const speed = Math.min(2, Math.max(0.5, typeof opts.speed === 'number' && opts.speed > 0 ? opts.speed : 1))
   const chunks = chunkForTts(text)
   if (chunks.length === 0) throw new ApiError(400, 'Nothing to speak — the text is empty', 'empty_text')
@@ -135,7 +135,7 @@ export async function synthesizeSpeech(orgId: string, text: string, opts: { voic
       const res = await fetch(`${row.baseUrl.replace(/\/$/, '')}/audio/speech`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
-        body: JSON.stringify({ model: row.model || 'tts-1', input: chunk, voice: typeof cfg.openaiVoice === 'string' ? cfg.openaiVoice : 'alloy', speed, response_format: 'mp3' }),
+        body: JSON.stringify({ model: row.model || 'tts-1', input: chunk, voice, speed, response_format: 'mp3' }),
         signal: AbortSignal.timeout(60_000),
       })
       if (!res.ok) throw new Error(`Speech endpoint returned HTTP ${res.status}`)

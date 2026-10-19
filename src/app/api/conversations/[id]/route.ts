@@ -56,4 +56,4 @@ export const PATCH = withAuth(async (req, ctx, params) => {
   })
 
   return json({ conversation: updated })
-})
+}, { roles: ['owner', 'admin', 'agent'] })

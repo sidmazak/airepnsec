@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { withPublic } from '@/lib/api'
@@ -75,12 +75,15 @@ export const POST = withPublic(async (req: NextRequest) => {
   if (!conversation.aiEnabled) return twiml('')
 
   const conversationId = conversation.id
-  // Answer asynchronously — Twilio only needs a fast 200. Reply is sent via REST + outbox retry.
-  void (async () => {
+  const statusBefore = conversation.status
+  // Answer after the Twilio response is flushed (after() keeps the runtime alive on
+  // serverless too) — Twilio only needs a fast 200. Reply is sent via REST + outbox retry.
+  after(async () => {
     try {
       const result = await handleReceptionistTurn(org, conversationId, body, { skipInboundPersist: true })
       const fresh = await db.conversation.findUnique({ where: { id: conversationId } })
-      if (fresh?.status === 'waiting_human') {
+      // Escalation automations fire only on the transition into waiting_human.
+      if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {
         await emitEvent(org.id, 'conversation_escalated', { conversationId, entityId: conversationId })
       }
       if (!result.reply) return
@@ -113,7 +116,7 @@ export const POST = withPublic(async (req: NextRequest) => {
     } catch (err) {
       console.error('[telephony] SMS turn failed:', err instanceof Error ? err.message : err)
     }
-  })()
+  })
 
   return twiml('')
 })

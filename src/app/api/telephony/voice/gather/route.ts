@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { withPublic } from '@/lib/api'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
+import { emitEvent } from '@/lib/automation/engine'
 import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams,
   logWebhook, plainResponse, twiml, gatherSpeech, say, dialNumber, hangup,
@@ -54,6 +55,13 @@ export const POST = withPublic(async (req: NextRequest) => {
   const language = (typeof config.language === 'string' && config.language) || 'en-US'
   const voiceName = (typeof config.voiceName === 'string' && config.voiceName) || 'alice'
   const lowConfidence = speech && confidence > 0 && confidence < 0.45
+  const statusBefore = conversation.status
+
+  // Staff paused AI for this call — do not let the bot keep answering phone calls.
+  if (!conversation.aiEnabled) {
+    await db.message.create({ data: { conversationId: conversation.id, orgId: org.id, role: 'customer', content: speech || '(no speech)', meta: JSON.stringify({ source: 'phone', callSid, aiDisabled: true }) } }).catch(() => {})
+    return twiml(say('A member of our team has taken over this call. Please try again later or leave a message on our website. Goodbye.', { voice: voiceName, language }) + hangup)
+  }
 
   if (!speech) {
     const misses = (noInputCounts.get(callSid) ?? 0) + 1
@@ -83,6 +91,10 @@ export const POST = withPublic(async (req: NextRequest) => {
   }
 
   const fresh = await db.conversation.findUnique({ where: { id: conversation.id } })
+  // Escalation automations fire only on the transition into waiting_human.
+  if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {
+    await emitEvent(org.id, 'conversation_escalated', { conversationId: conversation.id, entityId: conversation.id })
+  }
   await audit({ orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice', action: 'telephony.call_turn', entity: 'conversation', entityId: conversation.id, meta: { callSid, speech: speech.slice(0, 200), reply: reply.slice(0, 200) } })
 
   const transferNumber = (typeof config.transferNumber === 'string' && config.transferNumber.trim()) || ''

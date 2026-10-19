@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      # Long random string — encrypts provider keys and signs sessions. Change before first boot.
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env (e.g. openssl rand -hex 32)}
+      DATABASE_URL: file:/app/db/custom.db
+      # The public origin your browser and webhooks (Twilio/Stripe) use.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+    volumes:
+      - ais-data:/app/db
+      - ais-secrets:/app/.data
+    restart: unless-stopped
+
+volumes:
+  ais-data:
+  ais-secrets:

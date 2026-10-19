@@ -58,7 +58,7 @@ export const PATCH = withAuth(async (req, ctx, params) => {
       embeddingModel: indexed?.model ?? null,
     },
   })
-})
+}, { roles: ['owner', 'admin'] })
 
 /** DELETE /api/knowledge/[id] — removes doc + chunks (cascade) */
 export const DELETE = withAuth(async (req, ctx, params) => {
@@ -78,4 +78,4 @@ export const DELETE = withAuth(async (req, ctx, params) => {
   })
 
   return json({ ok: true })
-})
+}, { roles: ['owner', 'admin'] })

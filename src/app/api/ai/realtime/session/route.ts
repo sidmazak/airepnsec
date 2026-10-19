@@ -21,18 +21,19 @@ export const POST = withAuth(async (req, ctx) => {
   if (row.provider !== 'openai_compatible') {
     throw new ApiError(503, 'OpenAI Realtime requires an OpenAI-compatible provider (set base URL + API key under AI Providers)', 'realtime_unsupported')
   }
-  await assertAiPolicy(ctx.org.id, row.provider)
+  await assertAiPolicy(ctx.org.id, row.provider, row.baseUrl)
   const key = getApiKey(row)
   if (!key) throw new ApiError(503, 'API key missing for the realtime provider', 'realtime_no_key')
 
   const base = (row.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')
+  const cfg = (() => { try { return JSON.parse(row.configJson || '{}') as Record<string, unknown> } catch { return {} } })()
   const started = Date.now()
   let res: Response
   try {
     res = await fetch(`${base}/realtime/sessions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, voice: (row.configJson ? (JSON.parse(row.configJson || '{}') as Record<string, unknown>).voice : undefined) || 'alloy', instructions, input_audio_transcription: { model: 'whisper-1' }, ...(tools.length ? { tools } : {}) }),
+      body: JSON.stringify({ model, voice: (typeof cfg.voice === 'string' && cfg.voice) || 'alloy', instructions, input_audio_transcription: { model: 'whisper-1' }, ...(tools.length ? { tools } : {}) }),
       signal: AbortSignal.timeout(20_000),
     })
   } catch (err) {
@@ -45,12 +46,17 @@ export const POST = withAuth(async (req, ctx) => {
   const data = (await res.json()) as { client_secret?: { value?: string; expires_at?: number }; id?: string }
   const secret = data.client_secret?.value
   if (!secret) throw new ApiError(502, 'Realtime endpoint did not return a client secret', 'realtime_error')
+  // Derive the realtime WebRTC URL from the configured base (self-hosted realtime
+  // servers included) unless the provider config overrides it explicitly.
+  const realtimeUrl =
+    (typeof cfg.realtimeUrl === 'string' && cfg.realtimeUrl) || `${base.replace(/^http/, 'ws')}/realtime`
   return json({
     provider: row.provider,
     model,
     clientSecret: secret,
     expiresAt: data.client_secret?.expires_at ?? null,
-    realtimeUrl: 'wss://api.openai.com/v1/realtime',
+    realtimeUrl,
+    sdpUrl: realtimeUrl.replace(/^ws/, 'http'),
     serverLatencyMs: Date.now() - started,
   })
 }, { roles: ['owner', 'admin'] })

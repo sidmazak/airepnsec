@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import { useAppStore } from '@/lib/client/store'
 import { api, type SessionInfo } from '@/lib/client/api'
 import { AuthScreen } from '@/components/sections/auth-screen'
-import { Sidebar, MobileTopBar } from '@/components/sections/sidebar'
+import { Sidebar, MobileTopBar, isSectionAllowed } from '@/components/sections/sidebar'
 import { DashboardSection } from '@/components/sections/dashboard-section'
 import { InboxSection } from '@/components/sections/inbox-section'
 import { VoiceSection } from '@/components/sections/voice-section'
@@ -21,8 +21,10 @@ import { BusinessSection } from '@/components/sections/business-section'
 import { IntegrationsSection } from '@/components/sections/integrations-section'
 import UsageSection from '@/components/sections/usage-section'
 import { DiagnosticsSection } from '@/components/sections/diagnostics-section'
+import { SecuritySection } from '@/components/sections/security-section'
 import { SetupSection } from '@/components/sections/setup-section'
 import { Loader2 } from 'lucide-react'
+import { GuidedTour } from '@/components/guided-tour'
 
 function SectionRouter() {
   const activeSection = useAppStore((s) => s.activeSection)
@@ -43,6 +45,7 @@ function SectionRouter() {
     case 'integrations': return <IntegrationsSection />
     case 'usage': return <UsageSection />
     case 'diagnostics': return <DiagnosticsSection />
+    case 'security': return <SecuritySection />
     case 'setup': return <SetupSection />
     default: return <DashboardSection />
   }
@@ -59,6 +62,12 @@ export default function Home() {
       .finally(() => { if (!cancelled) setSessionLoading(false) })
     return () => { cancelled = true }
   }, [setSession, setSessionLoading])
+
+  // Role gate: deep links to sections this role cannot use fall back to the dashboard.
+  useEffect(() => {
+    if (!session?.authenticated) return
+    if (!isSectionAllowed(session.user?.role, activeSection)) setActiveSection('dashboard')
+  }, [session, activeSection, setActiveSection])
 
   // hash-based deep links (#bookings) + keep hash in sync
   useEffect(() => {
@@ -111,6 +120,7 @@ export default function Home() {
           </div>
         </main>
       </div>
+      <GuidedTour />
       <footer className="mt-auto border-t bg-muted/40 px-4 sm:px-6 lg:px-8 py-3 text-xs text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <span className="font-medium">AI Secretary</span>
         <span>Self-hosted · local-first</span>

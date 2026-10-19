@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.github
+db
+.data
+dev.log
+*.log
+tests
+docs
+worklog.md
+TODO.md
+tool-results

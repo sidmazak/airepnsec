@@ -18,4 +18,4 @@ export const POST = withAuth(async (req, ctx) => {
     model: result.model,
     latencyMs: result.latencyMs,
   })
-})
+}, { roles: ['owner', 'admin', 'agent'] })

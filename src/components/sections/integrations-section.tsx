@@ -252,13 +252,16 @@ function WebhookUrlRow({ url, label }: { url: string; label: string }) {
 }
 
 /** CalDAV push-sync box: shows last sync summary + runs a real sync now. */
+type CalDavPulled = { cancelled: number; rescheduled: number; unchanged: number; missing: number; failed: number; total: number }
+type CalDavLastSync = { at: string; direction?: string; pushed: number; failed: number; total: number; pulled?: CalDavPulled }
+
 function CalDavSyncBox({ canManage, onChanged }: { canManage: boolean; onChanged: () => Promise<void> | void }) {
   const { toast } = useToast()
-  const [info, setInfo] = useState<{ enabled: boolean; lastSync: { at: string; pushed: number; failed: number; total: number } | null } | null>(null)
+  const [info, setInfo] = useState<{ enabled: boolean; lastSync: CalDavLastSync | null } | null>(null)
   const [syncing, setSyncing] = useState(false)
 
   const load = useCallback(() => {
-    api.get<{ enabled: boolean; lastSync: { at: string; pushed: number; failed: number; total: number } | null }>('/api/integrations/caldav-sync')
+    api.get<{ enabled: boolean; lastSync: CalDavLastSync | null }>('/api/integrations/caldav-sync')
       .then(setInfo)
       .catch(() => setInfo(null))
   }, [])
@@ -268,10 +271,17 @@ function CalDavSyncBox({ canManage, onChanged }: { canManage: boolean; onChanged
   const syncNow = async () => {
     setSyncing(true)
     try {
-      const r = await api.post<{ pushed: number; failed: number; total: number }>('/api/integrations/caldav-sync')
+      const r = await api.post<{ pushed: number; failed: number; total: number; pulled: CalDavPulled }>('/api/integrations/caldav-sync')
+      const pulledBits = [
+        r.pulled.cancelled ? `${r.pulled.cancelled} cancelled remotely` : '',
+        r.pulled.rescheduled ? `${r.pulled.rescheduled} moved remotely` : '',
+        r.pulled.failed ? `${r.pulled.failed} pull errors` : '',
+      ].filter(Boolean).join(', ')
       toast({
-        title: r.total === 0 ? 'Nothing to sync — no upcoming bookings in the next 45 days' : `Synced ${r.pushed}/${r.total} bookings${r.failed ? `, ${r.failed} failed` : ''}`,
-        variant: r.failed > 0 ? 'destructive' : 'default',
+        title: r.total === 0 && r.pulled.total === 0
+          ? 'Nothing to sync — no upcoming bookings in the next 45 days'
+          : `Calendar sync: ${r.pushed}/${r.total} events written${r.failed ? `, ${r.failed} failed` : ''}${pulledBits ? `; ${pulledBits}` : ''}`,
+        variant: r.failed > 0 || r.pulled.failed > 0 ? 'destructive' : 'default',
       })
       load()
       await onChanged()
@@ -282,20 +292,31 @@ function CalDavSyncBox({ canManage, onChanged }: { canManage: boolean; onChanged
     }
   }
 
+  const last = info?.lastSync
+  const lastPulled = last?.pulled
+
   return (
     <div className="rounded-md border p-3 space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium">Bookings → calendar</p>
+        <p className="text-sm font-medium">Bookings ↔ calendar (two-way)</p>
         <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing || !canManage || !info?.enabled}>
           {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
           Sync now
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        {info?.lastSync
-          ? `Last sync ${formatDateTime(info.lastSync.at)} — ${info.lastSync.pushed}/${info.lastSync.total} events written${info.lastSync.failed ? `, ${info.lastSync.failed} failed` : ''}.`
-          : 'Never synced yet. Enable the integration, then sync upcoming bookings (next 45 days) to your calendar.'}
+        {last
+          ? `Last sync ${formatDateTime(last.at)} — ${last.pushed}/${last.total} events written${last.failed ? `, ${last.failed} failed` : ''}` +
+            (lastPulled
+              ? `; pulled: ${lastPulled.cancelled} cancelled, ${lastPulled.rescheduled} moved, ${lastPulled.missing} missing remotely${lastPulled.failed ? `, ${lastPulled.failed} errors` : ''}.`
+              : '.')
+          : 'Never synced yet. Enable the integration, then sync upcoming bookings (next 45 days). Remote cancellations and time changes are pulled back automatically.'}
       </p>
+      {lastPulled && lastPulled.missing > 0 && (
+        <p className="text-xs text-amber-700">
+          {lastPulled.missing} pushed event(s) are no longer on the remote calendar. Local bookings are deliberately NOT cancelled by remote deletion — review the calendar first.
+        </p>
+      )}
     </div>
   )
 }
@@ -415,6 +436,13 @@ function ConnectorCard({
             )}
             {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
               <p className="text-xs text-muted-foreground break-all">Sender: {str(row.config.from) || 'not set'}</p>
+            )}
+
+            {kind === 'twilio_whatsapp' && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium">Webhook URL for the Twilio console:</p>
+                <WebhookUrlRow url={`${origin}/api/telephony/whatsapp/incoming`} label="A message comes in" />
+              </div>
             )}
 
             {kind === 'sms_gateway' && (

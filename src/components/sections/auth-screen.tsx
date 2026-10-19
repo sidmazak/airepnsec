@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useAppStore } from '@/lib/client/store'
-import { api, type SessionInfo } from '@/lib/client/api'
+import { api, ApiClientError, type SessionInfo } from '@/lib/client/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,6 +16,8 @@ export function AuthScreen() {
   const [mode, setMode] = useState<'login' | 'setup'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [needsTotp, setNeedsTotp] = useState(false)
   const [name, setName] = useState('')
   const [orgName, setOrgName] = useState('')
   const [error, setError] = useState('')
@@ -37,11 +39,18 @@ export function AuthScreen() {
     setError('')
     setBusy(true)
     try {
-      await api.post('/api/auth/login', { email, password })
+      await api.post('/api/auth/login', needsTotp ? { email, password, code: code.trim() } : { email, password })
       const s = await api.get<SessionInfo>('/api/session')
       applySession(s)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign in failed')
+      if (err instanceof ApiClientError && (err.code === 'totp_required' || err.code === 'totp_invalid')) {
+        setNeedsTotp(true)
+        setError(err.code === 'totp_required'
+          ? 'This account has two-factor authentication enabled — enter the current 6-digit code from your authenticator app.'
+          : 'That code is not valid right now — try the current code from your authenticator app.')
+      } else {
+        setError(err instanceof Error ? err.message : 'Sign in failed')
+      }
     } finally {
       setBusy(false)
     }
@@ -126,6 +135,16 @@ export function AuthScreen() {
                     <Label htmlFor="password">Password</Label>
                     <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
                   </div>
+                  {needsTotp && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="totp-code">Authenticator code</Label>
+                      <Input
+                        id="totp-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10}
+                        value={code} onChange={(e) => setCode(e.target.value)}
+                        placeholder="123456" className="min-h-[44px] tracking-[0.3em]"
+                      />
+                    </div>
+                  )}
                   <Button type="submit" className="w-full" disabled={busy}>
                     {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <LogIn className="h-4 w-4" aria-hidden />}
                     Sign in

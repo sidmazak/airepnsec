@@ -134,6 +134,71 @@ export async function putBookingEvent(creds: CalDavCreds, uid: string, ics: stri
   }
 }
 
+/* ---------------- pull (two-way) ---------------- */
+
+export type RemoteEvent = {
+  uid: string
+  dtstart: Date | null
+  dtend: Date | null
+  status: string
+}
+
+/**
+ * Minimal but correct VEVENT reader for events THIS app pushed: unfolds RFC 5545
+ * continuation lines and reads UID/DTSTART/DTEND/STATUS. Timestamps we emit are UTC
+ * (`…Z`); DATE and naive stamps fall back to UTC.
+ */
+export function parseVEvent(ics: string): RemoteEvent | null {
+  const unfolded = ics.replace(/\r?\n[ \t]/g, '')
+  const lines = unfolded.split(/\r?\n/)
+  const start = lines.findIndex((l) => l.trim().toUpperCase() === 'BEGIN:VEVENT')
+  const end = lines.findIndex((l, i) => i > start && l.trim().toUpperCase() === 'END:VEVENT')
+  if (start < 0 || end < 0) return null
+  const fields = new Map<string, string>()
+  for (const line of lines.slice(start + 1, end)) {
+    const idx = line.indexOf(':')
+    if (idx <= 0) continue
+    const name = line.slice(0, idx).split(';')[0].trim().toUpperCase()
+    if (!fields.has(name)) fields.set(name, line.slice(idx + 1).trim())
+  }
+  const parseStamp = (v: string | undefined): Date | null => {
+    if (!v) return null
+    const m = v.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/)
+    if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]))
+    const d8 = v.match(/^(\d{4})(\d{2})(\d{2})$/)
+    if (d8) return new Date(Date.UTC(+d8[1], +d8[2] - 1, +d8[3]))
+    const d = new Date(v)
+    return isNaN(d.getTime()) ? null : d
+  }
+  return {
+    uid: fields.get('UID') ?? '',
+    dtstart: parseStamp(fields.get('DTSTART')),
+    dtend: parseStamp(fields.get('DTEND')),
+    status: (fields.get('STATUS') ?? '').toUpperCase(),
+  }
+}
+
+export type RemoteFetch =
+  | { kind: 'found'; event: RemoteEvent }
+  | { kind: 'missing' }
+  | { kind: 'error'; detail: string }
+
+/** Fetch one previously pushed event back from the collection (GET {uid}.ics). */
+export async function fetchRemoteEvent(creds: CalDavCreds, uid: string): Promise<RemoteFetch> {
+  try {
+    const res = await davFetch(creds, `${encodeURIComponent(uid)}.ics`, 'GET')
+    if (res.status === 404) return { kind: 'missing' }
+    if (res.status === 401 || res.status === 403) return { kind: 'error', detail: `server rejected credentials for the GET (HTTP ${res.status})` }
+    if (res.status < 200 || res.status >= 300) return { kind: 'error', detail: `HTTP ${res.status}` }
+    const text = await res.text()
+    const event = parseVEvent(text)
+    if (!event) return { kind: 'error', detail: 'remote object is not a parseable VEVENT' }
+    return { kind: 'found', event }
+  } catch (err) {
+    return { kind: 'error', detail: sanitizeMessage(err instanceof Error ? err.message : String(err)) }
+  }
+}
+
 export async function deleteRemoteEvent(creds: CalDavCreds, uid: string): Promise<{ ok: boolean; detail: string }> {
   try {
     const res = await davFetch(creds, `${encodeURIComponent(uid)}.ics`, 'DELETE')

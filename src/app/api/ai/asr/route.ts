@@ -20,4 +20,4 @@ export const POST = withAuth(async (req, ctx) => {
   if (audio.length > MAX_AUDIO_BYTES) return json({ error: 'Recording too large — keep clips under ~90 seconds' }, 413)
   const result = await transcribeAudio(ctx.org.id, audio, body.mime ?? 'audio/webm')
   return json({ text: result.text, provider: result.provider, model: result.model, latencyMs: result.latencyMs })
-})
+}, { roles: ['owner', 'admin', 'agent'] })

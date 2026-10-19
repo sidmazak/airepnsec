@@ -44,4 +44,4 @@ export const PUT = withAuth(async (req, ctx, params) => {
   })
 
   return json({ ok: true, staffId: staff.id, serviceIds })
-})
+}, { roles: ['owner', 'admin'] })

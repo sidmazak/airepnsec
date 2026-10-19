@@ -20,7 +20,13 @@ export const POST = withPublic(async (req: NextRequest) => {
 
   const config = (() => { try { return JSON.parse(route.integration.configJson || '{}') as Record<string, unknown> } catch { return {} } })()
   const signature = req.headers.get('x-twilio-signature')
-  const candidates = candidateWebhookUrls(req, config, pathname)
+  // Twilio signs the exact URL it was given, including the query string. This
+  // endpoint is called both directly (statusCallback) and as the <Dial action>
+  // target with ?routed=1 — accept either signed form.
+  const candidates = [
+    ...candidateWebhookUrls(req, config, pathname),
+    ...candidateWebhookUrls(req, config, `${pathname}?routed=1`),
+  ]
   const signatureValid = candidates.some((u) => verifyTwilioSignature(route.secrets.authToken ?? '', u, params, signature))
 
   await logWebhook({

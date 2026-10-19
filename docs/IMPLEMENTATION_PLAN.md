@@ -21,7 +21,7 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ 8-step autosaving setup wizard with back/continue, CSV templates, plain-language AI config, and a **real end-to-end test runner** (customer → service → availability → booking → invoice → verified payment → balanced ledger check) before activation.
 
 ## Phase 4 — AI receptionist + voice test
-✅ Strict-JSON tool loop over typed provider adapters (Ollama local / OpenAI-compatible BYOK); tools: list_services, check_availability, quote_price, create_booking, my_bookings, cancel_booking, search_knowledge, payment_claim, take_message, escalate — every tool validated, every failure reported honestly to the customer.
+✅ Strict-JSON tool loop over typed provider adapters (Ollama local / OpenAI-compatible BYOK); tools: list_services, list_staff, check_availability (timezone-correct, returns the exact slot value to book), quote_price, create_booking (slot re-verified), my_bookings, reschedule_booking, cancel_booking (policy-enforced), my_invoices, business_info, search_knowledge, payment_claim (identity-checked), take_message, escalate — every tool validated, every failure reported honestly to the customer.
 ✅ **Neural RAG retrieval**: built-in local ONNX embedder (all-MiniLM-L6-v2, 384-d) with hybrid dense+BM25 search, per-chunk model tagging, controlled reindex + stale-index detection, boot-time model warm-up, protocol-tolerant tool dispatch. AiLog with latency/usage metrics (no secrets).
 ✅ Browser-based test calling via Web Speech API (STT + TTS, interruption-safe toggles, honest unsupported-browser fallback). Text inbox with human takeover.
 
@@ -31,13 +31,13 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 
 ## Phase 6 — Security hardening
 ✅ Session auth (HMAC-signed, httpOnly, SameSite=Strict), RBAC (owner/admin/agent/viewer), org isolation on every query, zod validation, CSRF custom-header check, in-memory rate limiting, encrypted provider keys (never returned after save), webhook HMAC verification, audit events, security-relevant data-mode enforcement.
-🟡 CSP/security headers: Next defaults only — add explicit headers in production config.
+✅ Security headers set in `next.config.ts` (nosniff, deny framing, referrer policy, permissions policy, COOP) + HSTS and a production CSP.
 🟡 Two-factor auth, SSO: not implemented.
 
 ## Phase 7 — Verification & docs
 ✅ tsc + ESLint clean; browser E2E of the golden path; local-only blocking test; duplicate-webhook dedupe; overpay rejection; already-reversed 409; opt-out honored; demo seed idempotent.
 ✅ This docs set; README/AGENTS guidance.
-⏳ Automated test suite (Vitest): the sandbox build forbids test-framework code — TEST_PLAN.md documents the full case matrix to add outside the sandbox.
+✅ `npm run test:unit` (node:test, 20 cases): SMS chunking, TTS chunking, read-only SQL guard, RFC 6238 TOTP vectors. CI runs it in `.github/workflows/ci.yml` alongside tsc, eslint, and `next build`.
 
 ## Phase 8 — Third-party integration layer (2026-10-14)
 ✅ Real BYOK connectors: SMTP (nodemailer), Twilio SMS/WhatsApp (Messages API), Stripe (Payment Links + webhook), signed outbound webhooks — secrets AES-256-GCM, never returned.
@@ -69,4 +69,20 @@ Updated 2026-10-14 (integration layer delivered — see [INTEGRATIONS.md](./INTE
 | PostgreSQL + Docker Compose deployment | 🟡 | `infra/` Dockerfile + compose (pgvector/pg16) **delivered-unverified-in-sandbox** — no Docker daemon here; smoke test on your host |
 | Backups | ✅ | `VACUUM INTO` file backups + JSON export; scheduled backup scripts are infra work |
 
-**Remaining honest gaps** (2026-10-14): real inbound telephony (voice/SMS phone numbers — browser voice test only), two-way calendar sync (CalDAV / Google OAuth), Vitest suites outside the sandbox, Docker smoke test on real hosts, two-way messaging inbox channels beyond web/voice-test.
+## Phase 9 — Receptionist completion sweep (2026-10-19)
+✅ Timezone correctness end-to-end: shared fixed-offset helpers (`src/lib/timezone.ts`); `check_availability` speaks the business timezone and returns exact slot values; `create_booking`/`reschedule_booking` only accept real computed slots (no invented times); naive datetimes are interpreted as org wall-clock.
+✅ Receptionist depth: `reschedule_booking`, `my_invoices`, `business_info`, `list_staff`; cancellation policy enforced (escalates inside the cut-off window); payment claims identity-checked; latest-N history (not first-N), untrusted-content instructions, escalation audit when the tool loop exhausts.
+✅ RBAC closed on every mutating route (staff = owner/admin/agent; settings = owner/admin) + nav-level role gating.
+✅ Public web chat channel: `POST/GET /api/public/chat/[slug]` (token session, CORS, rate limits) — the receptionist can now be embedded on any website; conversations land in the Inbox.
+✅ Telephony: staff replies are actually delivered over SMS (delivered/queued/failed reported honestly); SMS turns run in `after()`; Twilio `?routed=1` status callbacks verify; escalation events fire only on transition.
+✅ Voice: browser Web Speech fallback is fully wired (out-of-the-box mic + speech synthesis); server speech is OpenAI-compatible only (self-hosted Kokoro-FastAPI/faster-whisper allowed in local-only mode); Realtime voice uses the configured endpoint (`sdpUrl`) and persists transcripts.
+
+**Remaining honest gaps** (2026-10-19): SSO (SAML/OIDC), Docker smoke test verified end-to-end on this host (see worklog), Browser E2E of the new public-chat + voice paths needs a stubbed LLM endpoint (no live model in this sandbox).
+
+## Phase 10 — Closing the remaining honest gaps (2026-10-19)
+✅ Two-way CalDAV: `POST /api/integrations/caldav-sync` now pulls remote `STATUS:CANCELLED` (cancels the booking) and moved `DTSTART` (reschedules through the validated booking service); remotely deleted events are reported as `missing` and deliberately do not cancel local bookings; `direction` defaults to `both`. Verified live against Radicale (1 cancel + 1 reschedule + 1 out-of-hours failure = honest per-item results).
+✅ Inbound WhatsApp: new `POST /api/telephony/whatsapp/incoming` (signature-verified, opt-out + AI-off honored, replies via the Twilio WhatsApp sender with outbox fallback, `conversation_escalated` on transition), plus a webhook URL row in the Integrations UI and a `whatsapp` channel badge in the Inbox. Verified live end-to-end (inbound → AI booking → WhatsApp reply queued for retry on a fake sender).
+✅ 2FA: TOTP (RFC 6238, SHA1, 30s, ±1 step) in `src/lib/security/totp.ts`; `User.twoFactorSecret/twoFactorEnabled` columns; setup/enable/disable endpoints; login requires a current code when enabled; `/api/auth/2fa` status; `Security` section in the sidebar (enrollment QR/secret + copy, confirm with live code, disable requires password + code). Verified live: enable, login without/with wrong/correct code, disable with/without code.
+✅ Docker: multi-stage image built and run on this host (Debian 3.0.x query-engine target added to `binaryTargets`); register-owner + login + health verified against the running container.
+✅ CI: `.github/workflows/ci.yml` runs tsc → eslint → unit tests → build on push/PR.
+✅ Docs: API.md/IMPLEMENTATION_PLAN.md updated; worklog appended.

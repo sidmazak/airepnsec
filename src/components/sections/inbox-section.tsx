@@ -40,6 +40,7 @@ const CHANNEL_BADGE: Record<string, string> = {
   web: 'bg-secondary text-secondary-foreground',
   voice_test: 'bg-amber-100 text-amber-900',
   sms: 'bg-emerald-100 text-emerald-900',
+  whatsapp: 'bg-emerald-50 text-emerald-900 border border-emerald-200',
   phone: 'bg-muted text-muted-foreground border',
 }
 
@@ -793,9 +794,10 @@ export function InboxSection() {
                   <SelectItem value="voice_test">Voice test (browser)</SelectItem>
                   <SelectItem value="phone">Phone</SelectItem>
                   <SelectItem value="sms">SMS</SelectItem>
+                  <SelectItem value="whatsapp">WhatsApp</SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Channels are labels in this build — only web chat and the browser voice test are wired end-to-end.</p>
+              <p className="text-xs text-muted-foreground">Inbound SMS, WhatsApp and phone calls create their own threads automatically. Manual channels are labels for staff-created test threads.</p>
             </div>
           </div>
           <DialogFooter>

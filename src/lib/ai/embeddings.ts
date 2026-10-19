@@ -288,7 +288,7 @@ export async function resolveEmbedder(orgId: string): Promise<Embedder> {
     return {
       info,
       embed: async (texts) => {
-        await assertAiPolicy(orgId, 'openai_compatible') // local-only mode blocks cloud embeddings
+        await assertAiPolicy(orgId, 'openai_compatible', row!.baseUrl) // local-only mode blocks cloud embeddings; self-hosted endpoints stay allowed
         const vectors = await embedOpenAiCompatible(
           { baseUrl: row!.baseUrl, model: info.model, apiKeyEnc: row!.apiKeyEnc },
           texts

@@ -44,7 +44,7 @@ export const PATCH = withAuth(async (req, ctx, params) => {
   })
 
   return json(updated)
-})
+}, { roles: ['owner', 'admin'] })
 
 /**
  * DELETE /api/services/[id]
@@ -77,4 +77,4 @@ export const DELETE = withAuth(async (req, ctx, params) => {
   })
 
   return json({ ok: true })
-})
+}, { roles: ['owner', 'admin'] })

@@ -21,6 +21,32 @@ type TurnStatus = 'idle' | 'recording' | 'transcribing' | 'thinking' | 'speaking
 
 const VOICES = ['tongtong', 'chuichui', 'xiaochen', 'jam', 'kazi', 'douji', 'luodo']
 
+/* ---- minimal Web Speech API types (browser fallback path) ---- */
+
+type Alternative = { transcript: string }
+type RecogResult = { isFinal: boolean; length: number; [i: number]: Alternative }
+type RecogResultList = { length: number; [i: number]: RecogResult }
+type SpeechRecognitionLike = {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((e: { resultIndex: number; results: RecogResultList }) => void) | null
+  onerror: ((e: { error?: string }) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+  abort: () => void
+}
+
+function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+  if (typeof window === 'undefined') return null
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike
+  }
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
+}
+
 type ToolChip = { tool: string; ok: boolean }
 
 function parseMeta(meta: string): { toolCalls?: ToolChip[]; aiError?: string } {
@@ -46,11 +72,12 @@ export function VoiceSection() {
   const [status, setStatus] = useState<TurnStatus>('idle')
   const [level, setLevel] = useState(0)
   const [latencies, setLatencies] = useState<{ stt?: number; ai?: number; tts?: number }>({})
-  const [voice, setVoice] = useState('tongtong')
+  const [voice, setVoice] = useState('')
   const [speed, setSpeed] = useState(1)
   const [textInput, setTextInput] = useState('')
   const [micError, setMicError] = useState('')
   const [replayingId, setReplayingId] = useState<string | null>(null)
+  const [browserVoices, setBrowserVoices] = useState<Array<{ name: string; lang: string }>>([])
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -58,10 +85,14 @@ export function VoiceSection() {
   const rafRef = useRef<number | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const audioQueueRef = useRef<HTMLAudioElement[]>([])
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
 
   const stt = providers.find((p) => p.capability === 'stt')
   const tts = providers.find((p) => p.capability === 'tts')
+  // 'browser' (the out-of-the-box default) means Web Speech in this device's browser.
+  const sttIsBrowser = !stt?.enabled || stt.provider === 'browser' || stt.provider === 'none'
+  const ttsIsBrowser = !tts?.enabled || tts.provider === 'browser' || tts.provider === 'none'
   const busy = status === 'transcribing' || status === 'thinking' || status === 'speaking'
 
   const stopAudio = useCallback(() => {
@@ -70,6 +101,7 @@ export function VoiceSection() {
       a.src = ''
     }
     audioQueueRef.current = []
+    if (typeof window !== 'undefined') window.speechSynthesis?.cancel()
     setReplayingId(null)
   }, [])
 
@@ -85,7 +117,7 @@ export function VoiceSection() {
     }
   }, [])
 
-  /** Stop any in-flight recording (mic stream, level meter, AudioContext). */
+  /** Stop any in-flight recording (mic stream, speech recognition, level meter, AudioContext). */
   const cleanupRecording = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     rafRef.current = null
@@ -94,6 +126,8 @@ export function VoiceSection() {
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') void audioCtxRef.current.close()
     audioCtxRef.current = null
     mediaRecorderRef.current = null
+    try { recognitionRef.current?.abort() } catch { /* already stopped */ }
+    recognitionRef.current = null
     setLevel(0)
   }, [])
 
@@ -128,6 +162,15 @@ export function VoiceSection() {
     window.localStorage.setItem('ais_voice', voice)
     window.localStorage.setItem('ais_voice_speed', String(speed))
   }, [voice, speed])
+
+  // Browser TTS voices (populated asynchronously by some browsers).
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return
+    const load = () => setBrowserVoices(window.speechSynthesis.getVoices().map((v) => ({ name: v.name, lang: v.lang })))
+    load()
+    window.speechSynthesis.addEventListener('voiceschanged', load)
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', load)
+  }, [])
 
   const ensureConversation = async (): Promise<string | null> => {
     if (conversationId) return conversationId
@@ -177,10 +220,28 @@ export function VoiceSection() {
 
   const speak = async (text: string) => {
     if (!text.trim()) return
+    if (ttsIsBrowser) {
+      const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined
+      if (!synth) {
+        toast({ title: 'This browser has no speech synthesis', description: 'Configure a server TTS provider under AI Providers.', variant: 'destructive' })
+        return
+      }
+      const t0 = performance.now()
+      synth.cancel()
+      const u = new SpeechSynthesisUtterance(text)
+      u.rate = speed
+      const chosen = voice ? synth.getVoices().find((v) => v.name === voice) : undefined
+      if (chosen) u.voice = chosen
+      setStatus('speaking')
+      u.onend = () => { setStatus('idle'); setLatencies((l) => ({ ...l, tts: Math.round(performance.now() - t0) })) }
+      u.onerror = () => setStatus('idle')
+      synth.speak(u)
+      return
+    }
     try {
       setStatus('speaking')
       const t0 = performance.now()
-      const r = await api.post<{ audio: Array<{ mime: string; b64: string }>; latencyMs: number }>('/api/ai/tts', { text, voice, speed })
+      const r = await api.post<{ audio: Array<{ mime: string; b64: string }>; latencyMs: number }>('/api/ai/tts', { text, voice: voice || undefined, speed })
       setLatencies((l) => ({ ...l, tts: r.latencyMs || Math.round(performance.now() - t0) }))
       playAudioChunks(r.audio)
     } catch (err) {
@@ -236,6 +297,43 @@ export function VoiceSection() {
   const startRecording = async () => {
     if (busy) { stopAudio(); if (status === 'speaking') setStatus('idle') }
     setMicError('')
+
+    // Out-of-the-box browser path: Web Speech recognition, no server round-trip.
+    const Ctor = getSpeechRecognitionCtor()
+    if (sttIsBrowser && Ctor) {
+      try {
+        const rec = new Ctor()
+        rec.lang = 'en-US'
+        rec.interimResults = false
+        rec.continuous = false
+        let gotResult = false
+        rec.onresult = (e) => {
+          let final = ''
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            if (e.results[i].isFinal) final += e.results[i][0].transcript
+          }
+          if (final.trim()) {
+            gotResult = true
+            cleanupRecording()
+            void runTurn(final.trim())
+          }
+        }
+        rec.onerror = (e) => {
+          if (e.error === 'no-speech') setMicError('No speech detected — try again.')
+          else if (e.error === 'not-allowed') setMicError('Microphone permission was denied. Enable it in your browser settings.')
+          else setMicError(`Speech recognition failed: ${e.error ?? 'unknown error'}`)
+        }
+        rec.onend = () => { if (!gotResult) setStatus('idle') }
+        recognitionRef.current = rec
+        rec.start()
+        setStatus('recording')
+        return
+      } catch (err) {
+        setMicError(`Browser speech recognition unavailable: ${err instanceof Error ? err.message : 'unknown error'}`)
+        return
+      }
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
@@ -278,6 +376,10 @@ export function VoiceSection() {
   }
 
   const stopRecording = () => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop() } catch { cleanupRecording(); setStatus('idle') }
+      return
+    }
     if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop()
   }
 
@@ -335,7 +437,7 @@ export function VoiceSection() {
             <ProviderChip label="Speech-to-text" provider={stt} onConfigure={() => setActiveSection('ai')} />
             <ProviderChip label="Text-to-speech" provider={tts} onConfigure={() => setActiveSection('ai')} />
             <Badge variant="outline" className="gap-1.5">
-              <Volume2 className="h-3.5 w-3.5" aria-hidden /> {voice} · {speed.toFixed(1)}×
+              <Volume2 className="h-3.5 w-3.5" aria-hidden /> {voice || 'default voice'} · {speed.toFixed(1)}×
             </Badge>
             {latencies.stt != null && <Badge variant="secondary">STT {h(latencies.stt)}</Badge>}
             {latencies.ai != null && <Badge variant="secondary">AI {h(latencies.ai)}</Badge>}
@@ -424,7 +526,7 @@ export function VoiceSection() {
                 disabled={status === 'transcribing' || status === 'thinking'}
                 aria-label={status === 'recording' ? 'Stop recording and send' : busy ? 'Interrupt playback' : 'Start recording'}
                 className={cn(
-                  'relative h-14 w-14 rounded-full flex items-center justify-center text-primary-foreground transition-all shrink-0',
+                  'relative h-14 w-14 rounded-full flex items-center justify-center text-primary-foreground transition-[transform,background-color] shrink-0',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
                   status === 'recording' ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:bg-primary/90'
                 )}
@@ -467,19 +569,32 @@ export function VoiceSection() {
             <CardContent className="space-y-4">
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-1.5">Assistant voice</p>
-                <Select value={voice} onValueChange={setVoice}>
-                  <SelectTrigger aria-label="Assistant voice"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {VOICES.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {ttsIsBrowser ? (
+                  <Select value={voice || '__default'} onValueChange={(v) => setVoice(v === '__default' ? '' : v)}>
+                    <SelectTrigger aria-label="Assistant voice"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default">Browser default</SelectItem>
+                      {browserVoices.map((v) => <SelectItem key={v.name} value={v.name}>{v.name} ({v.lang})</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Select value={voice || '__default'} onValueChange={(v) => setVoice(v === '__default' ? '' : v)}>
+                    <SelectTrigger aria-label="Assistant voice"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default">Provider default</SelectItem>
+                      {VOICES.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-1.5">Speaking speed — {speed.toFixed(1)}×</p>
                 <Slider value={[speed]} min={0.5} max={2} step={0.1} onValueChange={([v]) => setSpeed(v)} aria-label="Speaking speed" />
               </div>
               <p className="text-[11px] text-muted-foreground">
-                In strict local-only mode, cloud speech services are blocked — the phone channel (Twilio) keeps its own built-in speech.
+                With no speech provider configured, recording and playback run in this browser (Web Speech) — nothing leaves the device.
+                Server providers (including self-hosted Kokoro-FastAPI / faster-whisper on this machine) are used automatically when configured.
+                In strict local-only mode, external cloud speech services are blocked; the phone channel (Twilio) keeps its own built-in speech.
               </p>
             </CardContent>
           </Card>
@@ -510,7 +625,8 @@ export function VoiceSection() {
 }
 
 function ProviderChip({ label, provider, onConfigure }: { label: string; provider?: ProviderConfigPublic; onConfigure: () => void }) {
-  const ok = provider?.enabled && provider.provider !== 'none' && provider.provider !== 'browser'
+  const ok = Boolean(provider?.enabled && provider.provider !== 'none')
+  const shown = provider?.provider === 'browser' ? 'browser (this device)' : (provider?.provider ?? '').replace('_', ' ')
   return (
     <button
       onClick={onConfigure}
@@ -518,7 +634,7 @@ function ProviderChip({ label, provider, onConfigure }: { label: string; provide
       title="Configure in AI Providers"
     >
       <span className={cn('h-1.5 w-1.5 rounded-full', ok ? 'bg-emerald-500' : 'bg-amber-500')} aria-hidden />
-      {label}: {ok ? (provider?.provider ?? '').replace('_', ' ') : 'not configured'}
+      {label}: {ok ? shown : 'not configured'}
     </button>
   )
 }

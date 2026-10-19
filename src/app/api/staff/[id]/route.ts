@@ -33,4 +33,4 @@ export const PATCH = withAuth(async (req, ctx, params) => {
   })
 
   return json(updated)
-})
+}, { roles: ['owner', 'admin'] })

@@ -138,4 +138,4 @@ config changes, exports/backups, opt-out changes. Actor is `USER`, `SYSTEM`, or 
 - No CSRF token: mitigated by `sameSite=strict` + JSON-only, no-cookie-on-third-party design; a
   double-submit token is Planned for defense in depth.
 - Session revocation list is in-memory (restart clears); persistent revocation Planned.
-- 2FA not implemented (**Planned**).
+- 2FA implemented (TOTP, RFC 6238, SHA1, 30s, ±1 step) via `src/lib/security/totp.ts`; per-user enrollment/disable via `/api/auth/2fa/*`; login requires the current code when enabled; secret stored AES-256-GCM encrypted; disable requires password + a current code. Remaining: SSO (SAML/OIDC) and persistent session revocation.

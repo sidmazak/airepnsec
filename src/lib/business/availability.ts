@@ -1,25 +1,19 @@
 import { db } from '@/lib/db'
 import { ApiError } from '@/lib/api'
 import { parseJson } from '@/lib/org'
+import { parseOffsetMinutes, wallClockToUtc } from '@/lib/timezone'
 import type { Service } from '@prisma/client'
 
 export const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed'] as const
 
 export type Slot = { startAt: string; endAt: string; staffId: string | null }
 
-function toMinutesOk() { /* reserved */ }
-
 function atWallClock(dayStr: string, minutes: number, tzOffsetMin: number): Date {
-  const base = new Date(`${dayStr}T00:00:00Z`)
-  return new Date(base.getTime() + (minutes - tzOffsetMin) * 60_000)
+  return wallClockToUtc(dayStr, minutes, tzOffsetMin)
 }
 
 function parseOffset(timezone: string): number {
-  // Supports "UTC", "UTC+02:00", "UTC-05:30". Fixed-offset model (documented in ARCHITECTURE.md).
-  const m = /^UTC([+-])(\d{2}):?(\d{2})?$/.exec(timezone || 'UTC')
-  if (!m) return 0
-  const sign = m[1] === '+' ? 1 : -1
-  return sign * (parseInt(m[2], 10) * 60 + (m[3] ? parseInt(m[3], 10) : 0))
+  return parseOffsetMinutes(timezone)
 }
 
 async function workingWindows(orgId: string, staffId: string | null, dow: number) {

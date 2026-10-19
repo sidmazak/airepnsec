@@ -7,28 +7,40 @@ import { Button } from '@/components/ui/button'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   LayoutDashboard, Inbox, CalendarDays, Users, Receipt, BookOpen, BookMarked,
-  Workflow, Bot, Store, Activity, LogOut, Menu, Bot as Logo, Plug, X, Mic, Database, BarChart3, Wifi,
+  Workflow, Bot, Store, Activity, LogOut, Menu, Bot as Logo, Plug, X, Mic, Database, BarChart3, Wifi, ShieldCheck,
 } from 'lucide-react'
 
-const NAV: Array<{ id: SectionId; label: string; icon: typeof LayoutDashboard; group: string }> = [
+const STAFF: string[] = ['owner', 'admin', 'agent']
+const ADMINS: string[] = ['owner', 'admin']
+
+const NAV: Array<{ id: SectionId; label: string; icon: typeof LayoutDashboard; group: string; roles?: string[] }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'Overview' },
-  { id: 'inbox', label: 'Inbox', icon: Inbox, group: 'Conversations' },
-  { id: 'voice', label: 'Voice Console', icon: Mic, group: 'Conversations' },
-  { id: 'realtime', label: 'Realtime Voice', icon: Wifi, group: 'Conversations' },
-  { id: 'bookings', label: 'Bookings', icon: CalendarDays, group: 'Operations' },
-  { id: 'customers', label: 'Customers', icon: Users, group: 'Operations' },
-  { id: 'invoices', label: 'Invoices & Payments', icon: Receipt, group: 'Money' },
-  { id: 'ledger', label: 'Ledger', icon: BookOpen, group: 'Money' },
-  { id: 'usage', label: 'Usage & Billing', icon: BarChart3, group: 'Money' },
-  { id: 'knowledge', label: 'Knowledge & FAQs', icon: BookMarked, group: 'AI' },
-  { id: 'datasources', label: 'Data Sources', icon: Database, group: 'AI' },
-  { id: 'automations', label: 'Automations', icon: Workflow, group: 'AI' },
-  { id: 'ai', label: 'AI Providers', icon: Bot, group: 'Settings' },
-  { id: 'business', label: 'Business Profile', icon: Store, group: 'Settings' },
-  { id: 'integrations', label: 'Integrations', icon: Plug, group: 'Settings' },
-  { id: 'diagnostics', label: 'Diagnostics', icon: Activity, group: 'Settings' },
-  { id: 'setup', label: 'Setup Wizard', icon: Menu, group: 'Settings' },
+  { id: 'inbox', label: 'Inbox', icon: Inbox, group: 'Conversations', roles: STAFF },
+  { id: 'voice', label: 'Voice Console', icon: Mic, group: 'Conversations', roles: STAFF },
+  { id: 'realtime', label: 'Realtime Voice', icon: Wifi, group: 'Conversations', roles: ADMINS },
+  { id: 'bookings', label: 'Bookings', icon: CalendarDays, group: 'Operations', roles: STAFF },
+  { id: 'customers', label: 'Customers', icon: Users, group: 'Operations', roles: STAFF },
+  { id: 'invoices', label: 'Invoices & Payments', icon: Receipt, group: 'Money', roles: STAFF },
+  { id: 'ledger', label: 'Ledger', icon: BookOpen, group: 'Money', roles: ADMINS },
+  { id: 'usage', label: 'Usage & Billing', icon: BarChart3, group: 'Money', roles: ADMINS },
+  { id: 'knowledge', label: 'Knowledge & FAQs', icon: BookMarked, group: 'AI', roles: ADMINS },
+  { id: 'datasources', label: 'Data Sources', icon: Database, group: 'AI', roles: ADMINS },
+  { id: 'automations', label: 'Automations', icon: Workflow, group: 'AI', roles: ADMINS },
+  { id: 'ai', label: 'AI Providers', icon: Bot, group: 'Settings', roles: ADMINS },
+  { id: 'security', label: 'Security', icon: ShieldCheck, group: 'Settings' },
+  { id: 'business', label: 'Business Profile', icon: Store, group: 'Settings', roles: ADMINS },
+  { id: 'integrations', label: 'Integrations', icon: Plug, group: 'Settings', roles: ADMINS },
+  { id: 'diagnostics', label: 'Diagnostics', icon: Activity, group: 'Settings', roles: ADMINS },
+  { id: 'setup', label: 'Setup Wizard', icon: Menu, group: 'Settings', roles: ADMINS },
 ]
+
+/** Section visibility by role — mirrors the server-side route role gates. */
+export function isSectionAllowed(role: string | undefined, id: string): boolean {
+  const item = NAV.find((n) => n.id === id)
+  if (!item) return false
+  if (!item.roles) return true
+  return role ? item.roles.includes(role) : false
+}
 
 function useLogout() {
   const setSession = useAppStore((s) => s.setSession)
@@ -66,16 +78,20 @@ export function Sidebar() {
   const isMobile = useIsMobile()
   const logout = useLogout()
 
+  const role = session?.user?.role
+  const visibleNav = NAV.filter((n) => !n.roles || (role ? n.roles.includes(role) : false))
+
   const navList = (
     <nav className="space-y-4" aria-label="Primary">
-      {[...new Set(NAV.map((n) => n.group))].map((group) => (
+      {[...new Set(visibleNav.map((n) => n.group))].map((group) => (
         <div key={group}>
           <p className="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group}</p>
           <ul className="space-y-0.5">
-            {NAV.filter((n) => n.group === group).map((item) => (
+            {visibleNav.filter((n) => n.group === group).map((item) => (
               <li key={item.id}>
                 <button
                   onClick={() => setActiveSection(item.id)}
+                  data-tour={`sidebar-${item.id}`}
                   aria-current={activeSection === item.id ? 'page' : undefined}
                   className={cn(
                     'w-full flex items-center gap-2.5 rounded-md px-2 py-2 text-sm min-h-[44px] transition-colors',
@@ -131,8 +147,8 @@ export function Sidebar() {
           </div>
         </div>
       )}
-      <aside className="hidden lg:flex w-60 shrink-0 flex-col border-r bg-muted/30 px-3 py-4 sticky top-0 h-screen overflow-y-auto" aria-label="Sidebar">
-        <div className="flex items-center gap-2 px-2 py-1">
+      <aside className="hidden lg:flex w-60 shrink-0 flex-col border-r bg-muted/30 px-3 py-4 sticky top-0 h-screen" aria-label="Sidebar">
+        <div className="shrink-0 flex items-center gap-2 px-2 py-1">
           <div className="h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0" aria-hidden>
             <Logo className="h-4 w-4" />
           </div>
@@ -141,8 +157,8 @@ export function Sidebar() {
             <p className="text-[11px] text-muted-foreground truncate">{session?.org?.name ?? 'Workspace'}</p>
           </div>
         </div>
-        <div className="flex-1 mt-4">{navList}</div>
-        {logoutBtn}
+        <div className="flex-1 mt-4 overflow-y-auto min-h-0">{navList}</div>
+        <div className="shrink-0 pt-2">{logoutBtn}</div>
       </aside>
     </>
   )

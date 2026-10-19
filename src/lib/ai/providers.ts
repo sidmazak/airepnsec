@@ -2,8 +2,8 @@ import { db } from '@/lib/db'
 import { ApiError } from '@/lib/api'
 import { encryptSecret, decryptSecret } from '@/lib/crypto'
 
-export type Capability = 'llm' | 'embedding' | 'stt' | 'tts' | 'rerank' | 'vision'
-export const CAPABILITIES: Capability[] = ['llm', 'embedding', 'stt', 'tts', 'rerank', 'vision']
+export type Capability = 'llm' | 'embedding' | 'stt' | 'tts' | 'realtime' | 'rerank' | 'vision'
+export const CAPABILITIES: Capability[] = ['llm', 'embedding', 'stt', 'tts', 'realtime', 'rerank', 'vision']
 
 export type ProviderKind = 'ollama' | 'openai_compatible' | 'browser' | 'local_neural' | 'local_lexical' | 'none'
 
@@ -12,6 +12,7 @@ export const CAPABILITY_INFO: Record<Capability, { label: string; description: s
   embedding: { label: 'Knowledge retrieval (RAG embeddings)', description: 'Embeds and retrieves your approved documents. The built-in neural model runs entirely on this machine.', kinds: ['local_neural', 'ollama', 'openai_compatible', 'local_lexical'] },
   stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The browser mic path works out of the box.', kinds: ['browser', 'openai_compatible', 'ollama'] },
   tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The browser synth path works out of the box.', kinds: ['browser', 'openai_compatible'] },
+  realtime: { label: 'Realtime voice (optional)', description: 'Low-latency WebRTC voice with an OpenAI-compatible realtime endpoint. Falls back to the conversation model when not set.', kinds: ['none', 'openai_compatible'] },
   rerank: { label: 'Reranking (optional)', description: 'Improves ordering of retrieved knowledge. Optional.', kinds: ['none', 'openai_compatible'] },
   vision: { label: 'Vision (optional)', description: 'Understands images. Optional.', kinds: ['none', 'openai_compatible'] },
 }
@@ -249,15 +250,44 @@ export async function runAndStoreTest(orgId: string, capability: Capability): Pr
   return result
 }
 
+/**
+ * True when an OpenAI-compatible base URL points at this machine or a private
+ * network — i.e. a self-hosted speech/LLM server (Kokoro-FastAPI, faster-whisper,
+ * speaches, llama.cpp, vLLM...). Such endpoints stay inside the network and are
+ * allowed even in local-only mode.
+ */
+export function isLocalEndpoint(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    if (host === 'localhost' || host === 'host.docker.internal' || host.endsWith('.local') || host.endsWith('.internal')) return true
+    if (host === '::1') return true
+    if (/^(fc|fd|fe80)/.test(host)) return true // IPv6 unique-local / link-local
+    const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+    if (v4) {
+      const [a, b] = [Number(v4[1]), Number(v4[2])]
+      if (a === 127 || a === 10 || a === 0) return true
+      if (a === 192 && b === 168) return true
+      if (a === 169 && b === 254) return true
+      if (a === 172 && b >= 16 && b <= 31) return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
 /** Enforce data-mode policy before any AI call. Throws on violation. */
-export async function assertAiPolicy(orgId: string, providerKind: string) {
+export async function assertAiPolicy(orgId: string, providerKind: string, baseUrl = '') {
   const org = await db.organization.findUnique({ where: { id: orgId }, select: { dataMode: true } })
   if (!org) throw new ApiError(404, 'Organization not found', 'not_found')
   const cloudProviders = ['openai_compatible']
   if (org.dataMode === 'local_only' && cloudProviders.includes(providerKind)) {
+    // A self-hosted OpenAI-compatible server on this machine/private network is
+    // not a cloud provider — allow it so local_only orgs can still run speech.
+    if (baseUrl && isLocalEndpoint(baseUrl)) return
     throw new ApiError(
       403,
-      'Local-only mode is enabled: this request would send data to an external AI provider and was blocked. Configure a local Ollama model or switch the data mode in AI settings.',
+      'Local-only mode is enabled: this request would send data to an external AI provider and was blocked. Configure a local Ollama model, a self-hosted endpoint on this network, or switch the data mode in AI settings.',
       'local_only_blocked'
     )
   }

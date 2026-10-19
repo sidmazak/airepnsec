@@ -47,4 +47,4 @@ export const PUT = withAuth(async (req, ctx) => {
     orderBy: [{ dow: 'asc' }, { startMin: 'asc' }],
   })
   return json({ ok: true, hours: saved })
-})
+}, { roles: ['owner', 'admin'] })

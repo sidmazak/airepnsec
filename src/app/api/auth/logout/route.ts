@@ -11,7 +11,9 @@ import { audit } from '@/lib/audit'
 export const POST = withAuth(async (req, ctx) => {
   const token = req.cookies.get(SESSION_COOKIE)?.value
   if (token) {
-    await db.session.deleteMany({ where: { tokenHash: sha256(token) } })
+    // Revoke persistently so a stolen cookie cannot be replayed even after a
+    // restart; the row is kept (revokedAt set) for auditability.
+    await db.session.updateMany({ where: { tokenHash: sha256(token) }, data: { revokedAt: new Date(), expiresAt: new Date() } })
   }
 
   await audit({

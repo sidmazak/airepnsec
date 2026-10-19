@@ -25,6 +25,36 @@ export default function RealtimeSection() {
     setLog((prev) => [...prev, { who, text }])
   }, [])
 
+  // Realtime transcripts are persisted to the conversation (best-effort) so voice
+  // calls show up in the Inbox like any other channel.
+  const pendingRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const flushTranscript = useCallback(async () => {
+    const cid = conversationIdRef.current
+    const items = pendingRef.current
+    if (!cid || items.length === 0) return
+    pendingRef.current = []
+    try {
+      await api.post(`/api/conversations/${cid}/transcript`, { messages: items })
+    } catch (err) {
+      console.error('[realtime] transcript persist failed:', err instanceof Error ? err.message : err)
+    }
+  }, [])
+  const record = useCallback(
+    (who: 'user' | 'assistant', text: string) => {
+      append(who, text)
+      pendingRef.current.push({ role: who, content: text })
+    },
+    [append]
+  )
+
+  useEffect(() => {
+    const timer = setInterval(() => void flushTranscript(), 5000)
+    return () => {
+      clearInterval(timer)
+      void flushTranscript()
+    }
+  }, [flushTranscript])
+
   const teardown = useCallback(() => {
     dcRef.current?.close()
     pcRef.current?.close()
@@ -46,9 +76,10 @@ export default function RealtimeSection() {
       const conv = await api.post<{ conversation: { id: string } }>('/api/conversations', { channel: 'voice_test', contactName: 'Realtime voice caller' })
       conversationIdRef.current = conv.conversation.id
 
-      const session = await api.post<{ clientSecret: string; model: string } & Record<string, unknown>>('/api/ai/realtime/session', {})
+      const session = await api.post<{ clientSecret: string; model: string; sdpUrl?: string } & Record<string, unknown>>('/api/ai/realtime/session', {})
       const clientSecret = session.clientSecret as string
       const model = (session.model as string) || 'gpt-4o-realtime-preview'
+      const sdpUrl = session.sdpUrl || `https://api.openai.com/v1/realtime`
 
       const pc = new RTCPeerConnection()
       pcRef.current = pc
@@ -72,11 +103,11 @@ export default function RealtimeSection() {
         if (type === 'response.output_audio_transcript.delta') {
           assistantBuf += String(msg.delta ?? '')
         } else if (type === 'response.output_audio_transcript.done') {
-          if (assistantBuf.trim()) append('assistant', assistantBuf.trim())
+          if (assistantBuf.trim()) record('assistant', assistantBuf.trim())
           assistantBuf = ''
         } else if (type === 'conversation.item.input_audio_transcription.completed') {
           const text = String(msg.transcript ?? '').trim()
-          if (text) append('user', text)
+          if (text) record('user', text)
         } else if (type === 'response.function_call_arguments.done') {
           const name = String(msg.name ?? '')
           const callId = String(msg.call_id ?? '')
@@ -104,7 +135,7 @@ export default function RealtimeSection() {
 
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-      const resp = await fetch(`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
+      const resp = await fetch(`${sdpUrl}?model=${encodeURIComponent(model)}`, {
         method: 'POST',
         body: offer.sdp ?? '',
         headers: { authorization: `Bearer ${clientSecret}`, 'content-type': 'application/sdp' },
@@ -122,12 +153,13 @@ export default function RealtimeSection() {
       teardown()
       setStatus('error')
     }
-  }, [append, status, teardown, toast])
+  }, [append, record, status, teardown, toast])
 
   const stop = useCallback(() => {
+    void flushTranscript()
     append('system', 'Realtime session ended.')
     teardown()
-  }, [append, teardown])
+  }, [append, flushTranscript, teardown])
 
   return (
     <div className="space-y-6 p-4 md:p-6">

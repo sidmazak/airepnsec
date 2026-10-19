@@ -79,7 +79,7 @@ async function loadSession(token: string): Promise<ApiCtx | null> {
   const dot = token.indexOf('.')
   if (dot < 0) return null
   const session = await db.session.findUnique({ where: { tokenHash: sha256(token) } })
-  if (!session || session.expiresAt < new Date()) return null
+  if (!session || session.expiresAt < new Date() || session.revokedAt) return null
   const user = await db.user.findUnique({ where: { id: session.userId } })
   if (!user) return null
   const org = await db.organization.findUnique({ where: { id: user.orgId } })

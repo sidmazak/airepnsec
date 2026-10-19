@@ -44,4 +44,4 @@ export const POST = withAuth(async (req, ctx, params) => {
   }
 
   return json({ ...result, assistantReply: result.reply })
-})
+}, { roles: ['owner', 'admin', 'agent'] })

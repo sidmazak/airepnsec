@@ -16,4 +16,4 @@ export const POST = withAuth(async (req, ctx) => {
   if (!conv) return json({ error: 'conversation_not_found' }, 404)
   const result = await runReceptionistTool(ctx.org, data.conversationId, data.tool, (data.args as Record<string, unknown>) || {})
   return json({ tool: data.tool, result })
-}, { roles: ['owner', 'admin', 'viewer'] })
+}, { roles: ['owner', 'admin', 'agent'] })
