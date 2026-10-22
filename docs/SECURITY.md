@@ -117,6 +117,19 @@ services/routes after the mutation and are not part of the same DB transaction f
 - Restore: stop the app, replace the SQLite file (or restore the Postgres dump), run
   `npx prisma db push`, then verify health/providers.
 
+## 10a. Local models, OAuth tokens and backups
+
+- **Local speech models** live in `.models/` (git-ignored) and are downloaded from the Hugging
+  Face CDN on demand. They contain no secrets and no tenant data — only model weights. The
+  catalog is a fixed allow-list; a model id outside the catalog is rejected (`422 bad_model`).
+- **Microsoft 365 / Google OAuth refresh tokens** are stored AES-256-GCM encrypted in
+  `Integration.secretsEnc` together with the client secret and are never returned by any route.
+  Only `configured: boolean` is exposed. The OAuth `state` nonce is single-use and expires after
+  10 minutes.
+- **Backups** are written with file mode 0600 into `backups/`; the folder is git-ignored and must
+  be protected like the database itself (it contains the same business data). The `APP_SECRET` is
+  never part of a backup — without it, encrypted credentials stay encrypted.
+
 ## 11. Local-only mode guarantees
 
 - `local_only` blocks external `openai_compatible` calls at `assertAiPolicy`; endpoints on localhost,

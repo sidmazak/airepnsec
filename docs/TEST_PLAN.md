@@ -133,6 +133,24 @@ is enabled — that is a pass for honesty, not a booking test.
 - **Real provider/gateway tests:** BLOCKED_EXTERNAL here (no Ollama/OpenAI-compatible endpoint,
   pg/mysql, SMS hardware). Use the connection-test buttons on a configured host.
 
+## 4a. Local speech, calendar sync and backups (manual protocol)
+
+- **Local speech**: `GET /api/ai/speech/models` → the catalog with the real install state.
+  `POST /api/ai/speech/models {"id":"mms-tts-eng"}` → downloads the weights (≈38 MB) and warms
+  the pipeline; the answer contains the on-disk size. `PUT /api/providers/tts
+  {"provider":"local_speech","model":"mms-tts-eng"}` → `POST /api/ai/tts {"text":"..."}` must
+  return a `audio/wav` chunk (RIFF header). `PUT /api/providers/stt
+  {"provider":"local_speech","model":"whisper-tiny-en"}` → `POST /api/ai/asr` with the produced WAV
+  (or a webm recording when ffmpeg is installed) must return a transcript. A model that is not
+  downloaded must fail with the download hint — never with a fake success.
+- **Microsoft 365**: create the `microsoft_calendar` integration, open the authorize route (307 to
+  `login.microsoftonline.com`), then run `POST /api/integrations/microsoft-calendar/sync`. Without
+  a real tenant the run must fail honestly (`409 disabled` / `422 not_connected`); with a tenant the
+  push/pull counters must be real.
+- **Backups**: `PUT /api/admin/backups/schedule {"enabled":true,"hour":3,"retention":5}`,
+  `POST /api/admin/backups` → `201`, `GET /api/admin/backups` → the snapshot list; snapshots
+  older than the retention count must be pruned by the next run.
+
 ## 5. Future automated suite (outside this environment)
 
 Add DB-backed Vitest/Playwright suites for: conversation-lock contention, worker lease TTL

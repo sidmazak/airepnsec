@@ -8,7 +8,7 @@ import {
   type Capability,
 } from '@/lib/ai/providers'
 
-const PROVIDER_KINDS = ['ollama', 'openai_compatible', 'browser', 'local_neural', 'local_lexical', 'none'] as const
+const PROVIDER_KINDS = ['ollama', 'openai_compatible', 'browser', 'local_neural', 'local_lexical', 'local_speech', 'none'] as const
 
 const putSchema = z.object({
   provider: z.enum(PROVIDER_KINDS),
@@ -34,6 +34,21 @@ export const PUT = withAuth(
     const capability = raw as Capability
 
     const body = await parseBody(req, putSchema)
+
+    // A local speech provider must name a model from the local catalog, and the
+    // model must match the capability — no silent fallbacks to a remote service.
+    if (body.provider === 'local_speech') {
+      const { findLocalSpeechModel, LOCAL_SPEECH_MODELS } = await import('@/lib/ai/localSpeech')
+      const wanted = body.model?.trim()
+      const model = wanted ? findLocalSpeechModel(wanted) : undefined
+      if (!model) {
+        return fail(422, `Unknown local speech model "${wanted ?? ''}". Available: ${LOCAL_SPEECH_MODELS.map((m) => m.id).join(', ')}`, { code: 'bad_model' })
+      }
+      if (model.capability !== capability) {
+        return fail(422, `"${model.label}" is a ${model.capability === 'tts' ? 'text-to-speech' : 'speech-to-text'} model and cannot serve the ${capability} capability.`, { code: 'bad_model' })
+      }
+    }
+
     const row = await saveProvider(ctx.org.id, capability, body)
 
     await audit({

@@ -27,8 +27,8 @@ car rentals, and similar appointment/rental businesses.
 | Money | Invoices with line items, verified payments vs. customer claims, idempotent webhooks, append-only ledger, reversals, statements |
 | Knowledge | Approved FAQ/docs, hybrid semantic + BM25 retrieval, built-in local ONNX embeddings, BYO databases/JSON as knowledge sources |
 | Automations | Triggers, conditions, delays, quiet hours, dedupe, retries, caps, test mode, run history, leased worker |
-| Integrations | SMTP, Twilio SMS/WhatsApp/Voice, SMS gateways (TextBee/httpSMS/android-sms-gateway/generic), Stripe Payment Links/webhooks, signed outbound webhooks, CalDAV two-way sync, Google Calendar OAuth two-way sync |
-| Operations | Dashboard, audit trail, outbox status, AI usage/cost estimates, diagnostics, encrypted secrets, 2FA, backups |
+| Integrations | SMTP, Twilio SMS/WhatsApp/Voice, SMS gateways (TextBee/httpSMS/android-sms-gateway/generic), Stripe Payment Links/webhooks, signed outbound webhooks, CalDAV two-way sync, Google Calendar and Microsoft 365 Graph OAuth two-way sync |
+| Operations | Dashboard, audit trail, outbox status, AI usage/cost estimates, diagnostics, encrypted secrets, 2FA, scheduled backups with retention |
 
 ### AI providers (no proprietary SDK)
 
@@ -36,8 +36,11 @@ car rentals, and similar appointment/rental businesses.
   llama.cpp server, …). Credentials are configured in the UI and encrypted at rest.
 - **Embeddings:** built-in local neural model (`all-MiniLM-L6-v2`, 384-d ONNX) by default; optional
   Ollama or OpenAI-compatible embeddings.
-- **Speech:** browser Web Speech fallback, or OpenAI-compatible `/audio/transcriptions` and
-  `/audio/speech` for server STT/TTS.
+- **Speech:** browser Web Speech fallback, OpenAI-compatible `/audio/transcriptions` and
+  `/audio/speech` for server STT/TTS, or fully local ONNX models (Whisper / MMS-TTS) that are
+  downloaded on demand into `.models/` and never send audio off the machine.
+- **Also:** server-side streaming (SSE), provider-native tool calling with a JSON-protocol
+  fallback, optional reranking and vision, a hardware probe with a model catalog.
 - **Policy:** `local_only` blocks cloud endpoints; `hybrid` and `cloud_first` permit configured
   endpoints. There is no bundled cloud account and no silent deterministic fallback.
 
@@ -332,7 +335,8 @@ build check.
   for both profiles on 2026-10-22; rerun the documented smoke test after upgrading.
 - **CalDAV pull is conservative:** remote deletes are reported as `missing`, not auto-cancelled;
   locally cancelled bookings are not deleted remotely.
-- **No scheduled backups / retention policy** are shipped; schedule the documented commands.
+- Scheduled backups now ship with an hourly worker and a retention policy; a one-click
+  restore script is still not included (use `VACUUM INTO`/`pg_dump` snapshots from SELF_HOSTING).
 
 ## Project layout
 
@@ -340,8 +344,8 @@ build check.
 src/app/                 Next.js App Router: / SPA + /api route handlers
 src/components/sections/ 18 client-side sections (dashboard, inbox, bookings, …)
 src/lib/business/        Booking, invoice, payment, ledger, collections services
-src/lib/ai/              Providers, policy, embeddings, receptionist tool loop, speech
-src/lib/integrations/    SMTP, Twilio, SMS gateways, Stripe, CalDAV, Google Calendar, outbox dispatcher
+src/lib/ai/              Providers, policy, embeddings, receptionist tool loop, speech, local speech models
+src/lib/integrations/    SMTP, Twilio, SMS gateways, Stripe, CalDAV, Google Calendar, Microsoft 365 Graph, outbox dispatcher
 src/lib/datasources/     BYO DB/JSON ingestion + SSRF-guarded adapters
 src/lib/telephony/       TwiML, PABX routing, no-input state
 src/lib/automation/      Trigger/condition/action engine

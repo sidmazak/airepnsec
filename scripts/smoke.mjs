@@ -170,7 +170,46 @@ async function main() {
     check('google_calendar integration can be removed', removed.status === 200, `status=${removed.status}`)
   }
 
-  // 7. team management: invite -> accept -> role change -> deactivate
+  // 7. Microsoft 365 integration (Graph OAuth)
+  const ms = await req('POST', '/api/integrations', {
+    kind: 'microsoft_calendar',
+    label: 'Smoke Microsoft 365',
+    config: { tenant: 'common', calendarEmail: 'smoke@example.com' },
+    secrets: { clientId: 'smoke-ms-client-id', clientSecret: 'smoke-ms-client-secret' },
+  })
+  check('microsoft_calendar integration can be created', ms.status === 201 && Boolean(ms.data?.integration?.id), `status=${ms.status} ${JSON.stringify(ms.data).slice(0, 200)}`)
+  const msId = ms.data?.integration?.id
+
+  if (msId) {
+    const msList = await req('GET', '/api/integrations')
+    const msRow = (msList.data?.integrations ?? []).find((r) => r.id === msId)
+    check('microsoft_calendar is listed as not yet authorized', msRow?.connected === false, `connected=${msRow?.connected}`)
+    check('microsoft_calendar secrets are never returned', !JSON.stringify(msRow?.config ?? {}).includes('smoke-ms-client-secret'), 'secret leaked into the wire shape')
+
+    const msAuthorize = await req('GET', '/api/integrations/microsoft_calendar/authorize')
+    const msLocation = msAuthorize.headers.get('location') || ''
+    check('microsoft authorize redirects to Microsoft', msAuthorize.status === 307 || msAuthorize.status === 302, `status=${msAuthorize.status}`)
+    check('microsoft authorize points at login.microsoftonline.com', msLocation.startsWith('https://login.microsoftonline.com/common/oauth2/v2.0/authorize'), msLocation.slice(0, 90))
+    check('microsoft authorize sends a state nonce', /[?&]state=/.test(msLocation), 'no state parameter')
+
+    const msSync = await req('POST', '/api/integrations/microsoft-calendar/sync', {})
+    check('microsoft sync fails honestly without an OAuth grant', msSync.status === 422 || msSync.status === 409 || msSync.status === 404, `status=${msSync.status} ${JSON.stringify(msSync.data).slice(0, 160)}`)
+
+    const msRemoved = await req('DELETE', `/api/integrations/${msId}`)
+    check('microsoft_calendar integration can be removed', msRemoved.status === 200, `status=${msRemoved.status}`)
+  }
+
+  // 8. local speech model catalog
+  const speech = await req('GET', '/api/ai/speech/models')
+  check('local speech catalog is readable', speech.status === 200 && Array.isArray(speech.data?.models) && speech.data.models.length > 0, `status=${speech.status} ${JSON.stringify(speech.data).slice(0, 160)}`)
+  const badModel = await req('PUT', '/api/providers/tts', { provider: 'local_speech', model: 'not-a-model', enabled: true })
+  check('an unknown local speech model is rejected', badModel.status === 422, `status=${badModel.status} ${JSON.stringify(badModel.data).slice(0, 160)}`)
+
+  // 9. scheduled backups
+  const backups = await req('GET', '/api/admin/backups')
+  check('backup list and schedule are readable', backups.status === 200 && Array.isArray(backups.data?.backups) && typeof backups.data?.schedule?.hour === 'number', `status=${backups.status} ${JSON.stringify(backups.data).slice(0, 160)}`)
+
+  // 10. team management: invite -> accept -> role change -> deactivate
   const inviteEmail = `smoke-agent-${Date.now()}@example.com`
   const invite = await req('POST', '/api/users/invites', { email: inviteEmail, role: 'agent' })
   check('invitation can be created', invite.status === 201 && Boolean(invite.data?.inviteUrl), `status=${invite.status} ${JSON.stringify(invite.data).slice(0, 160)}`)

@@ -171,6 +171,15 @@ unique nullable `dedupeKey`, `scheduledFor`, `sentAt`.
 non-secret `configJson`, encrypted `secretsEnc`, `enabled`, last test state. Singleton kinds are
 enforced in code; `webhook_out` allows multiple destinations.
 
+### CalendarBlock
+
+`CalendarBlock` is the single representation of "you cannot be booked". `source` distinguishes the
+origin: `manual` (staff blocks, created by `/api/calendar/blocks` or the `block_time` tool),
+`google_calendar` (free/busy windows pulled from Google), `microsoft_calendar` (free/busy windows
+pulled from Microsoft 365) and `caldav` (events read back from a CalDAV collection). `externalId`
+makes the sync idempotent — the same external event is updated, not duplicated. Both
+`computeSlots` and the booking transaction honour these rows.
+
 ### WorkerLease
 `name` (PK), `holder`, `expiresAt`, `lastRunAt`, `lastError`, `updatedAt`. Expired leases are
 recoverable; a completed worker moves `expiresAt` into the past.

@@ -1,11 +1,13 @@
 import { db } from '@/lib/db'
 import { ApiError } from '@/lib/api'
 import { getActiveProvider, getApiKey, assertAiPolicy, type Capability } from '@/lib/ai/providers'
+import { toMono16kSamples } from '@/lib/ai/audio-input'
 
 /**
  * Real speech pipeline (STT + TTS) routed through the org's provider config —
  * same BYOK/policy layer as chat:
  *  - openai_compatible → POST {base}/audio/transcriptions (multipart) and POST {base}/audio/speech
+ *  - local_speech      → ONNX models in .models/ (Whisper / MMS-TTS), fully offline
  * Anything else (browser/none/ollama) is honestly "not usable server-side".
  *
  * Local-only data mode blocks external endpoints via assertAiPolicy, same as chat.
@@ -73,8 +75,12 @@ async function getSpeechProvider(orgId: string, capability: 'stt' | 'tts') {
       'speech_not_configured'
     )
   }
+  if (row.provider === 'local_speech') {
+    await assertAiPolicy(orgId, row.provider, row.baseUrl)
+    return row
+  }
   if (row.provider !== 'openai_compatible') {
-    throw new ApiError(503, `Provider "${row.provider}" cannot serve ${capability} on the server. Use an OpenAI-compatible endpoint (local servers like Kokoro-FastAPI, faster-whisper-server or Speaches work), or the browser mic/speech path in the Voice Console.`, 'speech_provider_unsupported')
+    throw new ApiError(503, `Provider "${row.provider}" cannot serve ${capability} on the server. Use an OpenAI-compatible endpoint (local servers like Kokoro-FastAPI, faster-whisper-server or Speaches work), a local speech model, or the browser mic/speech path in the Voice Console.`, 'speech_provider_unsupported')
   }
   await assertAiPolicy(orgId, row.provider, row.baseUrl)
   return row
@@ -82,10 +88,32 @@ async function getSpeechProvider(orgId: string, capability: 'stt' | 'tts') {
 
 /* ---------------- STT ---------------- */
 
+/** Default local speech-to-text model when the provider config does not name one. */
+export const DEFAULT_LOCAL_STT_MODEL = 'whisper-tiny-en'
+/** Default local text-to-speech model when the provider config does not name one. */
+export const DEFAULT_LOCAL_TTS_MODEL = 'mms-tts-eng'
+
 export async function transcribeAudio(orgId: string, audio: Buffer, mime: string): Promise<SpeechResult> {
   const row = await getSpeechProvider(orgId, 'stt')
   const started = Date.now()
   const model = row.model || 'default'
+
+  if (row.provider === 'local_speech') {
+    const localModel = row.model || DEFAULT_LOCAL_STT_MODEL
+    try {
+      const samples = await toMono16kSamples(audio, mime)
+      const { transcribeLocalSpeech } = await import('@/lib/ai/localSpeech')
+      const result = await transcribeLocalSpeech(samples, localModel)
+      if (!result.text) throw new Error('The local speech model returned an empty transcript — was the recording silent?')
+      await logSpeech(orgId, 'stt', 'local_speech', localModel, Date.now() - started, true)
+      return { text: result.text, provider: 'local_speech', model: localModel, latencyMs: Date.now() - started }
+    } catch (err) {
+      const msg = sanitize(err)
+      await logSpeech(orgId, 'stt', 'local_speech', localModel, Date.now() - started, false, msg)
+      throw new ApiError(502, `Local speech-to-text failed: ${msg.slice(0, 220)}`, 'stt_failed')
+    }
+  }
+
   try {
     // OpenAI-compatible multipart transcription (e.g. whisper-v3 on any compatible host)
     const form = new FormData()
@@ -127,6 +155,25 @@ export async function synthesizeSpeech(orgId: string, text: string, opts: { voic
   const chunks = chunkForTts(text)
   if (chunks.length === 0) throw new ApiError(400, 'Nothing to speak — the text is empty', 'empty_text')
   const model = row.model || 'default'
+
+  if (row.provider === 'local_speech') {
+    const localModel = row.model || DEFAULT_LOCAL_TTS_MODEL
+    try {
+      const { synthesizeLocalSpeech } = await import('@/lib/ai/localSpeech')
+      const result = await synthesizeLocalSpeech(text, localModel)
+      await logSpeech(orgId, 'tts', 'local_speech', localModel, Date.now() - started, true)
+      return {
+        chunks: [{ mime: 'audio/wav', b64: Buffer.from(result.audio).toString('base64') }],
+        provider: 'local_speech',
+        model: localModel,
+        latencyMs: Date.now() - started,
+      }
+    } catch (err) {
+      const msg = sanitize(err)
+      await logSpeech(orgId, 'tts', 'local_speech', localModel, Date.now() - started, false, msg)
+      throw new ApiError(502, `Local text-to-speech failed: ${msg.slice(0, 220)}`, 'tts_failed')
+    }
+  }
 
   try {
     const key = getApiKey(row)

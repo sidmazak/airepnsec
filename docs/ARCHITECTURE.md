@@ -290,6 +290,26 @@ transaction), our own pushed bookings are excluded from those blocks, and bookin
 Google events marked with a private `aisBookingId` extended property (idempotent re-push).
 Remote cancellations and moves are pulled back through the validated booking service.
 
+**Microsoft 365 sync.** `src/lib/integrations/microsoftGraph.ts` speaks the Graph API directly
+(fixed `graph.microsoft.com` / `login.microsoftonline.com` endpoints — no user-controlled host,
+so no SSRF surface). OAuth 2.0 authorization-code flow against the Microsoft identity platform:
+the authorize route mints a one-time nonce stored in `AppSetting`, the callback exchanges the
+code for access + refresh tokens and stores the refresh token encrypted in `Integration.secretsEnc`.
+`POST /api/integrations/microsoft-calendar/sync` then mirrors the Google Calendar design: the
+free/busy schedule becomes `CalendarBlock` rows (source `microsoft_calendar`), bookings are pushed
+as Graph events marked with an `ais-booking-id:` marker in the event body (idempotent re-push),
+and remote cancellations/moves are pulled back through the validated booking service.
+
+**Local speech models.** `src/lib/ai/localSpeech.ts` runs Whisper (speech-to-text) and MMS-TTS
+(text-to-speech) ONNX models through transformers.js (ONNX Runtime) on the server. The weights
+live in `.models/` (the same folder the built-in embedding model uses) and are downloaded on
+demand from the Hugging Face CDN — the install state shown in the UI is the real on-disk state.
+`src/lib/ai/audio-wav.ts` is a dependency-free RIFF/WAVE codec: PCM WAV is decoded in-process,
+compressed browser recordings are converted with ffmpeg when it is installed, and the Voice
+Console converts to 16 kHz mono WAV in the browser when the local provider is active. The
+`local_speech` provider kind is validated against the catalog (`422 bad_model`) and its
+connection test runs real inference — a model that is not downloaded fails honestly.
+
 **Blocked periods.** `CalendarBlock` is the single representation of "you cannot be booked"
 (external busy windows and manual blocks). `computeSlots` subtracts them from every slot list and
 `assertSlotAvailable` rejects an overlapping booking inside the booking transaction
@@ -310,6 +330,12 @@ lines are excluded; lines without a `TelephonyLine` row remain eligible with zer
 creates a `TelephonyCall` row; status callbacks prefer Twilio `DialCallStatus` for `<Dial>` results
 and normalize `ringing/queued → started`, `in-progress → answered`, `no-answer/busy/canceled → missed`.
 No-input counters are shared between gather and status so completed calls clear their state.
+
+**Scheduled backups.** `src/lib/backup.ts` creates SQLite snapshots (`VACUUM INTO`) into
+`backups/` with file mode 0600 and prunes the oldest snapshots beyond the configured retention.
+The schedule (`AppSetting backup_schedule`: `enabled`, `hour`, `retention`) is checked hourly by
+the background worker (`src/instrumentation.ts`); `backup_last_run` records the last run. The same
+engine backs the manual `/api/admin/backups` endpoint and the Diagnostics card.
 
 ## 10. Production deployment topology
 

@@ -207,6 +207,40 @@ always matches the real diary. Manual blocks can be managed through
 **Microsoft 365 / Graph** is not implemented — use CalDAV (Outlook exposes a CalDAV endpoint) or
 stay on the ICS feed.
 
+### `microsoft_calendar` — two-way sync with Microsoft 365 (Graph OAuth)
+
+Outlook users who do not want CalDAV can connect Microsoft 365 directly. The flow mirrors the
+Google Calendar integration: an Entra ID application (client id + secret) is saved in Integrations,
+`GET /api/integrations/microsoft_calendar/authorize` redirects to
+`login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize` with the scopes
+`offline_access User.Read Calendars.ReadWrite`, and the callback exchanges the code for an access
++ refresh token. The refresh token is stored encrypted and never returned; a one-time `state`
+nonce is bound to the org.
+
+`POST /api/integrations/microsoft-calendar/sync` (owner/admin, "Sync now") does three things:
+
+- **Pull (busy):** the free/busy schedule of the configured mailbox becomes `CalendarBlock` rows
+  (source `microsoft_calendar`) — busy diary time is subtracted from availability and rejected by
+  the booking transaction. Events we pushed ourselves are excluded.
+- **Pull (events):** Graph events whose body carries the `ais-booking-id: <bookingId>` marker are
+  read back — a cancelled remote event cancels the booking, a moved event reschedles it through
+  the validated booking service, and events of locally cancelled bookings are removed remotely.
+- **Push:** upcoming `pending|confirmed` bookings become Graph events (idempotent through the
+  marker, so a re-push updates the existing event instead of duplicating it).
+
+Every item carries a real result (`pushed`, `failed`, `pulled.cancelled|rescheduled|removed`,
+`blocks.added|removed`) — a partial failure is reported as such, never as a fake success. The
+last sync summary is stored in `AppSetting microsoft_sync:<integrationId>` and shown in the card.
+
+Setup notes:
+
+- Register an app in the Entra ID admin center, add the **web** redirect URI
+  `<your-base-url>/api/integrations/microsoft_calendar/callback` and grant the calendar scopes.
+- `tenant` defaults to `common` (works for most Microsoft 365 tenants); a directory (tenant) ID
+  locks the app to one tenant.
+- `calendarEmail` is the mailbox used for the free/busy query; when empty, the connected account's
+  own mailbox is used.
+
 ## 3. The outbox
 
 `OutboxMessage` fields: `channel` (`email|sms|whatsapp|webhook|inapp`),

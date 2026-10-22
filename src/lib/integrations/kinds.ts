@@ -63,6 +63,16 @@ export const googleCalendarConfigSchema = z.object({
   redirectUri: z.string().url('redirectUri must be the absolute OAuth callback URL').optional(),
 })
 
+export const microsoftCalendarConfigSchema = z.object({
+  // Where Microsoft authenticates. "common" works for most Microsoft 365 tenants;
+  // a specific tenant ID (GUID) can be supplied for locked-down setups.
+  tenant: z.string().min(1, 'tenant is required').max(200).optional(),
+  // The mailbox the free/busy schedule queries — defaults to the signed-in
+  // user's primary mailbox (fetched from Graph on sync).
+  calendarEmail: z.string().email('calendarEmail must be an email address').optional(),
+  redirectUri: z.string().url('redirectUri must be the absolute OAuth callback URL').optional(),
+})
+
 export const stripeConfigSchema = z.object({}).partial()
 
 export const webhookOutConfigSchema = z.object({
@@ -93,6 +103,14 @@ export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
     accessToken: z.string().optional(),
     accessTokenExpiresAt: z.string().optional(),
   }),
+  microsoft_calendar: z.object({
+    clientId: z.string().min(1, 'clientId is required (the application (client) ID from Entra ID)'),
+    clientSecret: z.string().min(1, 'clientSecret is required (the client secret value)'),
+    // Written by the OAuth callback — never typed by the operator.
+    refreshToken: z.string().optional(),
+    accessToken: z.string().optional(),
+    accessTokenExpiresAt: z.string().optional(),
+  }),
   stripe: z.object({ secretKey: z.string().min(1, 'secretKey is required'), webhookSecret: z.string().optional() }),
   webhook_out: z.object({ secret: z.string().optional() }),
 }
@@ -105,6 +123,7 @@ export const configSchemaFor: Record<string, z.ZodTypeAny> = {
   sms_gateway: smsGatewayConfigSchema,
   caldav: caldavConfigSchema,
   google_calendar: googleCalendarConfigSchema,
+  microsoft_calendar: microsoftCalendarConfigSchema,
   stripe: stripeConfigSchema,
   webhook_out: webhookOutConfigSchema,
 }
@@ -129,6 +148,8 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
       // The OAuth client credentials are enough to START the consent flow; the
       // refresh token arrives later from the Google callback.
       return Boolean(secrets.clientId && secrets.clientSecret)
+    case 'microsoft_calendar':
+      return Boolean(secrets.clientId && secrets.clientSecret)
     case 'stripe':
       return Boolean(secrets.secretKey)
     case 'webhook_out':
@@ -144,6 +165,7 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
  */
 const PRESERVED_SECRET_KEYS: Record<string, string[]> = {
   google_calendar: ['refreshToken', 'accessToken', 'accessTokenExpiresAt'],
+  microsoft_calendar: ['refreshToken', 'accessToken', 'accessTokenExpiresAt'],
 }
 
 /** Merge incoming secrets over the stored ones, keeping provider-owned tokens. */
@@ -160,6 +182,14 @@ export function mergeSecrets(kind: string, existing: Record<string, unknown>, in
 /** True when the Google OAuth consent flow has completed (a refresh token is stored). */
 export function googleOAuthConnected(secrets: Record<string, unknown>): boolean {
   return typeof secrets.refreshToken === 'string' && secrets.refreshToken.length > 0
+}
+
+/** Microsoft 365: the consent flow completed (tokens are stored). */
+export function microsoftOAuthConnected(secrets: Record<string, unknown>): boolean {
+  if (typeof secrets.refreshToken !== 'string' || !secrets.refreshToken) return false
+  if (typeof secrets.accessToken !== 'string' || !secrets.accessToken) return false
+  if (typeof secrets.accessTokenExpiresAt !== 'string' || !secrets.accessTokenExpiresAt) return false
+  return Number.isFinite(new Date(secrets.accessTokenExpiresAt).getTime())
 }
 
 /** Wire shape — config parsed, credentials represented ONLY by the boolean `configured`. */

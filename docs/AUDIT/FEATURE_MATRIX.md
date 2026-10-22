@@ -35,21 +35,21 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Embeddings (independent config) | DONE | `local_neural` default; `ollama`/`openai_compatible`/`local_lexical`. |
 | RAG pipeline | DONE | chunk → embed → hybrid cosine+BM25 → approved-only search. |
 | BYO external data sources | DONE | 4 kinds; read-only SQL + DNS-aware SSRF guard; per-source sync lease. |
-| Reranking | **MISSING** | Declared capability; tests report not-implemented. |
-| Vision | **MISSING** | Declared capability; not implemented. |
-| STT / TTS (server) | DONE | `openai_compatible` only; browser Web Speech path works client-side. |
+| Reranking | DONE | `src/lib/ai/rerank.ts` — second-stage ranking of the hybrid retrieval against a real `/rerank` endpoint; optional and off by default. |
+| Vision | DONE | `src/lib/ai/vision.ts` + `/api/ai/vision` — real multimodal call; optional and off by default. |
+| STT / TTS (server) | DONE | `openai_compatible` or `local_speech` (ONNX Whisper/MMS-TTS in `.models/`); browser Web Speech path works client-side. |
 | Real-time voice | DONE | WebRTC via OpenAI-compatible realtime endpoint; no local/browser realtime implementation. |
-| Streaming token output | **MISSING** | Synchronous JSON responses; no SSE token stream. |
-| Native tool-calling | PARTIAL | Strict JSON tool loop (`receptionist.ts`), not provider function-calling. |
+| Streaming token output | DONE | `POST /api/ai/stream` — SSE (`delta`/`tool`/`done`/`error`); non-streaming providers answer in one `delta` + `done`. |
+| Native tool-calling | DONE | Provider function-calling when the endpoint supports `tools`; automatic fallback to the strict JSON tool loop otherwise. |
 | SMS | DONE | Twilio plus `sms_gateway` adapters: TextBee, httpSMS, android-sms-gateway, generic HTTP. |
 | WhatsApp | DONE | Twilio inbound/outbound; inbound webhook signature-verified. |
 | Outbound email | DONE | SMTP via nodemailer; invoice HTML/text templates. |
 | Inbound email | **MISSING** | No IMAP/webhook ingest. |
-| Calendar | DONE | ICS feed + per-booking `.ics` + two-way CalDAV push/pull + Google Calendar OAuth sync. External busy times become `CalendarBlock` rows, so a busy diary removes slots from availability and blocks new bookings. |
+| Calendar | DONE | ICS feed + per-booking `.ics` + two-way CalDAV push/pull + Google Calendar OAuth sync + Microsoft 365 Graph OAuth sync. External busy times become `CalendarBlock` rows, so a busy diary removes slots from availability and blocks new bookings. |
 | Payments online | DONE | Stripe Payment Links + Stripe/generic signed webhooks. |
 | Automations | DONE | 60s lease-protected worker tick; manual run shares the lease. |
 | Outbox delivery | DONE | 30s lease-protected dispatcher; backoff and honest statuses. |
-| Hardware detection / model catalog | **MISSING** | No GPU/RAM probe or recommended-model endpoint. |
+| Hardware detection / model catalog | DONE | `GET /api/system/hardware` — CPU/RAM/GPU/disk probe plus a model catalog with fit reasons. |
 | Audit log | DONE | `src/lib/audit.ts`; append-only rows. |
 | Rate limiting / CSRF | DONE | In-memory sliding window per route plus a DB-backed `RateBucket` limiter for login; `x-requested-with: ais` on mutations. |
 | Security headers | DONE | Configured in `next.config.ts` (HSTS/CSP in production). No middleware. |
@@ -61,3 +61,5 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | SSO (SAML/OIDC) | **MISSING** | Email+password/TOTP only. |
 | Team user management | DONE | `/api/users*`: members, one-time invitations (7-day TTL, hashed token, emailed via the outbox), invitation revocation, role changes, deactivation, session revocation, password reset; Team section in the SPA + public Join/Reset screens. Owners manage owners, admins manage agents/viewers, the last active owner is protected. |
 | Shared-store rate limiting | DONE | `RateBucket` rows (DB-backed) for the login limiter — survives restarts, shared across replicas. |
+| Local speech models (STT/TTS) | DONE | `src/lib/ai/localSpeech.ts` — Whisper/MMS-TTS ONNX models in `.models/`, downloaded on demand, run through transformers.js; WAV codec in `src/lib/ai/audio-wav.ts`. |
+| Scheduled backups | DONE | `src/lib/backup.ts` + `/api/admin/backups*` — hourly worker, retention policy, snapshot list, audited schedule changes. |

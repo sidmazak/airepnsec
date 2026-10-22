@@ -84,6 +84,29 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Guard rails**: only owners manage owners or promote somebody to owner; admins manage agents/viewers only; nobody may deactivate or demote their own account; the last active owner can never be demoted or deactivated; a deactivated account cannot sign in.
 ✅ **UI**: Team section (owner/admin) with members, roles, 2FA/last-login state, pending invitations, invite/role/deactivate/revoke-sessions/reset actions, and a "change my password" card; public Join and Reset-password screens driven by the emailed hash link (`#?join=<token>`, `#/reset-password?token=<token>`).
 ✅ **Shared-store rate limiting**: `RateBucket` rows replace the in-memory sliding window for the login limiter, so the limit survives a restart and is shared between replicas.
-✅ **Verification**: tsc clean, lint clean, 43/43 unit tests, 33/33 smoke checks (invite → accept → replay rejected → role change → deactivate → last-owner guard).
+✅ **Verification**: tsc clean, lint clean, 43/43 unit tests, 33/33 smoke checks (invite → accept → replay rejected → role change → deactivate → last-owner guard). The smoke suite now runs **44 checks** in total (Microsoft 365 create/authorize/sync-failure, local speech catalog + model validation, backup list/schedule).
 
-**Remaining honest gaps (2026-10-22):** SSO (SAML/OIDC), inbound email, token streaming/native tool calling, rerank/vision, hardware detection/model catalog, automated role-matrix E2E, Microsoft 365 calendar OAuth, and local (ONNX) speech models — see [TODO.md](../TODO.md). Docker rebuilding is verified; live external provider tests remain BLOCKED_EXTERNAL (no provider credentials in this environment).
+## Phase 14 — Streaming, native tool calling, rerank, vision, hardware probe (2026-10-22)
+✅ **Server-side streaming** (`POST /api/ai/stream`): SSE with `delta` / `tool` / `done` / `error` events; the protocol helpers live in `src/lib/ai/llm-protocol.ts` (pure, unit-tested). Providers that cannot stream answer in one `delta` + `done` — never a fake stream.
+✅ **Native provider tool calling**: `toolSpecs` + `supportsNativeTools` in `src/lib/ai/receptionist.ts`; when the endpoint supports `tools` the model calls the validated tools directly, otherwise the strict JSON tool loop is used. Fragmented tool arguments are merged before parsing.
+✅ **Reranking** (`src/lib/ai/rerank.ts`): second-stage ranking of the hybrid retrieval against a real `/rerank` endpoint (optional capability, off by default, real connection test).
+✅ **Vision** (`src/lib/ai/vision.ts` + `/api/ai/vision`): real multimodal call with a real connection test (1x1 PNG probe).
+✅ **Hardware probe + model catalog** (`src/lib/system/hardware.ts` + `/api/system/hardware`): CPU/RAM/GPU/disk detection and a catalog that explains which model fits the machine.
+
+## Phase 15 — Scheduled backups and retention (2026-10-22)
+✅ **Snapshot engine** (`src/lib/backup.ts`): SQLite `VACUUM INTO` snapshots into `backups/` (file mode 0600), snapshot listing and a retention policy that prunes the oldest snapshots.
+✅ **Scheduler**: the background worker (`src/instrumentation.ts`) checks the hourly schedule (`AppSetting backup_schedule`: `enabled`, `hour`, `retention`), creates a snapshot when due and prunes old ones; `backup_last_run` records the last run.
+✅ **API + UI**: `/api/admin/backups` (GET list + POST create), `/api/admin/backups/schedule` (PUT), and a Diagnostics card showing the schedule, the snapshot list and the manual trigger. Audited.
+
+## Phase 16 — Microsoft 365 / Graph calendar sync (2026-10-22)
+✅ **Graph integration** (`microsoft_calendar`): OAuth 2.0 authorization-code flow against the Microsoft identity platform (one-time server-side `state` nonce, encrypted refresh token, real connection test through the Graph calendar view).
+✅ **Two-way sync** (`POST /api/integrations/microsoft-calendar/sync`): free/busy windows become `CalendarBlock` rows (source `microsoft_calendar`) so busy diary time is never offered, bookings are pushed as Graph events with an `ais-booking-id:` marker (idempotent re-push), remote cancellations/moves are pulled back through the validated booking service and events of cancelled bookings are removed remotely.
+✅ **UI**: the Microsoft 365 card in Integrations (connect, sync now, last-sync summary, tenant/mailbox configuration) next to the Google Calendar card.
+
+## Phase 17 — Local speech models (2026-10-22)
+✅ **Model manager** (`src/lib/ai/localSpeech.ts`): a small catalog of ONNX models (MMS-TTS for speech, Whisper tiny/base for transcription) that are downloaded on demand into `.models/` (the same folder the built-in embedding model uses), with honest install state, download and delete actions (`/api/ai/speech/models`).
+✅ **Real inference**: transformers.js (ONNX Runtime) runs the models on the server — Whisper transcribes 16 kHz mono PCM (WAV decoded in-process, compressed browser recordings converted with ffmpeg when installed), MMS-TTS synthesises WAV. Audio never leaves the machine.
+✅ **Provider kind** `local_speech` for the `stt`/`tts` capabilities, with catalog validation (`422 bad_model`) and a real connection test that actually runs inference.
+✅ **Voice Console**: recordings are converted to 16 kHz mono WAV in the browser when the local provider is active, so the server needs no ffmpeg for the common case.
+
+**Remaining honest gaps (2026-10-22):** SSO (SAML/OIDC), inbound email, an automated per-role endpoint sweep, live third-party provider E2E (BLOCKED_EXTERNAL — no provider credentials in this environment), and Kokoro/Piper voices in the local catalog (transformers.js v4 cannot run their model type — use an OpenAI-compatible Kokoro/Piper server instead). See [TODO.md](../TODO.md). Docker rebuilding is verified; live external provider tests remain BLOCKED_EXTERNAL (no provider credentials in this environment).

@@ -18,8 +18,8 @@ import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  Bot, CheckCircle2, Database, Globe, KeyRound, Loader2, Monitor, PlugZap, RefreshCw,
-  ShieldAlert, ShieldCheck, XCircle,
+  Bot, CheckCircle2, Database, Download, Globe, KeyRound, Loader2, Monitor, PlugZap, RefreshCw,
+  ShieldAlert, ShieldCheck, Trash2, XCircle,
 } from 'lucide-react'
 
 /* ------------------------------ helpers ------------------------------ */
@@ -30,6 +30,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   browser: 'In-browser',
   local_neural: 'Built-in neural model (local)',
   local_lexical: 'Legacy keyword index (local)',
+  local_speech: 'Local speech models (ONNX, offline)',
   none: 'Disabled',
 }
 
@@ -50,6 +51,18 @@ type AiLog = {
   latencyMs: number; tokensIn: number; tokensOut: number; ok: boolean; errorSanitized: string
 }
 type Draft = { provider: string; baseUrl: string; model: string; apiKey: string | null; enabled: boolean }
+
+type LocalSpeechModelRow = {
+  id: string
+  capability: 'stt' | 'tts'
+  label: string
+  repo: string
+  approxBytes: number
+  license: string
+  notes: string
+  installed: boolean
+  bytesOnDisk: number
+}
 
 export type HardwareInfoResponse = {
   hardware: {
@@ -155,6 +168,10 @@ export function AiSection() {
   const [channels, setChannels] = useState<{ email: boolean; sms: boolean } | null>(null)
   const [channelsBusy, setChannelsBusy] = useState(false)
 
+  // The local speech model catalog — one row per ONNX model in .models/.
+  const [localSpeechModels, setLocalSpeechModels] = useState<LocalSpeechModelRow[]>([])
+  const [localSpeechBusy, setLocalSpeechBusy] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -207,10 +224,46 @@ export function AiSection() {
     } catch { /* non-fatal */ }
   }, [])
 
+  const loadLocalSpeechModels = useCallback(async () => {
+    try {
+      const d = await api.get<{ models: LocalSpeechModelRow[] }>('/api/ai/speech/models')
+      setLocalSpeechModels(d.models ?? [])
+    } catch {
+      setLocalSpeechModels([])
+    }
+  }, [])
+
   useEffect(() => { void load() }, [load])
   useEffect(() => { void loadChannels() }, [loadChannels])
+  useEffect(() => { void loadLocalSpeechModels() }, [loadLocalSpeechModels])
   useEffect(() => { if (tab === 'logs') void loadLogs() }, [tab, loadLogs])
   useEffect(() => { if (tab === 'hardware') void loadHardware() }, [tab, loadHardware])
+
+  const downloadLocalModel = async (id: string) => {
+    setLocalSpeechBusy(id)
+    try {
+      const r = await api.post<{ detail: string }>('/api/ai/speech/models', { id })
+      toast({ title: 'Model ready', description: r.detail })
+      await loadLocalSpeechModels()
+    } catch (err) {
+      toast({ title: 'Download failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+    } finally {
+      setLocalSpeechBusy(null)
+    }
+  }
+
+  const removeLocalModel = async (id: string) => {
+    setLocalSpeechBusy(id)
+    try {
+      const r = await api.delete<{ detail: string }>('/api/ai/speech/models', { id })
+      toast({ title: 'Model removed', description: r.detail })
+      await loadLocalSpeechModels()
+    } catch (err) {
+      toast({ title: 'Could not remove the model', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+    } finally {
+      setLocalSpeechBusy(null)
+    }
+  }
 
   const setDataModeValue = async (mode: string) => {
     if (!canManage) return
@@ -392,6 +445,69 @@ export function AiSection() {
         </TabsContent>
 
         <TabsContent value="providers" className="space-y-4 mt-4">
+          {/* local speech model catalog */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Local speech models</CardTitle>
+              <CardDescription>
+                Speech-to-text and text-to-speech that run entirely on this machine. The ONNX weights are stored in
+                the <code className="bg-muted rounded px-1 py-0.5">.models/</code> folder and are downloaded from the
+                Hugging Face CDN on demand — no audio ever leaves the server.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {localSpeechModels.length === 0 ? (
+                <p className="text-sm text-muted-foreground">The local model catalog is not available.</p>
+              ) : (
+                localSpeechModels.map((m) => (
+                  <div key={m.id} className="rounded-md border p-3 flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        {m.label}
+                        <Badge variant={m.installed ? 'outline' : 'secondary'}>
+                          {m.installed ? 'installed' : 'not downloaded'}
+                        </Badge>
+                      </p>
+                      <p className="text-xs text-muted-foreground">{m.notes}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {m.repo} · {m.license} · ≈{Math.round(m.approxBytes / 1_000_000)} MB
+                        {m.installed ? ` · ${(m.bytesOnDisk / 1_000_000).toFixed(1)} MB on disk` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {m.installed ? (
+                        <Button
+                          variant="outline" size="sm" className="min-h-[36px]"
+                          disabled={!canManage || localSpeechBusy === m.id}
+                          onClick={() => void removeLocalModel(m.id)}
+                          aria-label={`Remove ${m.label}`}
+                        >
+                          {localSpeechBusy === m.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
+                          Remove
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm" className="min-h-[36px]"
+                          disabled={!canManage || localSpeechBusy === m.id}
+                          onClick={() => void downloadLocalModel(m.id)}
+                          aria-label={`Download ${m.label}`}
+                        >
+                          {localSpeechBusy === m.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
+                          Download
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+              <p className="text-xs text-muted-foreground">
+                The first download and the first inference are slow on CPU (tens of seconds) — afterwards the models stay
+                loaded in memory. Whisper needs 16 kHz mono audio; compressed browser recordings are converted with
+                ffmpeg when it is installed on the server.
+              </p>
+            </CardContent>
+          </Card>
+
           {/* capability cards */}
           <div className="grid gap-4 lg:grid-cols-2">
             {caps.map(([cap, cfg]) => {
@@ -444,6 +560,31 @@ export function AiSection() {
                           placeholder="http://localhost:11434"
                           className="min-h-[44px]"
                         />
+                      </div>
+                    )}
+
+                    {draft.provider === 'local_speech' && (cap === 'stt' || cap === 'tts') && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`model-${cap}`}>Local model</Label>
+                        <Select
+                          value={draft.model || localSpeechModels.find((m) => m.capability === cap)?.id || ''}
+                          disabled={!canManage}
+                          onValueChange={(v) => setDraft(cap, { model: v })}
+                        >
+                          <SelectTrigger id={`model-${cap}`} className="min-h-[44px]" aria-label={`Local speech model for ${info?.label ?? cap}`}>
+                            <SelectValue placeholder="Pick a downloaded model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {localSpeechModels.filter((m) => m.capability === cap).map((m) => (
+                              <SelectItem key={m.id} value={m.id}>
+                                {m.label}{m.installed ? '' : ' — not downloaded'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Download the weights under &quot;Local speech models&quot; below — the model runs on this machine and no audio leaves the server.
+                        </p>
                       </div>
                     )}
 

@@ -90,6 +90,22 @@ export async function register() {
     console.log('[worker] data-source sync disabled by environment')
   }
 
+  // Scheduled database backups: checked hourly, a snapshot is taken once a day at
+  // the configured hour and old snapshots are pruned by the retention policy.
+  if (isWorkerEnabled('backups')) {
+    const { runBackupScheduler } = await import('@/lib/backup')
+    schedule('backup scheduler', 45_000, 60 * 60_000, async () => {
+      const outcome = await runWithWorkerLease('backups', () => runBackupScheduler())
+      if (!outcome.ran) return
+      if (outcome.result.length) {
+        console.log(`[worker] backups: ${outcome.result.length} snapshot(s) created`)
+      }
+    })
+    console.log('[worker] backup scheduler started (hourly interval, lease-protected)')
+  } else {
+    console.log('[worker] backup scheduler disabled by environment')
+  }
+
   // Pre-load the local embedding model so the first knowledge search / AI answer is fast.
   // Fire-and-forget: a failed load is logged and search degrades to lexical scoring.
   void (async () => {

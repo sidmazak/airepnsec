@@ -125,6 +125,12 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
     blurb: 'Two-way sync with Google Calendar: your busy times block the bookable slots, and bookings appear on your calendar.',
     needsCredentials: true,
   },
+  microsoft_calendar: {
+    title: 'Microsoft 365 Calendar',
+    icon: CalendarDays,
+    blurb: 'Two-way sync with Microsoft 365 through the Graph API: busy times block the bookable slots, and bookings appear in Outlook.',
+    needsCredentials: true,
+  },
   stripe: {
     title: 'Payments (Stripe)',
     icon: CreditCard,
@@ -139,7 +145,7 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
   },
 }
 
-const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'google_calendar', 'stripe'] as const
+const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'google_calendar', 'microsoft_calendar', 'stripe'] as const
 
 const OUTBOX_STATUS_CLASS: Record<string, string> = {
   sent: 'bg-emerald-100 text-emerald-900',
@@ -244,10 +250,10 @@ function GoogleCalendarBox({ connected, canManage, onChanged }: { connected: boo
 /* ------------------------------ drafts ------------------------------ */
 
 
-type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string; baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean; calendarId: string; redirectUri: string }
+type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string; baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean; calendarId: string; redirectUri: string; tenant: string; calendarEmail: string }
 type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string; password: string; apiKey: string; username: string; passwordGw: string; token: string; authValue: string; clientId: string; clientSecret: string }
 
-const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee', baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false, calendarId: 'primary', redirectUri: '' }
+const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee', baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false, calendarId: 'primary', redirectUri: '', tenant: 'common', calendarEmail: '' }
 const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '', apiKey: '', username: '', passwordGw: '', token: '', authValue: '', clientId: '', clientSecret: '' }
 
 function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
@@ -287,6 +293,12 @@ function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
     if (d.redirectUri.trim()) out.redirectUri = d.redirectUri.trim()
     return out
   }
+  if (kind === 'microsoft_calendar') {
+    const out: Record<string, unknown> = { tenant: d.tenant.trim() || 'common' }
+    if (d.calendarEmail.trim()) out.calendarEmail = d.calendarEmail.trim()
+    if (d.redirectUri.trim()) out.redirectUri = d.redirectUri.trim()
+    return out
+  }
   if (kind === 'webhook_out') {
     const out: Record<string, unknown> = { url: d.url.trim() }
     if (d.allowPrivate) out.allowPrivate = true
@@ -318,7 +330,7 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
   } else if (kind === 'stripe') {
     if (d.secretKey) out.secretKey = d.secretKey
     if (d.webhookSecret) out.webhookSecret = d.webhookSecret
-  } else if (kind === 'google_calendar') {
+  } else if (kind === 'google_calendar' || kind === 'microsoft_calendar') {
     if (d.clientId.trim()) out.clientId = d.clientId.trim()
     if (d.clientSecret) out.clientSecret = d.clientSecret
   } else if (kind === 'webhook_out') {
@@ -410,6 +422,77 @@ function CalDavSyncBox({ canManage, onChanged }: { canManage: boolean; onChanged
   )
 }
 
+function MicrosoftCalendarBox({ connected, canManage, onChanged }: { connected: boolean; canManage: boolean; onChanged: () => Promise<void> | void }) {
+  const { toast } = useToast()
+  const [info, setInfo] = useState<{ enabled: boolean; lastSync: GoogleLastSync | null; activeBlocks: number } | null>(null)
+  const [syncing, setSyncing] = useState(false)
+
+  const load = useCallback(() => {
+    api.get<{ enabled: boolean; lastSync: GoogleLastSync | null; activeBlocks: number }>('/api/integrations/microsoft-calendar/sync')
+      .then(setInfo).catch(() => setInfo(null))
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const syncNow = async () => {
+    setSyncing(true)
+    try {
+      const r = await api.post<{ direction: string; pushed: number; failed: number; total: number; pulled: Record<string, number>; results: Array<unknown>; syncedAt: string; errors: string[] }>('/api/integrations/microsoft-calendar/sync')
+      const pulledBits = [
+        r.pulled.cancelled ? `${r.pulled.cancelled} cancelled remotely` : '',
+        r.pulled.rescheduled ? `${r.pulled.rescheduled} moved remotely` : '',
+        r.pulled.removed ? `${r.pulled.removed} pulled back` : '',
+        r.pulled.failed ? `${r.pulled.failed} pull errors` : '',
+      ].filter(Boolean).join(', ')
+      toast({
+        title: r.total === 0 && Object.keys(r.pulled || {}).length === 0
+          ? 'No upcoming bookings to sync'
+          : `Microsoft 365 sync: ${r.pushed}/${r.total} bookings written${r.failed ? `, ${r.failed} failed` : ''}${pulledBits ? `; ${pulledBits}` : ''}`,
+        variant: r.failed > 0 || (r.pulled?.failed ?? 0) > 0 ? 'destructive' : 'default',
+      })
+      load()
+      await onChanged()
+    } catch (err) {
+      toast({ title: 'Microsoft 365 sync failed', description: friendlyApiErrorLocal(err, 'Unknown error'), variant: 'destructive' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <div className="rounded-md border p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">Bookings &#8596; Microsoft 365 (two-way)</p>
+        {connected && info?.enabled ? (
+          <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing}>
+            {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+            Sync now
+          </Button>
+        ) : !connected ? (
+          <Button asChild variant="outline" size="sm" className="min-h-[36px]" disabled={!canManage}>
+            <a href="/api/integrations/microsoft_calendar/authorize">Connect Microsoft 365</a>
+          </Button>
+        ) : null}
+      </div>
+      {!connected ? (
+        <p className="text-xs text-muted-foreground">
+          Save the Entra ID application (client) ID and secret under Integrations first, then connect. The redirect URI is{' '}
+          <code className="bg-muted rounded px-1 py-0.5">/api/integrations/microsoft_calendar/callback</code>.
+        </p>
+      ) : info?.lastSync ? (
+        <p className="text-xs text-muted-foreground">
+          Last sync {formatDateTime(info.lastSync.at)} — {info.lastSync.pushed}/{info.lastSync.total} bookings written{info.lastSync.failed ? `, ${info.lastSync.failed} failed` : ''}
+          {(info.lastSync.blocksAdded !== undefined || info.lastSync.blocksRemoved !== undefined)
+            ? ` · blocks ${info.lastSync.blocksAdded ?? 0} added / ${info.lastSync.blocksRemoved ?? 0} removed`
+            : ''}.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">No sync yet — connect the calendar first.</p>
+      )}
+    </div>
+  )
+}
+
 /* ------------------------------ connector card (singletons) ------------------------------ */
 
 function ConnectorCard({
@@ -444,6 +527,7 @@ function ConnectorCard({
       bodyTemplate: str(c.bodyTemplate), testRecipient: str(c.testRecipient),
       allowPrivate: c.allowPrivate === true,
       calendarId: str(c.calendarId) || 'primary', redirectUri: str(c.redirectUri),
+      tenant: str(c.tenant) || 'common', calendarEmail: str(c.calendarEmail),
     })
     setDlgOpen(true)
   }
@@ -574,6 +658,14 @@ function ConnectorCard({
             )}
 
             {kind === 'google_calendar' && row && <GoogleCalendarBox connected={row.connected === true} canManage={canManage} onChanged={onChanged} />}
+
+            {kind === 'microsoft_calendar' && (
+              <p className="text-xs text-muted-foreground break-all">
+                Tenant: {str(row.config.tenant) || 'common'}{str(row.config.calendarEmail) ? <> · mailbox {str(row.config.calendarEmail)}</> : null}
+              </p>
+            )}
+
+            {kind === 'microsoft_calendar' && row && <MicrosoftCalendarBox connected={row.connected === true} canManage={canManage} onChanged={onChanged} />}
 
 
             {testResult ? (
@@ -842,6 +934,26 @@ function ConfigureDialog({
                 <Label htmlFor={`${idBase}-redirect`}>OAuth redirect URI (optional)</Label>
                 <Input id={`${idBase}-redirect`} type="url" value={cfg.redirectUri} onChange={(e) => setCfg((s) => ({ ...s, redirectUri: e.target.value }))} placeholder={`${origin}/api/integrations/google_calendar/callback`} autoComplete="off" className="min-h-[44px]" />
                 <p className="text-xs text-muted-foreground">Set this in the Google Cloud console as an authorized redirect URI. Leave empty to use this app&apos;s URL.</p>
+              </div>
+            </div>
+          )}
+
+          {kind === 'microsoft_calendar' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-tenant`}>Tenant (optional)</Label>
+                <Input id={`${idBase}-tenant`} value={cfg.tenant} onChange={(e) => setCfg((s) => ({ ...s, tenant: e.target.value }))} placeholder="common" autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">&quot;common&quot; works for most Microsoft 365 tenants; a tenant ID (GUID) locks the app to one directory.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-mailbox`}>Calendar mailbox (optional)</Label>
+                <Input id={`${idBase}-mailbox`} type="email" value={cfg.calendarEmail} onChange={(e) => setCfg((s) => ({ ...s, calendarEmail: e.target.value }))} placeholder="bookings@example.com" autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">Used for the free/busy query. Leave empty to use the connected account&apos;s own mailbox.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-msredirect`}>OAuth redirect URI (optional)</Label>
+                <Input id={`${idBase}-msredirect`} type="url" value={cfg.redirectUri} onChange={(e) => setCfg((s) => ({ ...s, redirectUri: e.target.value }))} placeholder={`${origin}/api/integrations/microsoft_calendar/callback`} autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">Add this URI as a &quot;Web&quot; redirect URI in the Entra ID app registration.</p>
               </div>
             </div>
           )}
@@ -1287,22 +1399,25 @@ function OutboxTab({ canManage }: { canManage: boolean }) {
 
   useEffect(() => { void load() }, [load])
 
-  // Google OAuth returns here with ?google_calendar=connected|error — report it once.
+  // Calendar OAuth returns here with ?google_calendar=... / ?microsoft_calendar=...
+  // — report the outcome once and clean the URL.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
-    const state = params.get('google_calendar')
-    if (!state) return
-    params.delete('google_calendar')
+    const key = params.get('google_calendar') ? 'google_calendar' : params.get('microsoft_calendar') ? 'microsoft_calendar' : ''
+    if (!key) return
+    const state = params.get(key) ?? ''
+    params.delete(key)
     const reason = params.get('reason')
     params.delete('reason')
     const query = params.toString()
     const url = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
     window.history.replaceState(null, '', url)
+    const label = key === 'google_calendar' ? 'Google Calendar' : 'Microsoft 365'
     if (state === 'connected') {
-      toast({ title: 'Google Calendar connected', description: 'Run a sync to pull your busy times and push upcoming bookings.' })
+      toast({ title: `${label} connected`, description: 'Run a sync to pull your busy times and push upcoming bookings.' })
     } else {
-      toast({ title: 'Google Calendar connection failed', description: reason || 'Google did not authorize the calendar.', variant: 'destructive' })
+      toast({ title: `${label} connection failed`, description: reason || 'The provider did not authorize the calendar.', variant: 'destructive' })
     }
   }, [toast])
 

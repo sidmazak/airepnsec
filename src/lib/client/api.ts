@@ -55,7 +55,7 @@ export const api = {
   post: <T>(path: string, body?: unknown) => apiSend<T>(path, 'POST', body),
   put: <T>(path: string, body?: unknown) => apiSend<T>(path, 'PUT', body),
   patch: <T>(path: string, body?: unknown) => apiSend<T>(path, 'PATCH', body),
-  delete: <T>(path: string) => apiSend<T>(path, 'DELETE'),
+  delete: <T>(path: string, body?: unknown) => apiSend<T>(path, 'DELETE', body),
 }
 
 /* ---------------- streaming (SSE over POST) ---------------- */

@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { encryptSecret } from '@/lib/crypto'
 import { INTEGRATION_KINDS, isIntegrationKind, SINGLETON_KINDS, decryptSecrets } from '@/lib/integrations/connectors'
-import { configSchemaFor, publicIntegration, secretsAreSufficient, secretsSchemaFor, googleOAuthConnected, mergeSecrets } from '@/lib/integrations/kinds'
+import { configSchemaFor, publicIntegration, secretsAreSufficient, secretsSchemaFor, googleOAuthConnected, microsoftOAuthConnected, mergeSecrets } from '@/lib/integrations/kinds'
 
 /** GET /api/integrations — configured integrations for the org (no secrets ever). */
 export const GET = withAuth(async (req, ctx) => {
@@ -18,6 +18,7 @@ export const GET = withAuth(async (req, ctx) => {
       // Google Calendar: the OAuth consent flow is a separate step from saving
       // the client credentials — the UI shows both states.
       ...(row.kind === 'google_calendar' ? { connected: googleOAuthConnected(decryptSecrets(row)) } : {}),
+      ...(row.kind === 'microsoft_calendar' ? { connected: microsoftOAuthConnected(decryptSecrets(row)) } : {}),
     })),
   })
 })

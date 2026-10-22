@@ -5,13 +5,13 @@ import { encryptSecret, decryptSecret } from '@/lib/crypto'
 export type Capability = 'llm' | 'embedding' | 'stt' | 'tts' | 'realtime' | 'rerank' | 'vision'
 export const CAPABILITIES: Capability[] = ['llm', 'embedding', 'stt', 'tts', 'realtime', 'rerank', 'vision']
 
-export type ProviderKind = 'ollama' | 'openai_compatible' | 'browser' | 'local_neural' | 'local_lexical' | 'none'
+export type ProviderKind = 'ollama' | 'openai_compatible' | 'browser' | 'local_neural' | 'local_lexical' | 'local_speech' | 'none'
 
 export const CAPABILITY_INFO: Record<Capability, { label: string; description: string; kinds: ProviderKind[] }> = {
   llm: { label: 'Conversation model (LLM)', description: 'Powers the AI receptionist chat and voice replies. Bring your own local Ollama model or an OpenAI-compatible endpoint.', kinds: ['ollama', 'openai_compatible', 'none'] },
   embedding: { label: 'Knowledge retrieval (RAG embeddings)', description: 'Embeds and retrieves your approved documents. The built-in neural model runs entirely on this machine.', kinds: ['local_neural', 'ollama', 'openai_compatible', 'local_lexical'] },
-  stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The browser mic path works out of the box.', kinds: ['browser', 'openai_compatible'] },
-  tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The browser synth path works out of the box.', kinds: ['browser', 'openai_compatible'] },
+  stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The browser mic path works out of the box, or run Whisper fully locally.', kinds: ['browser', 'openai_compatible', 'local_speech'] },
+  tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The browser synth path works out of the box, or run a local ONNX voice.', kinds: ['browser', 'openai_compatible', 'local_speech'] },
   realtime: { label: 'Realtime voice (optional)', description: 'Low-latency WebRTC voice with an OpenAI-compatible realtime endpoint. Falls back to the conversation model when not set.', kinds: ['none', 'openai_compatible'] },
   rerank: { label: 'Reranking (optional)', description: 'Second-stage ranking of retrieved knowledge. Optional — retrieval works without it.', kinds: ['none', 'openai_compatible'] },
   vision: { label: 'Vision (optional)', description: 'Reads images (a photo of an invoice, a damage report). Optional.', kinds: ['none', 'openai_compatible'] },
@@ -40,6 +40,7 @@ function dataFlowLabel(provider: string, baseUrl: string): string {
     case 'browser': return 'In the browser (this device) — no server round-trip for media'
     case 'local_neural': return 'Runs on this machine (built-in ONNX embedding model) — text never leaves the server'
     case 'local_lexical': return 'Legacy keyword index — runs entirely on this machine, no model'
+    case 'local_speech': return 'Runs on this machine (ONNX speech model in .models/) — audio never leaves the server'
     default: return 'Disabled — no data is sent anywhere'
   }
 }
@@ -202,6 +203,23 @@ export async function testProvider(
         latencyMs: Date.now() - started,
         details: { results: n },
       }
+    }
+    // Local speech models (ONNX in .models/) get a real check: the weights must be
+    // on disk and the pipeline must actually run.
+    if (row.provider === 'local_speech') {
+      const { listLocalSpeechModels, downloadLocalSpeechModel } = await import('@/lib/ai/localSpeech')
+      const wanted = row.model || (capability === 'tts' ? 'mms-tts-eng' : 'whisper-tiny-en')
+      const models = await listLocalSpeechModels()
+      const model = models.find((m) => m.id === wanted)
+      if (!model) {
+        return { ok: false, message: `Unknown local speech model "${wanted}". Pick one of: ${models.map((m) => m.id).join(', ')}.`, latencyMs: 0 }
+      }
+      if (!model.installed) {
+        return { ok: false, message: `${model.label} is not downloaded yet (${(model.approxBytes / 1_000_000).toFixed(0)} MB). Download it under AI Providers → Local speech models.`, latencyMs: 0 }
+      }
+      const warm = await downloadLocalSpeechModel(wanted)
+      if (!warm.ok) return { ok: false, message: warm.detail, latencyMs: Date.now() - started }
+      return { ok: true, message: `${model.label} runs locally on this machine (${(model.bytesOnDisk / 1_000_000).toFixed(1)} MB).`, latencyMs: Date.now() - started, details: { model: wanted, bytesOnDisk: model.bytesOnDisk } }
     }
     // Embedding capability gets provider-specific live tests against the actual embed call.
     if (capability === 'embedding') {

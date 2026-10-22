@@ -34,10 +34,12 @@ Read `docs/IMPLEMENTATION_PLAN.md` (phase history + remaining gaps) and `TODO.md
 - `src/lib/db.ts` — Prisma client singleton (`import { db } from '@/lib/db'`).
 - `src/lib/api.ts` — `withAuth`/`withPublic` wrappers (CSRF header `x-requested-with: ais` on mutations, rate limiting, session loading), `json`/`fail`/`parseBody`.
 - `src/lib/business/` — availability, booking, invoice, payments, ledger, collections (deterministic core; routes are thin).
-- `src/lib/ai/` — providers (BYOK/encryption/tests), llm (adapters + local-only enforcement), embeddings (local lexical retriever), receptionist (tool loop).
+- `src/lib/ai/` — providers (BYOK/encryption/tests), llm (adapters + local-only enforcement + streaming/native tools), llm-protocol (pure helpers), embeddings (local neural retriever), receptionist (tool loop, native + JSON protocol), rerank + rerank-protocol, vision, speech (BYOK STT/TTS), localSpeech (ONNX Whisper/MMS-TTS models in `.models/`), audio-wav (dependency-free WAV codec), audio-input (ffmpeg conversion).
+- `src/lib/system/hardware.ts` — CPU/RAM/GPU/disk probe + model catalog (`/api/system/hardware`).
+- `src/lib/backup.ts` — SQLite snapshots (`VACUUM INTO`), schedule + retention (`/api/admin/backups*`).
 - `src/lib/datasources/` — BYO external database/JSON ingestion into RAG (`registry` kinds + zod, `adapters` read-only SQL/SSRF-guarded fetchers, `sync` row→document + auto-sync). Routes under `src/app/api/datasources/**`; UI `src/components/sections/data-sources-section.tsx`.
 - `src/lib/automation/` — engine (tick, triggers, runs) + instrumentation worker (60s).
-- `src/lib/integrations/` — SMTP/Twilio/SMS-gateway/Stripe/CalDAV/**Google Calendar**/webhook adapters + outbox dispatcher.
+- `src/lib/integrations/` — SMTP/Twilio/SMS-gateway/Stripe/CalDAV/**Google Calendar**/**Microsoft 365 Graph**/webhook adapters + outbox dispatcher.
 - `src/lib/receptionist/status.ts` — org-wide receptionist switch (`running|paused|stopped`).
 - `src/lib/demo/seed.ts` — idempotent demo org (`/api/demo/seed`).
 - `src/app/api/**` — route handlers; contract in `docs/API.md`.

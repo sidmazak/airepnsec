@@ -57,13 +57,13 @@ rules, invoice/payment math, ledger rules, RBAC checks, audit, automation engine
 | Payments | PayPal/other provider-specific schemas | **Planned** — use the generic webhook or Stripe |
 | Ledger | Append-only ledger, adjustments/reversals only, per-invoice reconciliation | Implemented |
 | Assistant | Text chat receptionist with strict JSON tool loop and validated tools | Implemented |
-| Assistant | Voice Console — browser Web Speech fallback or BYOK OpenAI-compatible STT/TTS driving the same tool loop | Implemented |
+| Assistant | Voice Console — browser Web Speech fallback, BYOK OpenAI-compatible STT/TTS, or fully local ONNX speech models (Whisper / MMS-TTS) driving the same tool loop | Implemented |
 | Assistant | Inbound telephony (Twilio Voice/TwiML, speech Gather, escalation, PABX line routing) + inbound SMS/WhatsApp threads | Implemented (BYOK) |
 | Assistant | Outbound PSTN dialing / voice broadcast | **Deferred** — inbound telephony only |
-| Assistant | Server-side streaming, native provider tool calls, reranking, vision | **Not implemented** — the tool loop is non-streaming JSON |
+| Assistant | Server-side streaming (SSE), native provider tool calls, reranking, vision | Implemented — SSE stream (`/api/ai/stream`), native tool calling with JSON-protocol fallback, second-stage reranking, image reading |
 | Knowledge | FAQ/knowledge items, approved-only retrieval, local lexical + neural embeddings | Implemented |
 | Knowledge | External datasources (Postgres/MySQL/SQLite read-only, HTTP JSON) into the same RAG pipeline | Implemented (BYOK; SSRF-guarded) |
-| AI providers | Local Ollama, any OpenAI-compatible endpoint, browser STT, built-in local neural/lexical embeddings, policy gate | Implemented; **no managed/hosted default** |
+| AI providers | Local Ollama, any OpenAI-compatible endpoint, browser STT, local ONNX speech models, built-in local neural/lexical embeddings, hardware probe + model catalog, policy gate | Implemented; **no managed/hosted default** |
 | Automations | Trigger/condition/delay/action engine, retry, dedupe, audit, per-day caps, quiet hours | Implemented |
 | Automations | Outbound delivery (SMTP, Twilio SMS/WhatsApp, BYO SMS gateway, signed webhooks) via the leased outbox dispatcher | Implemented; consent/opt-out enforced at queue and run time |
 | Collections | Overdue policy, dunning schedule, escalation | Implemented (audited queued messages/tasks; nothing auto-sends unverified) |
@@ -72,11 +72,12 @@ rules, invoice/payment math, ledger rules, RBAC checks, audit, automation engine
 | Operations | Org-wide receptionist switch (run / pause / stop) with audited changes and a dashboard control | Implemented |
 | Calendar | Read-only ICS feed + CalDAV push/pull sync (remote cancel/move applied conservatively) | Implemented |
 | Calendar | Google Calendar OAuth two-way sync; external busy times block availability | Implemented |
-| Calendar | Microsoft 365 / Graph OAuth, external-event ingestion beyond CalDAV/Google | **Planned** |
+| Calendar | Microsoft 365 / Graph OAuth two-way sync; external busy times block availability | Implemented |
 | Reporting | Dashboard, usage metrics (`AiLog`), diagnostics (DB/workers/providers) | Implemented (basic) |
+| Operations | Scheduled database snapshots with retention (hourly worker + manual trigger) | Implemented |
 | Data | Org-scoped JSON export, SQLite backup endpoint, Docker/Compose deployment | Implemented |
-| Data | One-click restore/rollback scripts | **Not shipped** — snapshot via `VACUUM INTO`/`pg_dump` documented in SELF_HOSTING |
-| Team | Multiple users per org with role management UI | **Not shipped** — roles are enforced server-side, but this build has no user-management API/UI; each org has its owner account |
+| Data | One-click restore/rollback scripts | **Not shipped** — snapshots via `VACUUM INTO`/`pg_dump` (now also scheduled with retention) are documented in SELF_HOSTING |
+| Team | Multiple users per org with role management UI | Implemented — members, one-time invitations, role changes, deactivation, session revocation, password reset |
 
 ## 4. Non-goals
 

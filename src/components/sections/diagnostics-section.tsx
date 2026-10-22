@@ -9,6 +9,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Table,
   TableBody,
@@ -148,6 +151,9 @@ export function DiagnosticsSection() {
   const [runningAutomations, setRunningAutomations] = useState(false)
   const [backingUp, setBackingUp] = useState(false)
   const [backup, setBackup] = useState<{ file: string; bytes: number } | null>(null)
+  const [backupFiles, setBackupFiles] = useState<Array<{ filename: string; bytes: number; createdAt: string }>>([])
+  const [schedule, setSchedule] = useState<{ enabled: boolean; hour: number; retention: number }>({ enabled: false, hour: 3, retention: 7 })
+  const [scheduleBusy, setScheduleBusy] = useState(false)
   const [updatedLabel, setUpdatedLabel] = useState('')
 
   const load = useCallback(async (silent = false) => {
@@ -173,6 +179,35 @@ export function DiagnosticsSection() {
     }, POLL_MS)
     return () => clearInterval(t)
   }, [load])
+
+
+
+  const loadBackups = useCallback(async () => {
+    if (!isAdmin) return
+    try {
+      const d = await api.get<{ backups: Array<{ filename: string; bytes: number; createdAt: string }>; schedule: { enabled: boolean; hour: number; retention: number } }>('/api/admin/backups')
+      setBackupFiles(d.backups)
+      setSchedule(d.schedule)
+    } catch {
+      /* non-fatal: the section still works without the backup list */
+    }
+  }, [isAdmin])
+
+  const saveSchedule = async (next: { enabled: boolean; hour: number; retention: number }) => {
+    setScheduleBusy(true)
+    try {
+      const d = await api.put<{ schedule: { enabled: boolean; hour: number; retention: number } }>('/api/admin/backups/schedule', next)
+      setSchedule(d.schedule)
+      toast({ title: 'Backup schedule saved', description: d.schedule.enabled ? `Daily at ${String(d.schedule.hour).padStart(2, '0')}:00, keeping ${d.schedule.retention} snapshot(s).` : 'Automatic backups are off.' })
+      await loadBackups()
+    } catch (err) {
+      toast({ title: 'Could not save the schedule', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+    } finally {
+      setScheduleBusy(false)
+    }
+  }
+
+  useEffect(() => { void loadBackups() }, [loadBackups])
 
   const runAutomations = async () => {
     setRunningAutomations(true)
@@ -598,6 +633,76 @@ export function DiagnosticsSection() {
                 Export downloads a full JSON copy of this org&rsquo;s data (no secrets, no credentials) straight from the
                 server.
               </p>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Switch
+                      checked={schedule.enabled}
+                      disabled={scheduleBusy}
+                      onCheckedChange={(v) => void saveSchedule({ ...schedule, enabled: v })}
+                      aria-label="Automatic daily backups"
+                    />
+                    Automatic daily backup
+                  </label>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Label htmlFor="backup-hour" className="text-xs text-muted-foreground">At hour</Label>
+                    <Input
+                      id="backup-hour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={schedule.hour}
+                      disabled={scheduleBusy}
+                      onChange={(e) => setSchedule((s) => ({ ...s, hour: Math.min(23, Math.max(0, Number(e.target.value) || 0)) }))}
+                      onBlur={() => void saveSchedule(schedule)}
+                      className="w-20 min-h-[44px]"
+                    />
+                    <Label htmlFor="backup-retention" className="text-xs text-muted-foreground">Keep</Label>
+                    <Input
+                      id="backup-retention"
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={schedule.retention}
+                      disabled={scheduleBusy}
+                      onChange={(e) => setSchedule((s) => ({ ...s, retention: Math.min(60, Math.max(1, Number(e.target.value) || 1)) }))}
+                      onBlur={() => void saveSchedule(schedule)}
+                      className="w-20 min-h-[44px]"
+                    />
+                    <span className="text-xs text-muted-foreground">snapshot(s)</span>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The worker checks hourly, writes one snapshot a day at the chosen hour (server time) and deletes the
+                  oldest ones beyond the retention count. Snapshots contain every organization&rsquo;s data — ship them
+                  off-site.
+                </p>
+                {backupFiles.length > 0 && (
+                  <div className="max-h-48 overflow-y-auto rounded-lg border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>File</TableHead>
+                          <TableHead className="text-right">Size</TableHead>
+                          <TableHead className="text-right">Created</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {backupFiles.map((f) => (
+                          <TableRow key={f.filename}>
+                            <TableCell className="font-mono text-xs">{f.filename}</TableCell>
+                            <TableCell className="text-right tabular-nums text-xs">{formatBytes(f.bytes)}</TableCell>
+                            <TableCell className="text-right text-xs">{formatDateTime(f.createdAt)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <p className="text-sm text-muted-foreground">

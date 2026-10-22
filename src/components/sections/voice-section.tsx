@@ -62,6 +62,56 @@ function h(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${n}ms`
 }
 
+/**
+ * Convert a browser recording to 16 kHz mono PCM WAV.
+ * Returns the original blob when the browser cannot decode it (the server
+ * then falls back to ffmpeg or reports the real reason).
+ */
+async function toWav16kMono(blob: Blob): Promise<Blob> {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctx) return blob
+    const arrayBuffer = await blob.arrayBuffer()
+    const ctx = new Ctx()
+    const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0))
+    void ctx.close()
+    const targetRate = 16000
+    const frames = Math.max(1, Math.ceil(decoded.duration * targetRate))
+    const offline = new OfflineAudioContext(1, frames, targetRate)
+    const source = offline.createBufferSource()
+    source.buffer = decoded
+    source.connect(offline.destination)
+    source.start()
+    const rendered = await offline.startRendering()
+    const samples = rendered.getChannelData(0)
+    const bytes = new ArrayBuffer(44 + samples.length * 2)
+    const view = new DataView(bytes)
+    const ascii = (offset: number, text: string) => {
+      for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
+    }
+    ascii(0, 'RIFF')
+    view.setUint32(4, 36 + samples.length * 2, true)
+    ascii(8, 'WAVE')
+    ascii(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, targetRate, true)
+    view.setUint32(28, targetRate * 2, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    ascii(36, 'data')
+    view.setUint32(40, samples.length * 2, true)
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]))
+      view.setInt16(44 + i * 2, Math.round(s * 32767), true)
+    }
+    return new Blob([bytes], { type: 'audio/wav' })
+  } catch {
+    return blob
+  }
+}
+
 export function VoiceSection() {
   const { toast } = useToast()
   const setActiveSection = useAppStore((s) => s.setActiveSection)
@@ -274,13 +324,16 @@ export function VoiceSection() {
     if (!convId) return
     try {
       setStatus('transcribing')
-      const buf = new Uint8Array(await blob.arrayBuffer())
+      // Local Whisper models expect 16 kHz mono PCM. Convert in the browser so
+      // the server does not need ffmpeg for the common case.
+      const payload = stt?.provider === 'local_speech' ? await toWav16kMono(blob) : blob
+      const buf = new Uint8Array(await payload.arrayBuffer())
       let binary = ''
       const CHUNK = 0x8000
       for (let i = 0; i < buf.length; i += CHUNK) binary += String.fromCharCode(...buf.subarray(i, i + CHUNK))
       const b64 = btoa(binary)
       const t0 = performance.now()
-      const r = await api.post<{ text: string; latencyMs: number }>('/api/ai/asr', { b64, mime: blob.type || 'audio/webm' })
+      const r = await api.post<{ text: string; latencyMs: number }>('/api/ai/asr', { b64, mime: payload.type || 'audio/wav' })
       setLatencies((l) => ({ ...l, stt: r.latencyMs || Math.round(performance.now() - t0) }))
       if (!r.text.trim()) {
         toast({ title: 'Nothing audible was captured', description: 'Try speaking a bit closer to the microphone.' })
