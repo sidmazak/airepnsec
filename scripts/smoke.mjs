@@ -9,6 +9,7 @@
  *  - the receptionist runtime switch (pause → resume)
  *  - blocked periods: a block removes slots from availability, deleting it restores them
  *  - the Google Calendar integration: create, OAuth redirect, honest failure without a token
+ *  - team management: invitation -> accept (once) -> role change -> deactivate, owner guard rails
  *
  * Every assertion is explicit — a failed check prints what was expected and what
  * actually happened. Exit code is non-zero when anything fails.
@@ -167,6 +168,42 @@ async function main() {
 
     const removed = await req('DELETE', `/api/integrations/${googleId}`)
     check('google_calendar integration can be removed', removed.status === 200, `status=${removed.status}`)
+  }
+
+  // 7. team management: invite -> accept -> role change -> deactivate
+  const inviteEmail = `smoke-agent-${Date.now()}@example.com`
+  const invite = await req('POST', '/api/users/invites', { email: inviteEmail, role: 'agent' })
+  check('invitation can be created', invite.status === 201 && Boolean(invite.data?.inviteUrl), `status=${invite.status} ${JSON.stringify(invite.data).slice(0, 160)}`)
+  const inviteToken = String(invite.data?.inviteUrl ?? '').split('join=')[1] ?? ''
+  if (inviteToken) {
+    const details = await req('GET', `/api/users/invites/${inviteToken}`)
+    check('invitation details are readable', details.status === 200 && details.data?.invite?.email === inviteEmail, `status=${details.status}`)
+
+    // Accepting the invitation signs the NEW member in and replaces the cookie —
+    // keep the owner's cookie to continue as the owner.
+    const ownerCookie = cookie
+    const accept = await req('POST', `/api/users/invites/${inviteToken}/accept`, { name: 'Smoke Agent', password: 'smoke-agent-password' })
+    check('invitation can be accepted', accept.status === 200 && accept.data?.user?.email === inviteEmail, `status=${accept.status} ${JSON.stringify(accept.data).slice(0, 160)}`)
+    cookie = ownerCookie
+
+    const replay = await req('POST', `/api/users/invites/${inviteToken}/accept`, { password: 'smoke-agent-password' })
+    check('an invitation cannot be used twice', replay.status === 400, `status=${replay.status}`)
+
+    const team = await req('GET', '/api/users')
+    const member = (team.data?.members ?? []).find((m) => m.email === inviteEmail)
+    check('the new member is listed', Boolean(member), 'member not in the team list')
+    check('team list never exposes secrets', !JSON.stringify(team.data).includes('passwordHash'), 'password hash leaked')
+
+    if (member) {
+      const role = await req('PATCH', `/api/users/${member.id}`, { role: 'viewer' })
+      check('a member role can be changed', role.status === 200 && role.data?.member?.role === 'viewer', `status=${role.status} ${JSON.stringify(role.data).slice(0, 160)}`)
+
+      const off = await req('PATCH', `/api/users/${member.id}`, { active: false })
+      check('a member can be deactivated', off.status === 200 && off.data?.member?.active === false, `status=${off.status}`)
+
+      const lastOwner = await req('PATCH', `/api/users/${session.data?.user?.id}`, { active: false })
+      check('the last owner cannot be deactivated', lastOwner.status === 409, `status=${lastOwner.status}`)
+    }
   }
 
   log('')

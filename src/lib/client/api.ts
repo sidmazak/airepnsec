@@ -78,6 +78,16 @@ export type Customer = {
   tags: string[]; optOut: boolean; consentContact: boolean; createdAt: string
 }
 
+export type TeamMember = {
+  id: string; email: string; name: string; role: 'owner' | 'admin' | 'agent' | 'viewer'
+  active: boolean; twoFactorEnabled: boolean; lastLoginAt: string | null; createdAt: string
+}
+
+export type TeamInvite = {
+  id: string; email: string; role: 'owner' | 'admin' | 'agent' | 'viewer'
+  createdAt: string; expiresAt: string; acceptedAt: string | null; revokedAt: string | null
+}
+
 export type Service = {
   id: string; name: string; description: string; category: string
   durationMin: number; priceCents: number; bufferBeforeMin: number; bufferAfterMin: number

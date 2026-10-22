@@ -45,6 +45,21 @@ All handlers live in `src/app/api/**/route.ts`. Single-page frontend at `/` call
 - `POST /api/auth/register-owner` — only when zero users exist: `{orgName, businessType, name, email, password}` → create org (slug from name, unique-ified) + owner + default working hours Mon–Fri 9–17 + default provider rows. Audit `setup.owner_registered`.
 - `POST /api/demo/seed` — public, rate-limited: idempotent `seedDemo()` → `{orgId, email, password}` (demo credentials for login).
 
+### Team / members (auth)
+Roles: `owner | admin | agent | viewer`. Only owners may create owners or promote somebody to owner; admins manage agents/viewers only; nobody may change their own role, deactivate themselves, or demote/deactivate the last active owner. Deactivation is soft (`User.active=false`) — history is never deleted. Password hashes and TOTP secrets are never returned.
+
+- `GET /api/users` (owner/admin) → `{members:[{id,email,name,role,active,twoFactorEnabled,lastLoginAt,createdAt}]}`.
+- `POST /api/users/invites` (owner/admin) `{email, role}` → creates a 7-day invitation, emails the link through the outbox and returns `{inviteId,email,role,expiresAt,inviteUrl}` (the plain token is returned exactly once). `409 already_member`, `422 invalid_role`.
+- `GET /api/users/invites` (owner/admin) → pending invitations (no tokens).
+- `GET /api/users/invites/[token]` (public) → `{invite:{email,role,expiresAt}}` or `400 invite_invalid` — used by the Join screen before the user has an account.
+- `POST /api/users/invites/[token]/accept` (public) `{name?, password}` → creates the member, marks the invitation accepted and signs the new member in. `400 invite_invalid` for expired/used/revoked invitations.
+- `POST /api/users/invites/revoke` (owner/admin) `{inviteId}` → revokes a pending invitation.
+- `PATCH /api/users/[id]` (owner/admin) `{role?, active?, name?}` → updates a member. `409 last_owner`, `409 cannot_deactivate_self`, `403 forbidden`.
+- `POST /api/users/[id]/revoke-sessions` (owner/admin) → revokes every active session of that member; returns `{revoked}`.
+- `POST /api/users/[id]/reset-password` (owner/admin) → issues a one-time reset link (1-hour TTL), emails it through the outbox and returns `{link}` once. `403 forbidden` for non-owners.
+- `PATCH /api/users/me/password` (auth) `{currentPassword, newPassword}` → changes the signed-in user's password, revokes every session of that account (including the current one) and clears the session cookie. `401 bad_password` when the current password is wrong.
+- `POST /api/auth/reset-password` (public) `{token, password}` → consumes a one-time reset token, sets the new password, revokes the account's sessions and signs the user in. `400 reset_invalid`.
+
 ### Setup wizard (auth)
 - `GET /api/setup` → `{ state: parsed setupState, org }`
 - `PUT /api/setup` `{step: string, data: Record<string,unknown>}` → merge into `org.setupState` + apply business fields (name/timezone/openingHours/policies/aiIdentity per step). Return updated state. Audit `setup.step_saved`.

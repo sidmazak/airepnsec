@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   LayoutDashboard, Inbox, CalendarDays, Users, Receipt, BookOpen, BookMarked,
-  Workflow, Bot, Store, Activity, LogOut, Menu, Bot as Logo, Plug, X, Mic, Database, BarChart3, Wifi, ShieldCheck,
+  Workflow, Bot, Store, Activity, LogOut, Menu, Bot as Logo, Plug, X, Mic, Database, BarChart3, Wifi, ShieldCheck, UserCog,
 } from 'lucide-react'
 
 const STAFF: string[] = ['owner', 'admin', 'agent']
@@ -31,6 +31,7 @@ const NAV: Array<{ id: SectionId; label: string; icon: typeof LayoutDashboard; g
   { id: 'business', label: 'Business Profile', icon: Store, group: 'Settings', roles: ADMINS },
   { id: 'integrations', label: 'Integrations', icon: Plug, group: 'Settings', roles: ADMINS },
   { id: 'diagnostics', label: 'Diagnostics', icon: Activity, group: 'Settings', roles: ADMINS },
+  { id: 'team', label: 'Team', icon: UserCog, group: 'Settings', roles: ADMINS },
   { id: 'setup', label: 'Setup Wizard', icon: Menu, group: 'Settings', roles: ADMINS },
 ]
 

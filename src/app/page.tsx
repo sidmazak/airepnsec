@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '@/lib/client/store'
 import { api, type SessionInfo } from '@/lib/client/api'
 import { AuthScreen } from '@/components/sections/auth-screen'
@@ -23,6 +23,8 @@ import UsageSection from '@/components/sections/usage-section'
 import { DiagnosticsSection } from '@/components/sections/diagnostics-section'
 import { SecuritySection } from '@/components/sections/security-section'
 import { SetupSection } from '@/components/sections/setup-section'
+import { TeamSection } from '@/components/sections/team-section'
+import { JoinScreen, ResetPasswordScreen } from '@/components/team-access-screens'
 import { Loader2 } from 'lucide-react'
 import { GuidedTour } from '@/components/guided-tour'
 
@@ -47,12 +49,30 @@ function SectionRouter() {
     case 'diagnostics': return <DiagnosticsSection />
     case 'security': return <SecuritySection />
     case 'setup': return <SetupSection />
+    case 'team': return <TeamSection />
     default: return <DashboardSection />
   }
 }
 
+type AccessFlow = { kind: 'join' | 'reset'; token: string }
+
 export default function Home() {
   const { session, sessionLoading, setSession, setSessionLoading, activeSection, setActiveSection } = useAppStore()
+  const [flow, setFlow] = useState<AccessFlow | null>(null)
+
+  // Emailed access links: #?join=<token> and #/reset-password?token=<token>.
+  useEffect(() => {
+    const readFlow = () => {
+      const hash = window.location.hash
+      const join = /[?&]join=([A-Za-z0-9_-]{10,})/.exec(hash)
+      if (join) { setFlow({ kind: 'join', token: join[1] }); return }
+      const reset = /reset-password\?token=([A-Za-z0-9_-]{10,})/.exec(hash)
+      if (reset) { setFlow({ kind: 'reset', token: reset[1] }) }
+    }
+    readFlow()
+    window.addEventListener('hashchange', readFlow)
+    return () => window.removeEventListener('hashchange', readFlow)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -85,6 +105,17 @@ export default function Home() {
       window.history.replaceState(null, '', `#${activeSection}`)
     }
   }, [activeSection])
+
+  if (flow) {
+    const clear = () => {
+      setFlow(null)
+      window.history.replaceState(null, '', '#dashboard')
+      window.location.reload()
+    }
+    return flow.kind === 'join'
+      ? <JoinScreen token={flow.token} onDone={clear} />
+      : <ResetPasswordScreen token={flow.token} onDone={clear} />
+  }
 
   if (sessionLoading) {
     return (

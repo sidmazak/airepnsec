@@ -23,11 +23,12 @@ OAuth integration. A first-class Graph implementation would need a second OAuth 
 `src/lib/integrations/` plus Graph event/freebusy calls — the `CalendarBlock` model and the sync
 route shape would be reused.
 
-## 3. Multi-user team management + SSO
+## 3. SSO (SAML / OIDC)
 
-Roles (`owner | admin | agent | viewer`) are enforced on every route, but there is no user or
-invite API/UI, no SSO/SAML/OIDC, and no password-reset flow. This is the biggest functional gap
-for a multi-person business.
+Roles (`owner | admin | agent | viewer`) are enforced on every route and multi-user team management
+ships (members, invitations, role changes, deactivation, session revocation, password reset).
+What is still missing is federated sign-in: SAML or OIDC identity providers, account linking, and
+SCIM user provisioning. Every user currently signs in with a local password (+ optional TOTP).
 
 ## 4. Local speech models (Kokoro TTS / Whisper STT / Piper TTS)
 
@@ -54,11 +55,10 @@ pipeline that the product does not have a use case for yet.
 No GPU/RAM probe and no recommended-model endpoint, so "which model should I run?" is answered by
 the docs instead of the app.
 
-## 8. Shared-store rate limiting and role-matrix E2E
+## 8. Role-matrix E2E
 
-Rate limiting is an in-memory sliding window (per process). Multi-replica deployments should put a
-limiter in front of the app. The role matrix is enforced in code and covered by unit tests, but
-there is no automated per-role endpoint sweep.
+The role matrix is enforced in code and covered by unit tests. The smoke script exercises the team
+flow end to end, but there is still no automated per-role sweep over every endpoint.
 
 ## 9. Scheduled backups and retention
 
@@ -73,3 +73,7 @@ scheduler and no retention policy ship with the app — run them from cron/syste
   (`Organization.receptionistStatus`, dashboard control card, audited changes).
 - ~~Google Calendar sync~~ — implemented (`google_calendar` integration, OAuth two-way sync,
   busy windows block availability).
+- ~~Multi-user team management~~ — implemented (`/api/users*`: members, one-time invitations,
+  role changes, deactivation, session revocation, password reset; Team section in the SPA).
+- ~~Shared-store rate limiting~~ — implemented (`RateBucket` rows; the login limiter and the
+  shared limiter survive a restart and work across replicas).

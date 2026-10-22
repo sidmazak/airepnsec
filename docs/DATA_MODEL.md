@@ -14,7 +14,8 @@ Conventions: IDs are `String @id @default(cuid())`; business tables carry `orgId
 | Model | Purpose |
 |---|---|
 | `Organization` | Tenant root: business profile, timezone, locale, currency, hours, policies, AI identity, setup state, data mode. |
-| `User` | Login identity; password hash, role, encrypted TOTP secret. |
+| `User` | Login identity; unique `email`, scrypt `passwordHash`, `role` (`owner|admin|agent|viewer`),
+  encrypted TOTP secret, `active`, `twoFactorLastCounter`, `lastLoginAt`. |
 | `Session` | Hashed session token, expiry, `revokedAt`. |
 | `AppSetting` | Org key/value JSON (webhook secret, wizard state, channels, CalDAV sync summary). |
 | `WorkerLease` | Single-flight lease for automation/outbox/data-source workers (TTL recovery). |
@@ -173,6 +174,11 @@ enforced in code; `webhook_out` allows multiple destinations.
 ### WorkerLease
 `name` (PK), `holder`, `expiresAt`, `lastRunAt`, `lastError`, `updatedAt`. Expired leases are
 recoverable; a completed worker moves `expiresAt` into the past.
+
+### Invite / PasswordResetToken / RateBucket
+- `Invite`: pending join invitation; `email`, `role`, `tokenHash` (`@unique`), `invitedById`, `expiresAt` (7 days), `acceptedAt`/`revokedAt`. The plain token is returned once (invite URL + the inviter's copy) and only its hash is stored.
+- `PasswordResetToken`: one-time reset tokens for a user; `userId`, `tokenHash` (`@unique`), `expiresAt` (1 hour), `usedAt` (set on successful reset).
+- `RateBucket`: shared-store rate limit counters; `key` (`@unique`), `count`, `windowStart`, `expiresAt` — the login limiter survives restarts and is shared between replicas.
 
 ### TelephonyLine / TelephonyCall
 - `TelephonyLine`: `integrationId`, `label`, `phoneNumber`, destination kind/value, `priority`,

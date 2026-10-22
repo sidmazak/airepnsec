@@ -20,6 +20,7 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Automations | `/api/automations*` | DONE | Triggers, conditions, delays, quiet hours, test mode, runs. |
 | AI Providers | `/api/providers/*` | DONE | BYOK Ollama/OpenAI-compatible; encrypted keys; real connection tests. |
 | Security | `/api/auth/2fa/*`, `/api/auth/sessions/revoke-all` | DONE | TOTP enrollment/disable; revoke other sessions. |
+| Team | `/api/users*` | DONE | Members, invitations, roles, deactivation, session revocation, password reset; owner/admin only. |
 | Business Profile | `/api/setup`, `/api/settings/*` | DONE | Profile, hours, policies, AI identity, collections config. |
 | Integrations | `/api/integrations/*` | DONE | SMTP, Twilio, SMS gateways, Stripe, CalDAV, Google Calendar, outbound webhooks; per-kind tests. |
 | Diagnostics | `/api/health/detail` | DONE | DB tuning, worker leases, heartbeat, providers, counts. |
@@ -50,7 +51,7 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Outbox delivery | DONE | 30s lease-protected dispatcher; backoff and honest statuses. |
 | Hardware detection / model catalog | **MISSING** | No GPU/RAM probe or recommended-model endpoint. |
 | Audit log | DONE | `src/lib/audit.ts`; append-only rows. |
-| Rate limiting / CSRF | DONE | In-memory sliding window (per-process); `x-requested-with: ais` on mutations. |
+| Rate limiting / CSRF | DONE | In-memory sliding window per route plus a DB-backed `RateBucket` limiter for login; `x-requested-with: ais` on mutations. |
 | Security headers | DONE | Configured in `next.config.ts` (HSTS/CSP in production). No middleware. |
 | 2FA / session revocation | DONE | TOTP RFC 6238; DB sessions with `revokedAt`; revoke-all endpoint. |
 | Worker single-flight | DONE | `WorkerLease` + TTL recovery; manual endpoints return 409 while busy. |
@@ -58,4 +59,5 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | PABX routing | DONE | least-busy/round-robin/redirect, line pause/disable, real load, call records. |
 | Receptionist runtime switch | DONE | Org-wide `running \| paused \| stopped` (`Organization.receptionistStatus`): dashboard control, audited changes, gates inbound SMS/WhatsApp/voice/web chat and realtime sessions. |
 | SSO (SAML/OIDC) | **MISSING** | Email+password/TOTP only. |
-| Team user management | **MISSING** | Roles exist and are enforced, but there is no users/invite/role-management API or UI in this build; each org has its owner account. |
+| Team user management | DONE | `/api/users*`: members, one-time invitations (7-day TTL, hashed token, emailed via the outbox), invitation revocation, role changes, deactivation, session revocation, password reset; Team section in the SPA + public Join/Reset screens. Owners manage owners, admins manage agents/viewers, the last active owner is protected. |
+| Shared-store rate limiting | DONE | `RateBucket` rows (DB-backed) for the login limiter — survives restarts, shared across replicas. |
