@@ -2,7 +2,7 @@
 
 How the app talks to third-party services: email (SMTP), SMS/WhatsApp (Twilio or a self-hosted
 SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), Stripe payments, CalDAV
-calendar sync (push + pull), and signed outbound webhooks. Speech recognition/synthesis for the
+calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
 browser **Voice Console** is not an integration row — it rides the AI provider layer (capabilities
 `stt`/`tts`, same BYOK + data-mode policy as chat; see [ARCHITECTURE.md](./ARCHITECTURE.md) §9).
 Everything here is **BYOK (bring your own key)** — the app ships with zero third-party accounts and
@@ -12,7 +12,7 @@ Status summary (details per section below): integrations CRUD, the outbox
 dispatcher, Stripe payment links + signature-verified webhooks, generic inbound
 payment webhooks, outbound signed webhooks, the ICS calendar feed, the real
 phone/SMS receptionist (Twilio Voice webhooks), SMS-gateway delivery, and
-CalDAV push/pull sync are **implemented and live**. Every kind has a real
+CalDAV push/pull sync and **Google Calendar OAuth sync** are **implemented and live**. Every kind has a real
 connection test exposed at `POST /api/integrations/[id]/test` (results stored in
 `lastTest*` and shown on the card); the test never claims message delivery.
 
@@ -64,7 +64,7 @@ connection test exposed at `POST /api/integrations/[id]/test` (results stored in
 Config = non-secret fields (`configJson`), Secrets = encrypted fields.
 `GET /api/integrations` returns config plus `configured`, `enabled`,
 `lastTestAt/Ok/Error` — never secrets. Singleton kinds (one row per org):
-`smtp`, `twilio_sms`, `twilio_whatsapp`, `twilio_voice`, `sms_gateway`, `caldav`,
+`smtp`, `twilio_sms`, `twilio_whatsapp`, `twilio_voice`, `sms_gateway`, `caldav`, `google_calendar`,
 `stripe`; `webhook_out` allows one row per destination URL.
 
 ### `smtp` — email delivery
@@ -189,6 +189,23 @@ explicit cancellation or a moved start time. A missing remote event is surfaced 
 calendar wipe cannot destroy the local schedule. Push only covers `pending|confirmed` bookings;
 there is no delete-on-cancel push, so a locally cancelled booking's remote event is left for the
 operator to remove (and is reported `missing` only after that).
+
+### `google_calendar` — two-way sync with Google Calendar (OAuth)
+
+| | |
+|---|---|
+| Config | `calendarId?` (default `primary`; a shared calendar address also works), `redirectUri?` (defaults to this app's `/api/integrations/google_calendar/callback`) |
+| Secrets | `clientId` + `clientSecret` (from the Google Cloud console). The **access/refresh tokens are written by the OAuth callback**, encrypted at rest, and never returned by any API. |
+| Connect | Save the client id/secret, then **Connect Google Calendar** → `GET /api/integrations/google_calendar/authorize` redirects to Google's consent screen. A one-time server-side `state` nonce (10 min TTL, bound to the org) is verified and destroyed on the callback; the code is exchanged for tokens, the row is enabled, and the browser returns to the Integrations section. |
+| Test routine | Real calendar fetch with the stored (or freshly refreshed) access token → `Google Calendar verified — calendar "…" (access: owner)`. Honest failures: `401`/`403` (re-authorize), `404` (wrong calendar id), `422 not_connected` (consent not completed yet). |
+| Sync | `POST /api/integrations/google-calendar/sync` (owner/admin; the **Sync now** button) → **busy pull:** free/busy windows become `CalendarBlock` rows, so busy diary time is never offered as a slot and the booking transaction refuses it (`409 slot_blocked`); **event pull:** events carrying our `aisBookingId` marker are read back — remote cancellation cancels the booking, a moved event reschedules through the validated booking service, events of locally cancelled bookings are removed remotely; **push:** upcoming `pending|confirmed` bookings become Google events (idempotent — the booking id is stored as a private extended property, so re-pushing updates instead of duplicating). |
+
+Both CalDAV and Google Calendar feed the **same** availability engine, so the booking promise
+always matches the real diary. Manual blocks can be managed through
+`GET/POST/DELETE /api/calendar/blocks` and through the assistant's `block_time` tool.
+
+**Microsoft 365 / Graph** is not implemented — use CalDAV (Outlook exposes a CalDAV endpoint) or
+stay on the ICS feed.
 
 ## 3. The outbox
 

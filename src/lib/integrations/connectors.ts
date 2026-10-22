@@ -9,12 +9,12 @@ import { assertOutboundUrl } from '@/lib/security/outbound'
  * NEVER leaves the server — error messages are sanitized against secret values.
  */
 
-export type IntegrationKind = 'smtp' | 'twilio_sms' | 'twilio_whatsapp' | 'twilio_voice' | 'sms_gateway' | 'caldav' | 'stripe' | 'webhook_out'
+export type IntegrationKind = 'smtp' | 'twilio_sms' | 'twilio_whatsapp' | 'twilio_voice' | 'sms_gateway' | 'caldav' | 'google_calendar' | 'stripe' | 'webhook_out'
 
-export const INTEGRATION_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'stripe', 'webhook_out']
+export const INTEGRATION_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'google_calendar', 'stripe', 'webhook_out']
 
 /** Kinds that allow only one row per org (enforced at create time). */
-export const SINGLETON_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'stripe']
+export const SINGLETON_KINDS: IntegrationKind[] = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'google_calendar', 'stripe']
 
 export function isIntegrationKind(kind: string): kind is IntegrationKind {
   return (INTEGRATION_KINDS as string[]).includes(kind)
@@ -209,6 +209,11 @@ export async function testIntegration(orgId: string, integration: { kind: string
     case 'caldav': {
       const { testCaldav } = await import('@/lib/integrations/caldav')
       return testCaldav(integration)
+    }
+    case 'google_calendar': {
+      const { testGoogleCalendarIntegration } = await import('@/lib/integrations/googleAuth')
+      const origin = process.env.PUBLIC_BASE_URL || 'http://localhost:3000'
+      return testGoogleCalendarIntegration({ ...integration, id: '', orgId }, origin)
     }
     case 'stripe':
       return testStripe(integration)

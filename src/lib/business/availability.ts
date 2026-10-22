@@ -53,6 +53,14 @@ export async function computeSlots(orgId: string, query: AvailabilityQuery, tz: 
   })
   const svcMap = new Map((await db.service.findMany({ where: { orgId } })).map((s) => [s.id, s]))
 
+  // External busy windows (Google Calendar free/busy, manual blocks). A block
+  // without a staff member blocks the whole business; a staff block only blocks
+  // that staff member. In pool mode every block counts (conservative).
+  const blocks = await db.calendarBlock.findMany({
+    where: { orgId, startAt: { lt: query.to }, endAt: { gt: query.from } },
+    select: { startAt: true, endAt: true, staffId: true },
+  })
+
   // effective busy intervals include each booking's buffers
   const busy = bookings.map((b) => {
     const s = svcMap.get(b.serviceId)
@@ -62,6 +70,11 @@ export async function computeSlots(orgId: string, query: AvailabilityQuery, tz: 
       staffId: b.staffId,
     }
   })
+
+  for (const block of blocks) {
+    if (query.staffId && block.staffId && block.staffId !== query.staffId) continue
+    busy.push({ start: block.startAt.getTime(), end: block.endAt.getTime(), staffId: block.staffId })
+  }
 
   const slots: Slot[] = []
   const dayCursor = new Date(query.from)
@@ -107,7 +120,10 @@ export async function computeSlots(orgId: string, query: AvailabilityQuery, tz: 
  * conflict check and the insert are serialized together.
  */
 export async function assertSlotAvailable(
-  tx: { booking: { findMany: (args: unknown) => Promise<Array<{ startAt: Date; endAt: Date; serviceId: string }>> } },
+  tx: {
+    booking: { findMany: (args: unknown) => Promise<Array<{ startAt: Date; endAt: Date; serviceId: string }>> },
+    calendarBlock?: { findMany: (args: unknown) => Promise<Array<{ startAt: Date; endAt: Date; staffId: string | null }>> },
+  },
   org: { id: string; timezone: string; holidays: string },
   service: Service,
   staffId: string | null,
@@ -163,5 +179,21 @@ export async function assertSlotAvailable(
   } else {
     // Pool model: count bookings for ANY staff member (see computeSlots) — conservative.
     if (overlaps.length >= service.maxPerSlot) throw new ApiError(409, 'That time is fully booked.', 'slot_conflict')
+  }
+
+  // External busy windows (Google Calendar free/busy, manual blocks) also make a
+  // slot unbookable — the promise to the customer must match the real diary.
+  const blockFinder = tx.calendarBlock ?? db.calendarBlock
+  const blocks = await blockFinder.findMany({
+    where: {
+      orgId: org.id,
+      startAt: { lt: new Date(busyEnd) },
+      endAt: { gt: new Date(busyStart) },
+      ...(staffId ? { OR: [{ staffId: null }, { staffId }] } : {}),
+    },
+    select: { startAt: true, endAt: true, staffId: true },
+  })
+  if (blocks.length > 0) {
+    throw new ApiError(409, 'That time is blocked on the connected calendar — offer another slot.', 'slot_blocked')
   }
 }

@@ -27,7 +27,7 @@ car rentals, and similar appointment/rental businesses.
 | Money | Invoices with line items, verified payments vs. customer claims, idempotent webhooks, append-only ledger, reversals, statements |
 | Knowledge | Approved FAQ/docs, hybrid semantic + BM25 retrieval, built-in local ONNX embeddings, BYO databases/JSON as knowledge sources |
 | Automations | Triggers, conditions, delays, quiet hours, dedupe, retries, caps, test mode, run history, leased worker |
-| Integrations | SMTP, Twilio SMS/WhatsApp/Voice, SMS gateways (TextBee/httpSMS/android-sms-gateway/generic), Stripe Payment Links/webhooks, signed outbound webhooks, CalDAV two-way sync |
+| Integrations | SMTP, Twilio SMS/WhatsApp/Voice, SMS gateways (TextBee/httpSMS/android-sms-gateway/generic), Stripe Payment Links/webhooks, signed outbound webhooks, CalDAV two-way sync, Google Calendar OAuth two-way sync |
 | Operations | Dashboard, audit trail, outbox status, AI usage/cost estimates, diagnostics, encrypted secrets, 2FA, backups |
 
 ### AI providers (no proprietary SDK)
@@ -174,6 +174,7 @@ curl -s http://localhost:3000/api/health/ready    # DB readiness
 npx tsc --noEmit -p tsconfig.json
 npm run lint
 npm run test:unit
+node scripts/smoke.mjs     # 24 end-to-end checks against the running dev server
 ```
 
 ### Minimum useful flow (no cloud AI key required)
@@ -305,7 +306,8 @@ Read [docs/SECURITY.md](docs/SECURITY.md) for the threat model, RBAC matrix and 
 ```bash
 npx tsc --noEmit -p tsconfig.json
 npm run lint
-npm run test:unit        # Node built-in node:test, 32 cases
+npm run test:unit        # Node built-in node:test, 43 cases
+node scripts/smoke.mjs   # 24 end-to-end checks against the running dev server (scripts/smoke.mjs)
 ```
 
 CI (`.github/workflows/ci.yml`) runs Prisma generate → typecheck → lint → unit tests → production
@@ -339,7 +341,7 @@ src/app/                 Next.js App Router: / SPA + /api route handlers
 src/components/sections/ 18 client-side sections (dashboard, inbox, bookings, …)
 src/lib/business/        Booking, invoice, payment, ledger, collections services
 src/lib/ai/              Providers, policy, embeddings, receptionist tool loop, speech
-src/lib/integrations/    SMTP, Twilio, SMS gateways, Stripe, CalDAV, outbox dispatcher
+src/lib/integrations/    SMTP, Twilio, SMS gateways, Stripe, CalDAV, Google Calendar, outbox dispatcher
 src/lib/datasources/     BYO DB/JSON ingestion + SSRF-guarded adapters
 src/lib/telephony/       TwiML, PABX routing, no-input state
 src/lib/automation/      Trigger/condition/action engine

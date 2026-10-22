@@ -24,6 +24,7 @@ Conventions: IDs are `String @id @default(cuid())`; business tables carry `orgId
 | `StaffService` | Staff ↔ service join (`@@id([staffId, serviceId])`). |
 | `WorkingHour` | Per-staff or org-wide (`staffId:null`) weekly hours by `dow` + minute offsets. |
 | `Booking` | Reservation with `startAt/endAt`, status, source, price snapshot. |
+| `CalendarBlock` | A period that cannot be booked: external busy time (`source: google_calendar`) or a manual block. Read by the availability engine and the booking transaction. |
 | `Invoice` | Invoice header: number, status, subtotal/tax/total/paid cents, issue/due dates. |
 | `InvoiceItem` | Invoice line: description, qty, unit/total cents. |
 | `Payment` | Payment record with method, status, idempotency/external-event keys. |

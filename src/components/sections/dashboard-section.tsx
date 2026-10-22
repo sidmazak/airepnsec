@@ -10,8 +10,14 @@ import {
   type AuditRow,
   type OutboxRow,
   type ReadinessItem,
+  type SessionInfo,
 } from '@/lib/client/api'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -32,6 +38,10 @@ import {
   MessageSquare,
   Bell,
   PlusCircle,
+  PhoneCall,
+  PauseCircle,
+  PlayCircle,
+  StopCircle,
 } from 'lucide-react'
 
 type OverdueRow = {
@@ -149,6 +159,166 @@ function StatCard({
         </CardContent>
       </Card>
     </button>
+  )
+}
+
+type ReceptionistStatus = 'running' | 'paused' | 'stopped'
+
+const RECEPTIONIST_OPTIONS: Array<{
+  status: ReceptionistStatus
+  label: string
+  detail: string
+  icon: typeof PlayCircle
+}> = [
+  {
+    status: 'running',
+    label: 'Running',
+    detail: 'The assistant answers inbound SMS, WhatsApp, phone calls and web chat.',
+    icon: PlayCircle,
+  },
+  {
+    status: 'paused',
+    label: 'Paused',
+    detail: 'Inbound is recorded for staff, but the assistant does not reply. Calls get a short notice.',
+    icon: PauseCircle,
+  },
+  {
+    status: 'stopped',
+    label: 'Stopped',
+    detail: 'The app stops listening: inbound webhooks are acknowledged and audited, nothing is answered.',
+    icon: StopCircle,
+  },
+]
+
+/**
+ * Runtime switch for the AI receptionist — pause, resume or stop the assistant for
+ * the whole organization from the dashboard. Every change is audited server-side.
+ */
+function ReceptionistControl() {
+  const session = useAppStore((s) => s.session)
+  const setSession = useAppStore((s) => s.setSession)
+  const canManage = session?.user?.role === 'owner' || session?.user?.role === 'admin'
+  const [status, setStatus] = useState<ReceptionistStatus>(
+    (session?.org?.receptionistStatus as ReceptionistStatus) || 'running',
+  )
+  const [pending, setPending] = useState<ReceptionistStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<{ status: ReceptionistStatus }>('/api/settings/receptionist')
+      .then((d) => {
+        if (!cancelled) setStatus(d.status)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const apply = async (next: ReceptionistStatus) => {
+    setBusy(true)
+    setError('')
+    try {
+      const r = await api.patch<{ status: ReceptionistStatus }>('/api/settings/receptionist', { status: next })
+      setStatus(r.status)
+      const s = await api.get<SessionInfo>('/api/session')
+      setSession(s)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change the receptionist state')
+    } finally {
+      setBusy(false)
+      setPending(null)
+    }
+  }
+
+  const current = RECEPTIONIST_OPTIONS.find((o) => o.status === status) ?? RECEPTIONIST_OPTIONS[0]
+  const CurrentIcon = current.icon
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <CurrentIcon className="h-4 w-4" aria-hidden /> AI receptionist
+          </CardTitle>
+          <Badge
+            className={
+              status === 'running'
+                ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300'
+                : status === 'paused'
+                  ? 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300'
+                  : 'bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-300'
+            }
+          >
+            {current.label}
+          </Badge>
+        </div>
+        <CardDescription>{current.detail}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+        <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label="Receptionist state">
+          {RECEPTIONIST_OPTIONS.map((opt) => {
+            const Icon = opt.icon
+            const active = status === opt.status
+            return (
+              <button
+                key={opt.status}
+                type="button"
+                disabled={!canManage || busy}
+                aria-pressed={active}
+                aria-label={`${opt.label}: ${opt.detail}`}
+                onClick={() => {
+                  if (active) return
+                  if (opt.status === 'running') void apply('running')
+                  else setPending(opt.status)
+                }}
+                className={cn(
+                  'min-h-[44px] rounded-lg border p-3 text-left transition-colors disabled:opacity-60',
+                  active ? 'border-primary bg-primary/5' : 'hover:bg-muted/60',
+                )}
+              >
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <Icon className="h-4 w-4" aria-hidden /> {opt.label}
+                </span>
+                <span className="mt-1 block text-xs text-muted-foreground">{opt.detail}</span>
+              </button>
+            )
+          })}
+        </div>
+        {!canManage && (
+          <p className="text-xs text-muted-foreground">Only owners and admins can start, pause or stop the receptionist.</p>
+        )}
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <PhoneCall className="h-3.5 w-3.5" aria-hidden />
+          Calls routed to a human agent line are not affected. Scheduled reminders and automations keep running.
+        </p>
+
+        <AlertDialog open={pending !== null} onOpenChange={(open) => { if (!open) setPending(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {pending === 'paused' ? 'Pause the AI receptionist?' : 'Stop the AI receptionist?'}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {pending === 'paused'
+                  ? 'Inbound SMS, WhatsApp, calls and web chat are still recorded for staff, but the assistant will not reply. Calls get a short notice that the assistant is taking a break.'
+                  : 'The app stops listening: inbound webhooks are acknowledged and audited, but no conversation is opened and nothing is answered. Customers get no reply at all until you restart the receptionist.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => { if (pending) void apply(pending) }}>
+                {pending === 'paused' ? 'Pause receptionist' : 'Stop receptionist'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -298,6 +468,8 @@ export function DashboardSection() {
           targetLabel="Inbox"
         />
       </div>
+
+      <ReceptionistControl />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>

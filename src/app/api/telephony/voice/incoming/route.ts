@@ -6,8 +6,9 @@ import type { AiIdentity } from '@/lib/org'
 import { withPublic } from '@/lib/api'
 import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams,
-  matchCustomerByPhone, logWebhook, plainResponse, twiml, gatherSpeech, say,
+  matchCustomerByPhone, logWebhook, plainResponse, twiml, gatherSpeech, say, hangup,
 } from '@/lib/telephony/twiml'
+import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
 import {
   buildLineCandidates,
   normalizeAgentLines,
@@ -168,14 +169,16 @@ export const POST = withPublic(async (req: NextRequest) => {
       ? { strategy, routedTo: routedLine.number, label: routedLine.label }
       : { strategy: 'receptionist', ai: true }
   )
+  let callId = existingCall?.id ?? ''
   if (existingCall) {
     await db.telephonyCall
       .update({ where: { id: existingCall.id }, data: { lineId: routedLine?.id ?? '', status: 'started', meta: callMeta } })
       .catch(() => undefined)
   } else {
-    await db.telephonyCall
+    const created = await db.telephonyCall
       .create({ data: { orgId: org.id, callSid, from, to, lineId: routedLine?.id ?? '', status: 'started', meta: callMeta } })
-      .catch(() => undefined)
+      .catch(() => null)
+    callId = created?.id ?? ''
   }
 
   if (routedLine) {
@@ -196,6 +199,30 @@ export const POST = withPublic(async (req: NextRequest) => {
         '<Record maxLength="60" playBeep="true"/>' +
         '<Hangup/>'
     )
+  }
+
+  // Organization-wide runtime switch. Calls routed to a human agent line are
+  // unaffected — only the AI receptionist stops answering.
+  const receptionistStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  if (receptionistStatus !== 'running') {
+    if (callId) {
+      await db.telephonyCall
+        .update({
+          where: { id: callId },
+          data: { status: 'missed', endedAt: new Date(), meta: JSON.stringify({ strategy: 'receptionist', ai: false, receptionistStatus }) },
+        })
+        .catch(() => undefined)
+    }
+    await audit({
+      orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice',
+      action: 'telephony.call_not_answered', entity: 'conversation', entityId: conversation.id,
+      meta: { callSid, from, to, receptionistStatus },
+    })
+    const notice =
+      receptionistStatus === 'paused'
+        ? 'Our assistant is taking a break right now. Please call back later or leave a message on our website.'
+        : 'This line is currently unavailable. Please try our website instead.'
+    return twiml(say(notice, { voice: voiceName, language }) + hangup)
   }
 
   return twiml(

@@ -119,6 +119,12 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
     blurb: 'Push upcoming bookings to your own calendar — Nextcloud, Fastmail, Radicale, iCloud (app password).',
     needsCredentials: false,
   },
+  google_calendar: {
+    title: 'Google Calendar',
+    icon: CalendarDays,
+    blurb: 'Two-way sync with Google Calendar: your busy times block the bookable slots, and bookings appear on your calendar.',
+    needsCredentials: true,
+  },
   stripe: {
     title: 'Payments (Stripe)',
     icon: CreditCard,
@@ -133,7 +139,7 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
   },
 }
 
-const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'stripe'] as const
+const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'google_calendar', 'stripe'] as const
 
 const OUTBOX_STATUS_CLASS: Record<string, string> = {
   sent: 'bg-emerald-100 text-emerald-900',
@@ -165,13 +171,84 @@ function CopyButton({ value, label, className }: { value: string; label: string;
   )
 }
 
+type GoogleLastSync = { at: string; direction?: string; pushed: number; failed: number; total: number; blocksAdded?: number; blocksRemoved?: number; pulled?: { cancelled: number; rescheduled: number; unchanged: number; removed: number; failed: number; total: number } }
+
+function GoogleCalendarBox({ connected, canManage, onChanged }: { connected: boolean; canManage: boolean; onChanged: () => Promise<void> | void }) {
+  const { toast } = useToast()
+  const [info, setInfo] = useState<{ enabled: boolean; lastSync: GoogleLastSync | null; activeBlocks: number } | null>(null)
+  const [syncing, setSyncing] = useState(false)
+
+  const load = useCallback(() => {
+    api.get<{ enabled: boolean; lastSync: GoogleLastSync | null; activeBlocks: number }>('/api/integrations/google-calendar/sync')
+      .then(setInfo).catch(() => setInfo(null))
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const syncNow = async () => {
+    setSyncing(true)
+    try {
+      const r = await api.post<{ direction: string; pushed: number; failed: number; total: number; pulled: Record<string,number>; results: Array<unknown>; syncedAt: string; errors: string[] }>('/api/integrations/google-calendar/sync')
+      const pulledBits = [
+        r.pulled.cancelled ? `${r.pulled.cancelled} cancelled remotely` : '',
+        r.pulled.rescheduled ? `${r.pulled.rescheduled} moved remotely` : '',
+        r.pulled.removed ? `${r.pulled.removed} pulled back` : '',
+        r.pulled.failed ? `${r.pulled.failed} pull errors` : '',
+      ].filter(Boolean).join(', ')
+      toast({
+        title: r.total === 0 && Object.keys(r.pulled||{}).length === 0
+          ? 'No upcoming bookings to sync'
+          : `Google Calendar sync: ${r.pushed}/${r.total} bookings written${r.failed ? `, ${r.failed} failed` : ''}${pulledBits ? `; ${pulledBits}` : ''}`,
+        variant: r.failed > 0 || (r.pulled?.failed ?? 0) > 0 ? 'destructive' : 'default',
+      })
+      load()
+      await onChanged()
+    } catch (err) {
+      toast({ title: 'Google Calendar sync failed', description: friendlyApiErrorLocal(err, 'Unknown error'), variant: 'destructive' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <div className="rounded-md border p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">Bookings ↔ Google Calendar (two-way)</p>
+        {connected && info?.enabled ? (
+          <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing}>
+            {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+            Sync now
+          </Button>
+        ) : !connected ? (
+          <Button asChild variant="outline" size="sm" className="min-h-[36px]" disabled={!canManage}>
+            <a href="/api/integrations/google_calendar/authorize">Connect Google Calendar</a>
+          </Button>
+        ) : null}
+      </div>
+      {!connected ? (
+        <p className="text-xs text-muted-foreground">Save your OAuth client ID and secret under Integrations first, then connect.</p>
+      ) : info?.lastSync ? (
+        <p className="text-xs text-muted-foreground">
+          Last sync {formatDateTime(info.lastSync.at)} — {info.lastSync.pushed}/{info.lastSync.total} bookings written{info.lastSync.failed ? `, ${info.lastSync.failed} failed` : ''}
+          {(info.lastSync.blocksAdded !== undefined || info.lastSync.blocksRemoved !== undefined)
+            ? ` · blocks ${info.lastSync.blocksAdded ?? 0} added / ${info.lastSync.blocksRemoved ?? 0} removed`
+            : ''}.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">No sync yet — connect a calendar first.</p>
+      )}
+    </div>
+  )
+}
+
 /* ------------------------------ drafts ------------------------------ */
 
-type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string; baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean }
-type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string; password: string; apiKey: string; username: string; passwordGw: string; token: string; authValue: string }
 
-const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee', baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false }
-const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '', apiKey: '', username: '', passwordGw: '', token: '', authValue: '' }
+type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string; baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean; calendarId: string; redirectUri: string }
+type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string; password: string; apiKey: string; username: string; passwordGw: string; token: string; authValue: string; clientId: string; clientSecret: string }
+
+const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee', baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false, calendarId: 'primary', redirectUri: '' }
+const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '', apiKey: '', username: '', passwordGw: '', token: '', authValue: '', clientId: '', clientSecret: '' }
 
 function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
   if (kind === 'smtp') {
@@ -205,6 +282,11 @@ function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
     if (d.username.trim()) out.username = d.username.trim()
     return out
   }
+  if (kind === 'google_calendar') {
+    const out: Record<string, unknown> = { calendarId: d.calendarId.trim() || 'primary' }
+    if (d.redirectUri.trim()) out.redirectUri = d.redirectUri.trim()
+    return out
+  }
   if (kind === 'webhook_out') {
     const out: Record<string, unknown> = { url: d.url.trim() }
     if (d.allowPrivate) out.allowPrivate = true
@@ -236,6 +318,9 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
   } else if (kind === 'stripe') {
     if (d.secretKey) out.secretKey = d.secretKey
     if (d.webhookSecret) out.webhookSecret = d.webhookSecret
+  } else if (kind === 'google_calendar') {
+    if (d.clientId.trim()) out.clientId = d.clientId.trim()
+    if (d.clientSecret) out.clientSecret = d.clientSecret
   } else if (kind === 'webhook_out') {
     if (d.secret) out.secret = d.secret
   }
@@ -358,6 +443,7 @@ function ConnectorCard({
       method: str(c.method) || 'POST', authHeaderName: str(c.authHeaderName),
       bodyTemplate: str(c.bodyTemplate), testRecipient: str(c.testRecipient),
       allowPrivate: c.allowPrivate === true,
+      calendarId: str(c.calendarId) || 'primary', redirectUri: str(c.redirectUri),
     })
     setDlgOpen(true)
   }
@@ -481,6 +567,14 @@ function ConnectorCard({
             )}
 
             {kind === 'caldav' && row && <CalDavSyncBox canManage={canManage} onChanged={onChanged} />}
+            {kind === 'google_calendar' && (
+              <p className="text-xs text-muted-foreground break-all">
+                Calendar: {str(row.config.calendarId) || 'primary'}
+              </p>
+            )}
+
+            {kind === 'google_calendar' && row && <GoogleCalendarBox connected={row.connected === true} canManage={canManage} onChanged={onChanged} />}
+
 
             {testResult ? (
               <Alert role="status" className={testResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}>
@@ -737,6 +831,21 @@ function ConfigureDialog({
             </div>
           )}
 
+          {kind === 'google_calendar' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-calid`}>Calendar ID</Label>
+                <Input id={`${idBase}-calid`} value={cfg.calendarId} onChange={(e) => setCfg((s) => ({ ...s, calendarId: e.target.value }))} placeholder="primary" autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">&quot;primary&quot; is your main Google Calendar. You can also use a shared calendar address.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-redirect`}>OAuth redirect URI (optional)</Label>
+                <Input id={`${idBase}-redirect`} type="url" value={cfg.redirectUri} onChange={(e) => setCfg((s) => ({ ...s, redirectUri: e.target.value }))} placeholder={`${origin}/api/integrations/google_calendar/callback`} autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">Set this in the Google Cloud console as an authorized redirect URI. Leave empty to use this app&apos;s URL.</p>
+              </div>
+            </div>
+          )}
+
           {kind === 'webhook_out' && (
             <div className="space-y-3">
               <div className="space-y-1.5">
@@ -875,6 +984,20 @@ function ConfigureDialog({
                 <Input id={`${idBase}-calpass`} type="password" value={sec.password} onChange={(e) => setSec((s) => ({ ...s, password: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
                 <p className="text-xs text-muted-foreground">For iCloud/Fastmail use an app-specific password. Anonymous local servers (e.g. Radicale) can leave this empty.</p>
               </div>
+            )}
+
+            {kind === 'google_calendar' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-clientid`}>OAuth client ID</Label>
+                  <Input id={`${idBase}-clientid`} value={sec.clientId} onChange={(e) => setSec((s) => ({ ...s, clientId: e.target.value }))} placeholder="1234…apps.googleusercontent.com" autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-clientsecret`}>OAuth client secret</Label>
+                  <Input id={`${idBase}-clientsecret`} type="password" value={sec.clientSecret} onChange={(e) => setSec((s) => ({ ...s, clientSecret: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">Stored encrypted. Leave empty to keep the current secret — the authorization you already granted stays connected.</p>
+                </div>
+              </>
             )}
 
             {kind === 'stripe' && (
@@ -1164,6 +1287,25 @@ function OutboxTab({ canManage }: { canManage: boolean }) {
 
   useEffect(() => { void load() }, [load])
 
+  // Google OAuth returns here with ?google_calendar=connected|error — report it once.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const state = params.get('google_calendar')
+    if (!state) return
+    params.delete('google_calendar')
+    const reason = params.get('reason')
+    params.delete('reason')
+    const query = params.toString()
+    const url = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+    window.history.replaceState(null, '', url)
+    if (state === 'connected') {
+      toast({ title: 'Google Calendar connected', description: 'Run a sync to pull your busy times and push upcoming bookings.' })
+    } else {
+      toast({ title: 'Google Calendar connection failed', description: reason || 'Google did not authorize the calendar.', variant: 'destructive' })
+    }
+  }, [toast])
+
   const dispatch = async () => {
     setDispatching(true)
     try {
@@ -1381,6 +1523,7 @@ function InboundWebhookTab({ canManage }: { canManage: boolean }) {
 export function IntegrationsSection() {
   const session = useAppStore((s) => s.session)
   const canManage = session?.user?.role === 'owner' || session?.user?.role === 'admin'
+  const { toast } = useToast()
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

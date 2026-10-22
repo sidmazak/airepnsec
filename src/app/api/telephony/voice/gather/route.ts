@@ -9,6 +9,7 @@ import {
   logWebhook, plainResponse, twiml, gatherSpeech, say, dialNumber, hangup,
 } from '@/lib/telephony/twiml'
 import { bumpNoInput, resetNoInput } from '@/lib/telephony/no-input'
+import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
 
 export const pathname = '/api/telephony/voice/gather'
 
@@ -54,6 +55,17 @@ export const POST = withPublic(async (req: NextRequest) => {
   const voiceName = (typeof config.voiceName === 'string' && config.voiceName) || 'alice'
   const lowConfidence = speech && confidence > 0 && confidence < 0.45
   const statusBefore = conversation.status
+
+  // Organization-wide runtime switch — a paused/stopped assistant ends the call.
+  const receptionistStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  if (receptionistStatus !== 'running') {
+    await db.message.create({ data: { conversationId: conversation.id, orgId: org.id, role: 'customer', content: speech || '(no speech)', meta: JSON.stringify({ source: 'phone', callSid, receptionistStatus }) } }).catch(() => {})
+    await audit({ orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice', action: 'telephony.call_not_answered', entity: 'conversation', entityId: conversation.id, meta: { callSid, receptionistStatus } })
+    const notice = receptionistStatus === 'paused'
+      ? 'Our assistant is taking a break right now. Please call back later or leave a message on our website.'
+      : 'This line is currently unavailable. Please try our website instead.'
+    return twiml(say(notice, { voice: voiceName, language }) + hangup)
+  }
 
   // Staff paused AI for this call — do not let the bot keep answering phone calls.
   if (!conversation.aiEnabled) {

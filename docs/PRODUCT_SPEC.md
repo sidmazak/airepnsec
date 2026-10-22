@@ -69,8 +69,10 @@ rules, invoice/payment math, ledger rules, RBAC checks, audit, automation engine
 | Collections | Overdue policy, dunning schedule, escalation | Implemented (audited queued messages/tasks; nothing auto-sends unverified) |
 | Channels | Web text chat, public embedded web chat, Voice Console, phone, inbound SMS, inbound WhatsApp | Implemented |
 | Channels | Instagram inbound | **Planned** |
+| Operations | Org-wide receptionist switch (run / pause / stop) with audited changes and a dashboard control | Implemented |
 | Calendar | Read-only ICS feed + CalDAV push/pull sync (remote cancel/move applied conservatively) | Implemented |
-| Calendar | Google/Microsoft OAuth, external-event ingestion beyond CalDAV | **Planned** |
+| Calendar | Google Calendar OAuth two-way sync; external busy times block availability | Implemented |
+| Calendar | Microsoft 365 / Graph OAuth, external-event ingestion beyond CalDAV/Google | **Planned** |
 | Reporting | Dashboard, usage metrics (`AiLog`), diagnostics (DB/workers/providers) | Implemented (basic) |
 | Data | Org-scoped JSON export, SQLite backup endpoint, Docker/Compose deployment | Implemented |
 | Data | One-click restore/rollback scripts | **Not shipped** — snapshot via `VACUUM INTO`/`pg_dump` documented in SELF_HOSTING |

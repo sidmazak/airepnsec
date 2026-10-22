@@ -3,7 +3,7 @@ import { withAuth, json, parseBody, ApiError } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { encryptSecret, decryptSecret } from '@/lib/crypto'
-import { configSchemaFor, publicIntegration, secretsAreSufficient, secretsSchemaFor } from '@/lib/integrations/kinds'
+import { configSchemaFor, publicIntegration, secretsAreSufficient, secretsSchemaFor, mergeSecrets } from '@/lib/integrations/kinds'
 
 async function loadIntegration(orgId: string, id: string) {
   const integration = await db.integration.findFirst({ where: { id, orgId } })
@@ -65,10 +65,17 @@ export const PATCH = withAuth(
           const first = parsed.error.issues[0]
           throw new ApiError(422, `Invalid secrets.${first.path.join('.') || ''}: ${first.message}`, 'validation')
         }
-        if (!secretsAreSufficient(integration.kind, parsed.data as Record<string, unknown>)) {
+        // Provider-owned tokens (Google OAuth) survive an operator editing the
+        // other credentials — otherwise saving a new client secret would silently
+        // disconnect the calendar.
+        const existingSecrets = integration.secretsEnc
+          ? (JSON.parse(decryptSecret(integration.secretsEnc) || '{}') as Record<string, unknown>)
+          : {}
+        const merged = mergeSecrets(integration.kind, existingSecrets, parsed.data as Record<string, unknown>)
+        if (!secretsAreSufficient(integration.kind, merged)) {
           throw new ApiError(400, 'Add credentials before enabling', 'insufficient_secrets')
         }
-        data.secretsEnc = encryptSecret(JSON.stringify(parsed.data))
+        data.secretsEnc = encryptSecret(JSON.stringify(merged))
         changed.push('secrets')
       }
     }

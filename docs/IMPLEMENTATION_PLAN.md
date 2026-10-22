@@ -37,7 +37,7 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 
 ## Phase 7 — Verification & docs
 ✅ tsc + ESLint clean; browser E2E of the golden path; local-only blocking test; duplicate-webhook dedupe; overpay rejection; already-reversed 409; opt-out honored; demo seed idempotent.
-✅ `npm run test:unit` (Node's built-in `node:test`, **27 cases**): SMS gateway adapters, TTS chunking, read-only SQL guard, TOTP vectors, telephony routing/status mapping.
+✅ `npm run test:unit` (Node's built-in `node:test`, **43 cases**): SMS gateway adapters, TTS chunking, read-only SQL guard, TOTP vectors, telephony routing/status mapping, outbound URL guard, Google Calendar token/event helpers.
 ✅ CI (`.github/workflows/ci.yml`) runs Prisma generate → tsc → eslint → unit tests → `next build` on push/PR.
 ✅ Docs refreshed in iteration 2 (2026-10-22): API, architecture, data model, security, self-hosting, audits.
 
@@ -69,6 +69,13 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Rate limiting:** per-route limits configurable; telephony webhooks raised to 300/600 per minute; per-IP login limit alongside per-email.
 ✅ **Docker/static assets:** `DATABASE_PROVIDER` build arg, `.next/static` + `public/` copied into standalone, OpenSSL installed; `ignoreBuildErrors` disabled and React strict mode enabled.
 ✅ **UI correctness:** favicon 404 fixed; Radix dialog description IDs no longer overridden; credentials dialog form semantics fixed.
-✅ **Verification:** tsc clean, lint clean, 32/32 unit tests; live health checks, lease-busy 409, SSRF rejection, and browser section/dialog checks; both Docker profiles smoke-tested 2026-10-22.
+✅ **Verification:** tsc clean, lint clean, 43/43 unit tests; live health checks, lease-busy 409, SSRF rejection, and browser section/dialog checks; both Docker profiles smoke-tested 2026-10-22.
 
-**Remaining honest gaps (2026-10-22):** SSO (SAML/OIDC), multi-user team management (roles are enforced but there is no user API/UI), inbound email, token streaming/native tool calling, rerank/vision, hardware detection/model catalog, shared-store rate limiting, automated role-matrix and provider-credential E2E. Docker rebuilding is verified; live external provider tests remain BLOCKED_EXTERNAL.
+## Phase 12 — Google Calendar sync + receptionist lifecycle control (2026-10-22)
+✅ **Google Calendar integration** (`google_calendar`): OAuth 2.0 authorization-code flow with a one-time server-side `state` nonce, refresh tokens stored encrypted and never returned; real connection test against the configured calendar.
+✅ **Two-way sync** (`POST /api/integrations/google-calendar/sync`): free/busy windows become `CalendarBlock` rows (so busy diary time is never offered), bookings are pushed as Google events with a private extended property (idempotent re-push), remote cancellations/moves are pulled back through the validated booking service, and events of locally cancelled bookings are removed remotely.
+✅ **Availability honours external busy time**: `computeSlots` and the transactional `assertSlotAvailable` both subtract `CalendarBlock` rows; manual blocks are manageable through `/api/calendar/blocks`.
+✅ **Receptionist runtime switch**: org-wide `running | paused | stopped` (`Organization.receptionistStatus`) with a dashboard control card, an audited `PATCH /api/settings/receptionist`, a global banner while not running, and hard gates on inbound SMS, WhatsApp, voice calls, the speech gather loop, public web chat, realtime sessions and the receptionist turn runner. Calls routed to a human agent line are unaffected.
+✅ **Smoke test**: `scripts/smoke.mjs` runs 24 checks against a live instance (health, session bootstrap + owner-registration guard, pause/resume, block → availability, Google Calendar create/authorize/sync failure).
+
+**Remaining honest gaps (2026-10-22):** SSO (SAML/OIDC), multi-user team management (roles are enforced but there is no user API/UI), inbound email, token streaming/native tool calling, rerank/vision, hardware detection/model catalog, shared-store rate limiting, automated role-matrix and provider-credential E2E, Microsoft 365 calendar OAuth, and local (ONNX) speech models — see [TODO.md](../TODO.md). Docker rebuilding is verified; live external provider tests remain BLOCKED_EXTERNAL (no provider credentials in this environment).

@@ -7,6 +7,7 @@ import { recordPaymentClaim } from '@/lib/business/payments'
 import { computeSlots } from '@/lib/business/availability'
 import { invoiceOutstanding } from '@/lib/business/invoice'
 import { parseJson, type OrgPolicies } from '@/lib/org'
+import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
 import { withConversationTurnLock } from '@/lib/concurrency'
 import {
   localDateString,
@@ -210,6 +211,96 @@ export const TOOLS: ToolDef[] = [
           slots.length === 0
             ? 'No open slots that day — offer another day.'
             : `Pass the exact "start" value of the chosen slot to create_booking (times are ${ctx.org.timezone}).`,
+      }
+    },
+  },
+  {
+    name: 'list_busy_blocks',
+    description: 'List the periods that are blocked (connected-calendar busy times, manual blocks). Use it when the customer asks when you are unavailable — these periods are never offered as bookable slots.',
+    args: { date: 'optional start date (YYYY-MM-DD in the business timezone)', days: 'optional number of days to look ahead (default 7)' },
+    execute: async (args, ctx) => {
+      const date = str(args, 'date')
+      const daysRaw = str(args, 'days')
+      const parsedDays = Number.parseInt(daysRaw || '7', 10)
+      const days = Math.min(Math.max(Number.isFinite(parsedDays) ? parsedDays : 7, 1), 60)
+      const from = date ? parseOrgDateTime(date, ctx.org.timezone) : new Date()
+      if (!from) return { error: `date "${date}" is not a valid date.` }
+      const to = new Date(from.getTime() + days * 24 * 60 * 60 * 1000)
+      const blocks = await db.calendarBlock.findMany({
+        where: { orgId: ctx.org.id, startAt: { lt: to }, endAt: { gt: from } },
+        include: { staff: { select: { name: true } } },
+        orderBy: { startAt: 'asc' },
+        take: 100,
+      })
+      return {
+        timezone: ctx.org.timezone,
+        from: toZonedISOString(from, ctx.org.timezone),
+        days,
+        blocked: blocks.map((b) => ({
+          title: b.title || (b.source === 'google_calendar' ? 'Busy (external calendar)' : 'Blocked'),
+          staff: b.staff?.name ?? 'whole business',
+          start: toZonedISOString(b.startAt, ctx.org.timezone),
+          end: toZonedISOString(b.endAt, ctx.org.timezone),
+          local_start: localTimeString(b.startAt, ctx.org.timezone),
+          local_end: localTimeString(b.endAt, ctx.org.timezone),
+          source: b.source,
+        })),
+        note: 'Blocked periods are excluded from every open-slot list.',
+      }
+    },
+  },
+  {
+    name: 'block_time',
+    description: 'Block a period so it cannot be booked (staff absence, break, private event). The block is real — it is removed from the bookable slots immediately.',
+    args: {
+      start_at: 'start time (same format as the check_availability "start" values)',
+      end_at: 'end time',
+      title: 'optional short label (e.g. "Lunch break")',
+      staff: 'optional staff id or name — omit to block the whole business',
+    },
+    required: ['start_at', 'end_at'],
+    execute: async (args, ctx) => {
+      const startRaw = str(args, 'start_at')
+      const endRaw = str(args, 'end_at')
+      const title = str(args, 'title')
+      const staffRef = str(args, 'staff')
+      const start = parseOrgDateTime(startRaw, ctx.org.timezone)
+      const end = parseOrgDateTime(endRaw, ctx.org.timezone)
+      if (!start) return { error: `start_at "${startRaw}" is not a valid date/time.` }
+      if (!end) return { error: `end_at "${endRaw}" is not a valid date/time.` }
+      if (end.getTime() <= start.getTime()) return { error: 'end_at must be later than start_at.' }
+      let staffId: string | null = null
+      let staffName = 'whole business'
+      if (staffRef) {
+        const staff = await resolveStaff(ctx.org.id, staffRef)
+        if (!staff) return { error: `No active staff member matching "${staffRef}".` }
+        staffId = staff.id
+        staffName = staff.name
+      }
+      const block = await db.calendarBlock.create({
+        data: {
+          orgId: ctx.org.id,
+          staffId,
+          source: 'manual',
+          title: title || 'Blocked',
+          startAt: start,
+          endAt: end,
+        },
+      })
+      await audit({
+        orgId: ctx.org.id, actorType: 'ai', actorId: 'receptionist',
+        action: 'calendar.block_created', entity: 'calendar_block', entityId: block.id,
+        meta: { startAt: start.toISOString(), endAt: end.toISOString(), staffId },
+      })
+      return {
+        success: true,
+        blocked: {
+          start: toZonedISOString(block.startAt, ctx.org.timezone),
+          end: toZonedISOString(block.endAt, ctx.org.timezone),
+          title: block.title,
+          staff: staffName,
+        },
+        note: 'That period is blocked now and will not be offered to customers.',
       }
     },
   },
@@ -663,8 +754,8 @@ export type TurnResult = {
   toolCalls: Array<{ tool: string; ok: boolean; summary: string }>
   aiUsed: boolean
   error?: string
-  /** Set when the turn was intentionally not run (AI paused for this conversation). */
-  skipped?: 'ai_disabled'
+  /** Set when the turn was intentionally not run. */
+  skipped?: 'ai_disabled' | 'receptionist_paused' | 'receptionist_stopped'
 }
 
 /**
@@ -706,6 +797,22 @@ async function runReceptionistTurn(
 ): Promise<TurnResult> {
   const conversation = await db.conversation.findFirst({ where: { id: conversationId, orgId: org.id } })
   if (!conversation) throw new Error('Conversation not found')
+
+  // Organization-wide runtime switch: a paused/stopped assistant never talks to
+  // customers on ANY channel. Defence in depth — the inbound routes check first,
+  // but a turn already queued must not slip through.
+  const orgStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  if (orgStatus !== 'running') {
+    if (!opts.skipInboundPersist) {
+      await db.message.create({ data: { conversationId, orgId: org.id, role: 'customer', content: userMessage } })
+    }
+    return {
+      reply: '',
+      toolCalls: [],
+      aiUsed: false,
+      skipped: orgStatus === 'paused' ? 'receptionist_paused' : 'receptionist_stopped',
+    }
+  }
 
   // Staff paused AI replies for this thread ("AI off" toggle) — record the inbound
   // message but do not answer; a human is handling it.

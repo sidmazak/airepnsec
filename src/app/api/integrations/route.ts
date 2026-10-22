@@ -3,8 +3,8 @@ import { withAuth, json, parseBody, ApiError } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { encryptSecret } from '@/lib/crypto'
-import { INTEGRATION_KINDS, isIntegrationKind, SINGLETON_KINDS } from '@/lib/integrations/connectors'
-import { configSchemaFor, publicIntegration, secretsAreSufficient, secretsSchemaFor } from '@/lib/integrations/kinds'
+import { INTEGRATION_KINDS, isIntegrationKind, SINGLETON_KINDS, decryptSecrets } from '@/lib/integrations/connectors'
+import { configSchemaFor, publicIntegration, secretsAreSufficient, secretsSchemaFor, googleOAuthConnected, mergeSecrets } from '@/lib/integrations/kinds'
 
 /** GET /api/integrations — configured integrations for the org (no secrets ever). */
 export const GET = withAuth(async (req, ctx) => {
@@ -12,7 +12,14 @@ export const GET = withAuth(async (req, ctx) => {
     where: { orgId: ctx.org.id },
     orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }],
   })
-  return json({ integrations: rows.map(publicIntegration) })
+  return json({
+    integrations: rows.map((row) => ({
+      ...publicIntegration(row),
+      // Google Calendar: the OAuth consent flow is a separate step from saving
+      // the client credentials — the UI shows both states.
+      ...(row.kind === 'google_calendar' ? { connected: googleOAuthConnected(decryptSecrets(row)) } : {}),
+    })),
+  })
 })
 
 const createSchema = z.object({

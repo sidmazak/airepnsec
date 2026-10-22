@@ -65,6 +65,8 @@ export type SessionInfo = {
   org?: {
     id: string; name: string; slug: string; demo: boolean; setupComplete: boolean
     dataMode: string; timezone: string; currency: string; businessType: string
+    /** Runtime switch of the AI receptionist: running | paused | stopped. */
+    receptionistStatus?: string
   }
   demoAvailable?: boolean
 }
@@ -164,6 +166,8 @@ export type IntegrationInfo = {
   id: string; kind: string; label: string
   config: Record<string, unknown>
   configured: boolean; enabled: boolean
+  /** Google Calendar: the OAuth consent flow completed (refresh token stored). */
+  connected?: boolean
   lastTestAt: string | null; lastTestOk: boolean; lastTestError: string
   createdAt: string
 }

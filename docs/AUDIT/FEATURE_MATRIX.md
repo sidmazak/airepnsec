@@ -1,7 +1,7 @@
 # Feature Matrix — AI Secretary
 
 Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomplete/honest-gap;
-**MISSING** = not implemented; **N/A** = not applicable. Last reviewed: iteration 2, 2026-10-22.
+**MISSING** = not implemented; **N/A** = not applicable. Last reviewed: iteration 3, 2026-10-22.
 
 ## SPA sections (18 + auth)
 | Section | Primary APIs | Status | Notes |
@@ -21,7 +21,7 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | AI Providers | `/api/providers/*` | DONE | BYOK Ollama/OpenAI-compatible; encrypted keys; real connection tests. |
 | Security | `/api/auth/2fa/*`, `/api/auth/sessions/revoke-all` | DONE | TOTP enrollment/disable; revoke other sessions. |
 | Business Profile | `/api/setup`, `/api/settings/*` | DONE | Profile, hours, policies, AI identity, collections config. |
-| Integrations | `/api/integrations/*` | DONE | SMTP, Twilio, SMS gateways, Stripe, CalDAV, outbound webhooks; per-kind tests. |
+| Integrations | `/api/integrations/*` | DONE | SMTP, Twilio, SMS gateways, Stripe, CalDAV, Google Calendar, outbound webhooks; per-kind tests. |
 | Diagnostics | `/api/health/detail` | DONE | DB tuning, worker leases, heartbeat, providers, counts. |
 | Setup Wizard | `/api/setup*` | DONE | Autosave/resume; readiness checks; end-to-end test. |
 | Auth screen | `/api/auth/*`, `/api/session` | DONE | scrypt passwords, hashed sessions, optional TOTP. |
@@ -44,7 +44,7 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | WhatsApp | DONE | Twilio inbound/outbound; inbound webhook signature-verified. |
 | Outbound email | DONE | SMTP via nodemailer; invoice HTML/text templates. |
 | Inbound email | **MISSING** | No IMAP/webhook ingest. |
-| Calendar | DONE | ICS feed + per-booking `.ics` + two-way CalDAV push/pull. |
+| Calendar | DONE | ICS feed + per-booking `.ics` + two-way CalDAV push/pull + Google Calendar OAuth sync. External busy times become `CalendarBlock` rows, so a busy diary removes slots from availability and blocks new bookings. |
 | Payments online | DONE | Stripe Payment Links + Stripe/generic signed webhooks. |
 | Automations | DONE | 60s lease-protected worker tick; manual run shares the lease. |
 | Outbox delivery | DONE | 30s lease-protected dispatcher; backoff and honest statuses. |
@@ -56,5 +56,6 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Worker single-flight | DONE | `WorkerLease` + TTL recovery; manual endpoints return 409 while busy. |
 | Conversation turn serialization | DONE | DB lock + token; stale-lock takeover; 409 `conversation_busy`. |
 | PABX routing | DONE | least-busy/round-robin/redirect, line pause/disable, real load, call records. |
+| Receptionist runtime switch | DONE | Org-wide `running \| paused \| stopped` (`Organization.receptionistStatus`): dashboard control, audited changes, gates inbound SMS/WhatsApp/voice/web chat and realtime sessions. |
 | SSO (SAML/OIDC) | **MISSING** | Email+password/TOTP only. |
 | Team user management | **MISSING** | Roles exist and are enforced, but there is no users/invite/role-management API or UI in this build; each org has its owner account. |

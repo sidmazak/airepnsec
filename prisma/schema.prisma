@@ -34,6 +34,10 @@ model Organization {
   setupState     String   @default("{}") // JSON: step -> {done, savedAt}
   setupComplete  Boolean  @default(false)
   dataMode       String   @default("hybrid") // local_only | hybrid | cloud_first
+  // Runtime switch for the AI receptionist: running | paused | stopped.
+  // paused = inbound is recorded for staff but the assistant does not reply;
+  // stopped = inbound webhooks are acknowledged but nothing is answered or stored.
+  receptionistStatus String @default("running")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -55,6 +59,7 @@ model Organization {
   aiLogs           AiLog[]
   automations      Automation[]
   auditEvents      AuditEvent[]
+  calendarBlocks   CalendarBlock[]
   telephonyLines   TelephonyLine[]
   telephonyCalls   TelephonyCall[]
   settings         AppSetting[]
@@ -174,6 +179,7 @@ model Staff {
   serviceLinks StaffService[]
   bookings  Booking[]
   workingHours WorkingHour[]
+  calendarBlocks CalendarBlock[]
   @@index([orgId])
 }
 
@@ -195,6 +201,29 @@ model WorkingHour {
   staff   Staff? @relation(fields: [staffId], references: [id], onDelete: Cascade)
   @@index([orgId])
   @@index([staffId])
+}
+
+/// A time range the business cannot be booked for, coming from an external
+/// calendar (Google Calendar free/busy) or created manually by staff/AI.
+/// Blocks are read by the availability engine — a slot that overlaps a block
+/// is never offered or booked.
+model CalendarBlock {
+  id         String   @id @default(cuid())
+  orgId      String
+  staffId    String? // null = blocks the whole business
+  source     String   @default("manual") // manual | google_calendar
+  externalId String   @default("") // provider event id (google) — empty for manual blocks
+  title      String   @default("")
+  startAt    DateTime
+  endAt      DateTime
+  allDay     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  staff      Staff?   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  @@index([orgId, startAt])
+  @@index([orgId, staffId, startAt])
+  @@index([orgId, source, externalId])
 }
 
 model Booking {

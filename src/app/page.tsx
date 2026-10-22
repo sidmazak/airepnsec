@@ -107,6 +107,20 @@ export default function Home() {
       <div className="flex flex-1">
         <Sidebar />
         <main className="flex-1 min-w-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6" aria-label="Main content">
+          {session.org && session.org.receptionistStatus && session.org.receptionistStatus !== 'running' && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 px-4 py-3 text-sm text-amber-900 dark:text-amber-200 flex flex-wrap items-center gap-2" role="status">
+              <span className="font-medium">AI receptionist {session.org.receptionistStatus}.</span>
+              <span>
+                {session.org.receptionistStatus === 'paused'
+                  ? 'Inbound is recorded for staff, but the assistant does not reply.'
+                  : 'The app is not answering SMS, WhatsApp, calls or web chat.'}
+              </span>
+              <button onClick={() => setActiveSection('dashboard')} className="underline font-medium hover:no-underline" aria-label="Open the dashboard to restart the receptionist">
+                Change in dashboard
+              </button>
+            </div>
+          )}
+
           {needsSetup && activeSection !== 'setup' && (
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 px-4 py-3 text-sm text-amber-900 dark:text-amber-200 flex flex-wrap items-center gap-2">
               <span>Setup is not complete — the assistant, reminders, and readiness checks depend on it.</span>

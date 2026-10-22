@@ -1,59 +1,75 @@
-# TODO: Local Voice Pipeline (Kokoro TTS + Whisper STT)
+# Backlog — AI Secretary
 
-## Missing Local Voice Pipeline
+Live list of what is **not** implemented yet. Everything else is done and verified — see
+[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the phase history and
+[docs/AUDIT/FEATURE_MATRIX.md](docs/AUDIT/FEATURE_MATRIX.md) for the per-feature status.
 
-The current AI pipeline has:
-- ✅ LLM: Ollama + OpenAI-compatible
-- ✅ RAG/Embeddings: Local neural (Xenova/all-MiniLM-L6-v2) + Ollama + OpenAI-compatible
-- ✅ Realtime API (OpenAI Realtime compatible)
-- ✅ Browser Web Speech API (client-side STT/TTS for testing)
-- ❌ **Local Kokoro TTS** - lightweight ONNX TTS model
-- ❌ **Local Whisper STT** - faster-whisper / whisper.cpp server
-- ❌ **Piper TTS** - lightweight multi-voice ONNX TTS
-- ❌ **Voice pipeline integration** in `src/lib/ai/speech.ts`
+Items are ordered by value, not by urgency. Nothing here blocks a self-hosted deployment.
 
-## Implementation Plan
+## 1. Live external provider E2E — BLOCKED_EXTERNAL
 
-### 1. Kokoro TTS (Lightweight, ~80MB ONNX)
-- Model: `hexgrad/Kokoro-82M` or `onnx-community/Kokoro-82M-v1.0-ONNX`
-- Integration: `src/lib/ai/speech.ts` → new provider kind `'kokoro'`
-- Use `transformers.js` for ONNX inference (already in deps)
-- Voices: 50+ voices, multiple languages
+Every connector has a **real** connection test (`POST /api/integrations/[id]/test`) that talks to the
+provider. What cannot be done in this environment is signing up for third-party accounts on the
+user's behalf (Twilio, Stripe, Google Cloud, an SMTP relay, a CalDAV server). Those tests are
+honest: they report the provider's real answer instead of a fake success.
 
-### 2. Whisper STT (Local)
-- Option A: `faster-whisper` server (Python) + REST wrapper
-- Option B: `whisper.cpp` + `whisper-node` native binding
-- Option C: ONNX Whisper via transformers.js (larger model)
-- Integration: new provider kind `'whisper'`
+To close this: run the app against real credentials and record the results in
+[docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
-### 3. Piper TTS (Alternative lightweight)
-- Model: `rhasspy/piper` ONNX models (~30-50MB each)
-- Many voices, very fast
-- Integration: new provider kind `'piper'`
+## 2. Microsoft 365 / Graph calendar OAuth
 
-### 3. Integration Points
-- `src/lib/ai/speech.ts`:
-  - Add `'kokoro'`, `'piper'`, `'whisper'` to `ProviderKind`
-  - Add to `CAPABILITY_INFO` kinds for `stt`/`tts`
-  - Implement `transcribeAudio` / `synthesizeSpeech` branches
-  - Add to `dataFlowLabel` (local inference)
-- `src/lib/ai/providers.ts`:
-  - Add kinds to `CAPABILITY_INFO`
-  - Add test logic in `testProvider`
-- UI: AI Providers section + Setup Wizard step 5
+CalDAV covers Outlook (Microsoft publishes a CalDAV endpoint) and Google Calendar has a native
+OAuth integration. A first-class Graph implementation would need a second OAuth provider in
+`src/lib/integrations/` plus Graph event/freebusy calls — the `CalendarBlock` model and the sync
+route shape would be reused.
 
-### 4. Model Management
-- Download models on first use (cache in `.models/`)
-- Configurable model selection per org
-- Health check endpoint per provider
+## 3. Multi-user team management + SSO
 
-## Priority
-1. **Kokoro TTS** (highest impact - full local TTS)
-2. **Whisper STT** (local transcription)
-3. **Piper TTS** (additional voices)
+Roles (`owner | admin | agent | viewer`) are enforced on every route, but there is no user or
+invite API/UI, no SSO/SAML/OIDC, and no password-reset flow. This is the biggest functional gap
+for a multi-person business.
 
-## Notes
-- Models should be downloaded on-demand (first use) to `.models/`
-- No external API keys required for local inference
-- Works in `local_only` data mode
-- GPU optional (CPU inference OK for Kokoro/Piper)
+## 4. Local speech models (Kokoro TTS / Whisper STT / Piper TTS)
+
+Current speech support: the browser's own Web Speech API (Voice Console, zero setup) and
+OpenAI-compatible `/audio/transcriptions` + `/audio/speech` for server-side STT/TTS. A fully local
+pipeline would add ONNX models (Kokoro-82M ≈ 80 MB, Piper ≈ 30–50 MB per voice, Whisper via
+`transformers.js`) and new provider kinds (`kokoro`, `piper`, `whisper`) in
+`src/lib/ai/speech.ts` + `src/lib/ai/providers.ts`, with on-demand model downloads into `.models/`.
+Not required: `local_only` mode already works with the browser speech path.
+
+## 5. Server-side streaming and native provider tool calling
+
+The receptionist uses a strict JSON tool loop and answers in one synchronous response. Streaming
+(SSE) and provider-native function calling would improve latency and robustness on slow models.
+
+## 6. Reranking and vision
+
+Declared capabilities (`rerank`, `vision`) exist in the provider matrix but have no implementation.
+Reranking is a small addition on top of the existing hybrid retrieval; vision needs an image
+pipeline that the product does not have a use case for yet.
+
+## 7. Hardware detection / model catalog
+
+No GPU/RAM probe and no recommended-model endpoint, so "which model should I run?" is answered by
+the docs instead of the app.
+
+## 8. Shared-store rate limiting and role-matrix E2E
+
+Rate limiting is an in-memory sliding window (per process). Multi-replica deployments should put a
+limiter in front of the app. The role matrix is enforced in code and covered by unit tests, but
+there is no automated per-role endpoint sweep.
+
+## 9. Scheduled backups and retention
+
+Backup endpoints exist (`POST /api/admin/backup`, `VACUUM INTO` / `pg_dump` documented) but no
+scheduler and no retention policy ship with the app — run them from cron/systemd.
+
+## Removed from this list
+
+- ~~First-run owner registration~~ — implemented (`POST /api/auth/register-owner`, one-time while
+  zero users exist; the auth screen switches to the setup form automatically).
+- ~~Organisation-wide pause/stop for the receptionist~~ — implemented
+  (`Organization.receptionistStatus`, dashboard control card, audited changes).
+- ~~Google Calendar sync~~ — implemented (`google_calendar` integration, OAuth two-way sync,
+  busy windows block availability).

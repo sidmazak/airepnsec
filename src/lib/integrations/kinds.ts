@@ -53,6 +53,11 @@ export const caldavConfigSchema = z.object({
   username: z.string().max(200).optional(),
 })
 
+export const googleCalendarConfigSchema = z.object({
+  calendarId: z.string().max(300).optional(), // calendar to read/write — defaults to "primary"
+  redirectUri: z.string().url('redirectUri must be the absolute OAuth callback URL').optional(),
+})
+
 export const stripeConfigSchema = z.object({}).partial()
 
 export const webhookOutConfigSchema = z.object({
@@ -75,6 +80,14 @@ export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
     authValue: z.string().optional(), // generic_http custom auth header value
   }),
   caldav: z.object({ password: z.string().optional() }),
+  google_calendar: z.object({
+    clientId: z.string().min(1, 'clientId is required'),
+    clientSecret: z.string().min(1, 'clientSecret is required'),
+    // Written by the OAuth callback — never typed by the operator.
+    refreshToken: z.string().optional(),
+    accessToken: z.string().optional(),
+    accessTokenExpiresAt: z.string().optional(),
+  }),
   stripe: z.object({ secretKey: z.string().min(1, 'secretKey is required'), webhookSecret: z.string().optional() }),
   webhook_out: z.object({ secret: z.string().optional() }),
 }
@@ -86,6 +99,7 @@ export const configSchemaFor: Record<string, z.ZodTypeAny> = {
   twilio_voice: twilioVoiceConfigSchema,
   sms_gateway: smsGatewayConfigSchema,
   caldav: caldavConfigSchema,
+  google_calendar: googleCalendarConfigSchema,
   stripe: stripeConfigSchema,
   webhook_out: webhookOutConfigSchema,
 }
@@ -106,6 +120,10 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
       return true
     case 'caldav':
       return true // password optional (some local servers allow anonymous writes); PUT/PROPFIND will fail honestly otherwise
+    case 'google_calendar':
+      // The OAuth client credentials are enough to START the consent flow; the
+      // refresh token arrives later from the Google callback.
+      return Boolean(secrets.clientId && secrets.clientSecret)
     case 'stripe':
       return Boolean(secrets.secretKey)
     case 'webhook_out':
@@ -113,6 +131,30 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
     default:
       return false
   }
+}
+
+/**
+ * Secrets that an OAuth callback owns. When the operator edits other credentials
+ * the token is preserved instead of being wiped by the full-replacement semantics.
+ */
+const PRESERVED_SECRET_KEYS: Record<string, string[]> = {
+  google_calendar: ['refreshToken', 'accessToken', 'accessTokenExpiresAt'],
+}
+
+/** Merge incoming secrets over the stored ones, keeping provider-owned tokens. */
+export function mergeSecrets(kind: string, existing: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
+  const preserved = PRESERVED_SECRET_KEYS[kind]
+  if (!preserved) return incoming
+  const merged: Record<string, unknown> = { ...incoming }
+  for (const key of preserved) {
+    if (merged[key] === undefined && existing[key] !== undefined) merged[key] = existing[key]
+  }
+  return merged
+}
+
+/** True when the Google OAuth consent flow has completed (a refresh token is stored). */
+export function googleOAuthConnected(secrets: Record<string, unknown>): boolean {
+  return typeof secrets.refreshToken === 'string' && secrets.refreshToken.length > 0
 }
 
 /** Wire shape — config parsed, credentials represented ONLY by the boolean `configured`. */

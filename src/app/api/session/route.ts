@@ -32,6 +32,7 @@ export const GET = withPublic(async (req) => {
       timezone: ctx.org.timezone,
       currency: ctx.org.currency,
       businessType: ctx.org.businessType,
+      receptionistStatus: ctx.org.receptionistStatus || 'running',
     },
     demoAvailable,
   })

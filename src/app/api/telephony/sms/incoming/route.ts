@@ -5,6 +5,7 @@ import { withPublic } from '@/lib/api'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
 import { getEnabledSmsSender, sendOrgSms } from '@/lib/integrations/connectors'
+import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
 import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams,
   matchCustomerByPhone, logWebhook, plainResponse, twiml,
@@ -47,6 +48,18 @@ export const POST = withPublic(async (req: NextRequest) => {
 
   const org = await db.organization.findUnique({ where: { id: route.orgId } })
   if (!org || !body.trim()) return twiml('')
+
+  // "stopped" means the app does not listen: acknowledge the webhook, audit a
+  // short preview of what arrived, and open no conversation at all.
+  const receptionistStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  if (receptionistStatus === 'stopped') {
+    await audit({
+      orgId: org.id, actorType: 'webhook', actorId: 'twilio_sms',
+      action: 'telephony.sms_ignored', entity: 'organization', entityId: org.id,
+      meta: { messageSid, from, to, reason: 'receptionist_stopped', preview: body.slice(0, 160) },
+    })
+    return twiml('')
+  }
 
   const customer = await matchCustomerByPhone(org.id, from)
   let conversation = await db.conversation.findFirst({

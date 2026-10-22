@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { withAuth, json, ApiError } from '@/lib/api'
 import { assertAiPolicy, getApiKey, getActiveProvider } from '@/lib/ai/providers'
 import { REALTIME_TOOLS } from '@/lib/ai/receptionist'
+import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
 
 // POST /api/ai/realtime/session — mint a short-lived client secret for the OpenAI
 // Realtime API (WebRTC) using the org's OpenAI-compatible provider. The browser uses
@@ -10,6 +11,12 @@ import { REALTIME_TOOLS } from '@/lib/ai/receptionist'
 // endpoint. Tool calling still goes through our validated receptionist tools.
 export const POST = withAuth(async (req, ctx) => {
   const body = await req.json().catch(() => ({}))
+  // The runtime switch also gates realtime voice — a paused receptionist must not
+  // open a live customer session.
+  const status = normalizeReceptionistStatus(ctx.org.receptionistStatus)
+  if (status !== 'running') {
+    throw new ApiError(503, `The AI receptionist is ${status} — realtime voice sessions are disabled.`, 'receptionist_not_running')
+  }
   const model = typeof body?.model === 'string' && body.model ? body.model : 'gpt-4o-realtime-preview'
   const instructions = typeof body?.instructions === 'string' ? body.instructions : 'You are an AI receptionist. Be concise and helpful. Use provided tools for business data.'
   const tools = Array.isArray(body?.tools) ? body.tools : REALTIME_TOOLS

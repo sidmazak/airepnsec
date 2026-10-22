@@ -279,6 +279,30 @@ the booking, a moved `DTSTART` reschedules through the validated booking service
 deletes are reported as `missing` rather than auto-cancelled. Per-item results and a persisted
 last-sync summary are returned; verified against Radicale.
 
+**Google Calendar sync.** `src/lib/integrations/googleCalendar.ts` speaks the Google Calendar v3
+API directly (fixed Google endpoints — no user-controlled host, so no SSRF surface). OAuth 2.0
+authorization-code flow: the authorize route mints a one-time nonce stored in `AppSetting`, Google
+calls back with a code, the code is exchanged for access + refresh tokens and the refresh token is
+stored encrypted in `Integration.secretsEnc`. Access tokens are refreshed on demand.
+`POST /api/integrations/google-calendar/sync` then does three things: free/busy windows become
+`CalendarBlock` rows (external busy time is subtracted from availability and from the booking
+transaction), our own pushed bookings are excluded from those blocks, and bookings are pushed as
+Google events marked with a private `aisBookingId` extended property (idempotent re-push).
+Remote cancellations and moves are pulled back through the validated booking service.
+
+**Blocked periods.** `CalendarBlock` is the single representation of "you cannot be booked"
+(external busy windows and manual blocks). `computeSlots` subtracts them from every slot list and
+`assertSlotAvailable` rejects an overlapping booking inside the booking transaction
+(`409 slot_blocked`). The assistant can create blocks with the `block_time` tool; staff manage them
+through `/api/calendar/blocks`.
+
+**Receptionist runtime switch.** `Organization.receptionistStatus` is `running | paused | stopped`.
+It is enforced at the edges: the inbound SMS/WhatsApp webhooks, the voice incoming route (calls
+routed to a human agent line are exempt), the speech gather loop, the public web chat, the realtime
+session mint and the receptionist turn runner itself. `paused` records inbound for staff without
+answering; `stopped` acknowledges webhooks, audits a short preview and opens no conversation at
+all. Changes go through `PATCH /api/settings/receptionist` (owner/admin) and are audited.
+
 **PABX routing (phone lines).** `src/lib/telephony/routing.ts` contains pure helpers used by the
 voice incoming route: `least_busy` (real active-call load), `round_robin` (CAS-updated cursor in
 the line config), and `redirect` (deterministic priority target). Disabled or `acceptingCalls:false`

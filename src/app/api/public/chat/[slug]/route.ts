@@ -6,6 +6,7 @@ import { audit } from '@/lib/audit'
 import { randomToken } from '@/lib/crypto'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
+import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
 
 export const maxDuration = 60
 
@@ -64,6 +65,20 @@ export const POST = withPublic(async (req, params) => {
     const body = await parseBody(req, postSchema)
     const org = await db.organization.findUnique({ where: { slug } })
     if (!org) return cors(fail(404, 'Unknown business'))
+
+    // "stopped" = the assistant is off: nothing is stored, the visitor is told
+    // honestly that no one is answering right now.
+    if (normalizeReceptionistStatus(org.receptionistStatus) === 'stopped') {
+      return cors(
+        json({
+          token: body.token ?? '',
+          reply: '',
+          aiUsed: false,
+          status: 'closed',
+          note: 'Our assistant is offline right now — please leave a message and we will get back to you.',
+        })
+      )
+    }
 
     let token = body.token ?? ''
     let conversation = token
