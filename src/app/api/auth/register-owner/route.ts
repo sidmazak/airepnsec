@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { withPublic, json, fail, parseBody, createSession, sessionCookie } from '@/lib/api'
+import { withPublic, json, fail, parseBody, createSession, sessionCookie, ApiError } from '@/lib/api'
 import { db } from '@/lib/db'
 import { hashPassword } from '@/lib/crypto'
 import { audit } from '@/lib/audit'
@@ -24,11 +24,13 @@ function slugify(name: string): string {
   return slug || 'my-business'
 }
 
-async function uniqueSlug(base: string): Promise<string> {
+type Tx = Parameters<Parameters<typeof db['$transaction']>[0]>[0]
+
+/** Slug is globally unique in the schema; append -2, -3, ... until free. */
+async function uniqueSlug(tx: Tx, base: string): Promise<string> {
   let candidate = base
   let n = 1
-  // Slug is globally unique in the schema; append -2, -3, ... until free.
-  while (await db.organization.findUnique({ where: { slug: candidate }, select: { id: true } })) {
+  while (await tx.organization.findUnique({ where: { slug: candidate }, select: { id: true } })) {
     n += 1
     candidate = `${base}-${n}`
   }
@@ -58,63 +60,73 @@ export const POST = withPublic(async (req) => {
     return fail(409, 'An account with this email already exists', { code: 'email_taken' })
   }
 
-  const slug = await uniqueSlug(slugify(body.orgName))
-
-  const org = await db.organization.create({
-    data: {
-      name: body.orgName.trim(),
-      slug,
-      businessType: body.businessType,
-      policies: JSON.stringify({ autoConfirmBookings: true } satisfies { autoConfirmBookings: boolean }),
-      openingHours: JSON.stringify(
-        Object.fromEntries(DEFAULT_BUSINESS_DAYS.map((dow) => [String(dow), [['09:00', '17:00']]]))
-      ),
-    },
-  })
-
-  const user = await db.user.create({
-    data: {
-      orgId: org.id,
-      email,
-      passwordHash: hashPassword(body.password),
-      name: body.name,
-      role: 'owner',
-    },
-  })
-
-  await db.workingHour.createMany({
-    data: DEFAULT_BUSINESS_DAYS.map((dow) => ({
-      orgId: org.id,
-      staffId: null,
-      dow,
-      startMin: START_MIN,
-      endMin: END_MIN,
-    })),
-  })
-
-  await db.providerConfig.createMany({
-    data: [
-      { orgId: org.id, capability: 'llm', provider: 'none', enabled: false },
-      { orgId: org.id, capability: 'embedding', provider: 'local_neural', enabled: true },
-    ],
-  })
+  let created
+  try {
+    // The whole bootstrap runs in one transaction: a concurrent owner can no
+    // longer collide on the global slug unique constraint and get a
+    // non-retryable P2002 half-way through.
+    created = await db.$transaction(async (tx) => {
+      const slug = await uniqueSlug(tx, slugify(body.orgName))
+      const org = await tx.organization.create({
+        data: {
+          name: body.orgName.trim(),
+          slug,
+          businessType: body.businessType,
+          policies: JSON.stringify({ autoConfirmBookings: true } satisfies { autoConfirmBookings: boolean }),
+          openingHours: JSON.stringify(
+            Object.fromEntries(DEFAULT_BUSINESS_DAYS.map((dow) => [String(dow), [['09:00', '17:00']]]))
+          ),
+        },
+      })
+      const user = await tx.user.create({
+        data: {
+          orgId: org.id,
+          email,
+          passwordHash: hashPassword(body.password),
+          name: body.name,
+          role: 'owner',
+        },
+      })
+      await tx.workingHour.createMany({
+        data: DEFAULT_BUSINESS_DAYS.map((dow) => ({
+          orgId: org.id,
+          staffId: null,
+          dow,
+          startMin: START_MIN,
+          endMin: END_MIN,
+        })),
+      })
+      await tx.providerConfig.createMany({
+        data: [
+          { orgId: org.id, capability: 'llm', provider: 'none', enabled: false },
+          { orgId: org.id, capability: 'embedding', provider: 'local_neural', enabled: true },
+        ],
+      })
+      return { org, user }
+    })
+  } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
+      throw new ApiError(409, 'This registration attempt collided with an existing record — try again shortly.', 'setup_locked')
+    }
+    throw err
+  }
 
   await audit({
-    orgId: org.id,
+    orgId: created.org.id,
     actorType: 'user',
-    actorId: user.id,
+    actorId: created.user.id,
     action: 'setup.owner_registered',
     entity: 'organization',
-    entityId: org.id,
-    meta: { orgName: org.name, slug, businessType: org.businessType },
+    entityId: created.org.id,
+    meta: { orgName: created.org.name, slug: created.org.slug, businessType: created.org.businessType },
   })
 
-  const { token, expiresAt } = await createSession(user.id)
+  const { token, expiresAt } = await createSession(created.user.id)
   const res = json(
     {
       ok: true,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-      org: { id: org.id, name: org.name, slug: org.slug },
+      user: { id: created.user.id, name: created.user.name, email: created.user.email, role: created.user.role },
+      org: { id: created.org.id, name: created.org.name, slug: created.org.slug },
     },
     201
   )

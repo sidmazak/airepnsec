@@ -52,6 +52,23 @@ export function assertReadOnlySql(query: string): string {
   ) {
     throw new Error('The query contains a write operation — only read-only SELECT queries are allowed')
   }
+  // Dangerous server-side functions that read files, sleep, or reach the network.
+  // They start with SELECT, so the keyword list above does not catch them.
+  if (
+    /\b(pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|pg_sleep|pg_sleep_for|pg_sleep_until|pg_terminate_backend|pg_cancel_backend|lo_import|lo_export|dblink|dblink_exec|dblink_connect|readfile|writefile|sys_exec|utl_http|utl_smtp|xp_cmdshell|sp_executesql|openrowset|opendatasource)\b/.test(
+      lower
+    )
+  ) {
+    throw new Error(
+      'The query calls a function that can read files, sleep, or reach the network — only plain SELECT queries are allowed'
+    )
+  }
+  // A function call in the projection can hide a write (e.g. nextval('seq')).
+  const SAFE_FUNCTIONS =
+    /\b(count|sum|avg|min|max|coalesce|nullif|greatest|least|abs|round|floor|ceil|lower|upper|trim|substr|substring|length|concat|cast|now|current_date|current_timestamp|extract|date_trunc|json_extract|row_number|rank|dense_rank|lag|lead|first_value|last_value)\s*\(/
+  if (/\w+\s*\(/.test(lower) && !SAFE_FUNCTIONS.test(lower)) {
+    throw new Error('Only plain column expressions are allowed in a data-source query')
+  }
   return q
 }
 

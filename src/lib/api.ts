@@ -135,12 +135,46 @@ export function rateLimit(key: string, limit: number, windowMs: number): boolean
 }
 
 /**
- * Client IP for rate limiting. Trusts the first `x-forwarded-for` hop — correct
- * behind a reverse proxy that overwrites the header, spoofable if the app is
- * exposed directly. Documented in docs/SECURITY.md.
+ * Client IP for rate limiting. Uses the LAST `x-forwarded-for` entry — the hop
+ * appended by the closest trusted proxy. A client can prepend arbitrary values
+ * to that header, but it cannot control the entry the proxy appends, so taking
+ * the FIRST entry (as a naive implementation does) is trivially spoofable.
+ * `x-real-ip` is honoured for proxies that rewrite the request entirely.
+ * Documented in docs/SECURITY.md.
  */
 export function clientIp(req: NextRequest): string {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local'
+  const xff = req.headers.get('x-forwarded-for')
+  if (xff) {
+    const parts = xff.split(',').map((p) => p.trim()).filter(Boolean)
+    if (parts.length) return parts[parts.length - 1]
+  }
+  const real = req.headers.get('x-real-ip')?.trim()
+  if (real) return real
+  return 'local'
+}
+
+/* ---------------- shared (database-backed) rate limiting ---------------- */
+
+/**
+ * Rate limit that holds across app instances because the counters live in the
+ * database. Used for the endpoints an attacker actually targets (sign-in,
+ * public chat, payment webhooks). The in-memory limiter above stays the fast
+ * first line; this one is the shared backstop.
+ */
+export async function rateLimitShared(key: string, limit: number, windowMs: number): Promise<boolean> {
+  const now = new Date()
+  const row = await db.rateBucket.findUnique({ where: { key } })
+  if (!row || row.expiresAt <= now) {
+    await db.rateBucket.upsert({
+      where: { key },
+      create: { key, count: 1, windowStart: now, expiresAt: new Date(now.getTime() + windowMs) },
+      update: { count: 1, windowStart: now, expiresAt: new Date(now.getTime() + windowMs) },
+    })
+    return true
+  }
+  if (row.count >= limit) return false
+  await db.rateBucket.update({ where: { key }, data: { count: row.count + 1 } })
+  return true
 }
 
 /* ---------------- validation ---------------- */

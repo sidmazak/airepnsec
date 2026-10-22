@@ -45,6 +45,20 @@ export type OutboundUrlOptions = {
   label?: string
 }
 
+/**
+ * Cloud instance-metadata endpoints. These are blocked even when private
+ * addresses are allowed: no legitimate self-hosted integration lives there, and
+ * they hand out the cloud credentials of the host.
+ */
+const METADATA_IPS = ['169.254.169.254', '169.254.170.2', '100.100.100.200', 'fd00:ec2::254']
+const METADATA_HOSTS = ['metadata.google.internal', 'metadata.goog', 'instance-data']
+
+export function isMetadataHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '')
+  if (METADATA_HOSTS.includes(h)) return true
+  return METADATA_IPS.includes(h)
+}
+
 export async function assertOutboundUrl(raw: string, options: OutboundUrlOptions = {}): Promise<URL> {
   const label = options.label ?? 'URL'
   let url: URL
@@ -55,6 +69,10 @@ export async function assertOutboundUrl(raw: string, options: OutboundUrlOptions
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`${label} must use http:// or https://`)
+  }
+  // Metadata endpoints are never reachable, not even with allowPrivate.
+  if (isMetadataHost(url.hostname)) {
+    throw new Error(`${label} points to a cloud metadata endpoint — this is blocked to prevent credential theft`)
   }
   if (options.allowPrivate) return url
 

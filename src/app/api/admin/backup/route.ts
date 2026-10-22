@@ -8,7 +8,11 @@ import { getDbTuning } from '@/lib/db-tuning'
 /**
  * POST /api/admin/backup (owner/admin) — SQLite `VACUUM INTO` snapshot.
  * Writes to backups/backup-<ts>.db and returns the filename + real byte size.
- * Failures surface as honest 500s with the actual message (no secrets).
+ * The artifact is a full database snapshot — including encrypted secrets and all
+ * orgs' rows — so it MUST be stored off-site and the file read by owner/admin
+ * only. Set permissions 0600 explicitly. Failures surface as honest 500s with the
+ * actual message (no secrets). This endpoint is deliberately never exposed to
+ * browser sessions.
  */
 export const POST = withAuth(
   async (req, ctx) => {
@@ -26,6 +30,9 @@ export const POST = withAuth(
       // VACUUM INTO fails if the target exists; the timestamp name keeps it unique.
       await db.$executeRawUnsafe(`VACUUM INTO '${filePath.replace(/'/g, "''")}'`)
       const bytes = fs.statSync(filePath).size
+      // Read 0600: a backup contains every org's encrypted secrets and raw
+      // config. It must not be readable by other users on the machine.
+      fs.chmodSync(filePath, 0o600)
 
       await audit({
         orgId: ctx.org.id,

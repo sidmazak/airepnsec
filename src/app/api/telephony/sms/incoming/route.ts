@@ -93,7 +93,7 @@ export const POST = withPublic(async (req: NextRequest) => {
   // serverless too) — Twilio only needs a fast 200. Reply is sent via REST + outbox retry.
   after(async () => {
     try {
-      const result = await handleReceptionistTurn(org, conversationId, body, { skipInboundPersist: true })
+      const result = await handleReceptionistTurn(org, conversationId, body, { skipInboundPersist: true, channel: 'sms' })
       const fresh = await db.conversation.findUnique({ where: { id: conversationId } })
       // Escalation automations fire only on the transition into waiting_human.
       if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {

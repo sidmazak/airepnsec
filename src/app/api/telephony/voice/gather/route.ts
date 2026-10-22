@@ -92,7 +92,7 @@ export const POST = withPublic(async (req: NextRequest) => {
 
   let reply = ''
   try {
-    const result = await handleReceptionistTurn(org, conversation.id, lowConfidence ? `The caller said (low speech confidence): ${speech}` : speech)
+    const result = await handleReceptionistTurn(org, conversation.id, lowConfidence ? `The caller said (low speech confidence): ${speech}` : speech, { channel: 'voice' })
     reply = result.reply
   } catch (err) {
     reply = 'I am sorry, something went wrong on my side. Your message has been saved and our team will follow up.'

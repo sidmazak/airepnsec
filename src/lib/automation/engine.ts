@@ -6,6 +6,7 @@ import { parseJson, getSetting, setSetting } from '@/lib/org'
 import { integrationConfig, str } from '@/lib/integrations/connectors'
 import { renderBookingEmail } from '@/lib/integrations/templates'
 import { outboxCountFor } from '@/lib/automation/actions'
+import { centsToDecimal } from '@/lib/money'
 
 export type TriggerType = 'invoice_overdue' | 'booking_created' | 'conversation_escalated' | 'manual'
 
@@ -220,7 +221,7 @@ async function executeRun(automation: {
     customer_name: customer?.name ?? '',
     business_name: org.name,
     invoice_number: actionInvoice?.number ?? (typeof input.invoiceNumber === 'string' ? input.invoiceNumber : ''),
-    amount_due: `$${(outstandingForVars / 100).toFixed(2)}`,
+    amount_due: centsToDecimal(outstandingForVars),
     due_date: actionInvoice ? actionInvoice.dueDate.toISOString().slice(0, 10) : '',
     service_name: serviceName,
     start_time: startTime,
@@ -281,11 +282,13 @@ async function executeRun(automation: {
 
 /** collections.renderTemplate-style substitution, extended with service/start-time vars. */
 function renderAutomationTemplate(template: string, vars: Record<string, string>): string {
-  let out = template
-  for (const [key, value] of Object.entries(vars)) {
-    out = out.replaceAll(`{{${key}}}`, value)
-  }
-  return out
+  // Single pass over the template: a substituted value is never re-scanned, so a
+  // customer name that contains "{{amount_due}}" cannot expand into another
+  // variable (variable injection through customer-controlled data).
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key: string) => {
+    const value = vars[key]
+    return value === undefined ? match : value
+  })
 }
 
 type AutomationRow = {

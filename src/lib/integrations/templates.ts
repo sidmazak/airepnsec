@@ -1,3 +1,5 @@
+import { centsToDecimal } from '@/lib/money'
+
 /**
  * Email templates for invoice delivery and booking confirmations.
  * Pure functions — every dynamic value is substituted here (no client-side
@@ -25,11 +27,12 @@ export type InvoiceEmailInput = {
 export type RenderedEmail = { subject: string; html: string; text: string }
 
 function formatMoney(cents: number, currency: string): string {
-  const value = cents / 100
+  // Integer cents -> exact decimal string (no float division of the amount).
+  const decimal = centsToDecimal(cents)
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value)
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(decimal))
   } catch {
-    return `${value.toFixed(2)} ${currency}`
+    return `${decimal} ${currency}`
   }
 }
 

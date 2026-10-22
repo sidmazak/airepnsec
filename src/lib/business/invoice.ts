@@ -49,52 +49,67 @@ export async function createInvoice(orgId: string, input: CreateInvoiceInput, ac
   const total = subtotal + tax
   const issueDate = input.issueDate ? new Date(input.issueDate) : new Date()
   const dueDate = new Date(issueDate.getTime() + (input.dueInDays ?? 14) * 24 * 60 * 60 * 1000)
-  const number = await nextInvoiceNumber(orgId)
-
-  const invoice = await db.$transaction(async (tx) => {
-    const inv = await tx.invoice.create({
-      data: {
-        orgId,
-        customerId: input.customerId,
-        number,
-        status: 'sent',
-        currency: customer ? (await db.organization.findUnique({ where: { id: orgId }, select: { currency: true } }))?.currency ?? 'USD' : 'USD',
-        subtotalCents: subtotal,
-        taxCents: tax,
-        totalCents: total,
-        paidCents: 0,
-        issueDate,
-        dueDate,
-        rentalPeriod: input.rentalPeriod ? JSON.stringify(input.rentalPeriod) : '',
-        notes: input.notes ?? '',
-      },
-    })
-    for (const item of input.items) {
-      await tx.invoiceItem.create({
-        data: {
+  // The invoice number is a per-org sequence guarded by a unique index. Two
+  // parallel issuances can pick the same number, so retry on the unique
+  // violation instead of failing the invoice.
+  let invoice
+  let allocatedNumber = ''
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const number = await nextInvoiceNumber(orgId)
+    try {
+      invoice = await db.$transaction(async (tx) => {
+        const inv = await tx.invoice.create({
+          data: {
+            orgId,
+            customerId: input.customerId,
+            number,
+            status: 'sent',
+            currency: customer ? (await db.organization.findUnique({ where: { id: orgId }, select: { currency: true } }))?.currency ?? 'USD' : 'USD',
+            subtotalCents: subtotal,
+            taxCents: tax,
+            totalCents: total,
+            paidCents: 0,
+            issueDate,
+            dueDate,
+            rentalPeriod: input.rentalPeriod ? JSON.stringify(input.rentalPeriod) : '',
+            notes: input.notes ?? '',
+          },
+        })
+        for (const item of input.items) {
+          await tx.invoiceItem.create({
+            data: {
+              invoiceId: inv.id,
+              description: item.description.trim(),
+              qty: item.qty,
+              unitPriceCents: item.unitPriceCents,
+              totalCents: item.qty * item.unitPriceCents,
+            },
+          })
+        }
+        await postEntry(orgId, {
+          type: 'charge',
+          debitAccount: 'accounts_receivable',
+          creditAccount: 'revenue',
+          amountCents: total,
           invoiceId: inv.id,
-          description: item.description.trim(),
-          qty: item.qty,
-          unitPriceCents: item.unitPriceCents,
-          totalCents: item.qty * item.unitPriceCents,
-        },
+          memo: `Invoice ${number} issued to ${customer.name}`,
+          createdBy: actor.id,
+        }, tx)
+        return inv
       })
+      allocatedNumber = number
+      break
+    } catch (err) {
+      const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : ''
+      if (code === 'P2002' && attempt < 4) continue
+      throw err
     }
-    await postEntry(orgId, {
-      type: 'charge',
-      debitAccount: 'accounts_receivable',
-      creditAccount: 'revenue',
-      amountCents: total,
-      invoiceId: inv.id,
-      memo: `Invoice ${number} issued to ${customer.name}`,
-      createdBy: actor.id,
-    }, tx)
-    return inv
-  })
+  }
+  if (!invoice) throw new ApiError(409, 'Could not allocate a unique invoice number', 'invoice_number_conflict')
 
   await audit({
     orgId, actorType: actor.type, actorId: actor.id, action: 'invoice.created', entity: 'invoice', entityId: invoice.id,
-    meta: { number, totalCents: total, dueDate: dueDate.toISOString() },
+    meta: { number: allocatedNumber, totalCents: total, dueDate: dueDate.toISOString() },
   })
   return invoice
 }

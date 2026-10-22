@@ -26,12 +26,19 @@ export async function recordVerifiedPayment(orgId: string, input: VerifiedPaymen
   }
 
   if (input.idempotencyKey) {
-    const existing = await db.payment.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
-    if (existing && existing.orgId === orgId) return { payment: existing, duplicate: true }
+    const existing = await db.payment.findFirst({ where: { idempotencyKey: input.idempotencyKey, orgId } })
+    if (existing) return { payment: existing, duplicate: true }
+    // The key is globally unique. If it belongs to another organisation the
+    // caller is reusing someone else's key - refuse instead of handing back a
+    // payment row that belongs to a different tenant.
+    const foreign = await db.payment.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { orgId: true } })
+    if (foreign) throw new ApiError(409, 'This idempotency key was already used for another record', 'idempotency_conflict')
   }
   if (input.externalEventId) {
-    const existing = await db.payment.findUnique({ where: { externalEventId: input.externalEventId } })
-    if (existing && existing.orgId === orgId) return { payment: existing, duplicate: true }
+    const existing = await db.payment.findFirst({ where: { externalEventId: input.externalEventId, orgId } })
+    if (existing) return { payment: existing, duplicate: true }
+    const foreign = await db.payment.findUnique({ where: { externalEventId: input.externalEventId }, select: { orgId: true } })
+    if (foreign) throw new ApiError(409, 'This event id was already used for another record', 'idempotency_conflict')
   }
 
   const invoice = await db.invoice.findFirst({ where: { id: input.invoiceId, orgId } })
@@ -110,7 +117,7 @@ export async function recordPaymentClaim(
   }
 
   const idempotencyKey = `claim:${input.invoiceId}:${input.amountCents}:${input.reference || Date.now()}`
-  const existing = await db.payment.findUnique({ where: { idempotencyKey } })
+  const existing = await db.payment.findFirst({ where: { idempotencyKey, orgId } })
   if (existing) return { payment: existing, duplicate: true }
 
   const payment = await db.payment.create({
@@ -220,47 +227,75 @@ export function parseWebhookPayload(raw: string): WebhookPayload {
   }
 }
 
-/** Process a verified webhook: dedupes by eventId, then records the payment idempotently. */
+/**
+ * Process a verified webhook: dedupes by eventId, then records the payment idempotently.
+ *
+ * Retry semantics matter here. Only a FINAL outcome ('processed' / 'duplicate') makes
+ * an event terminal. A rejected or failed attempt stays retryable, so a provider that
+ * re-delivers after a transient failure - or after a bogus unsigned attempt was
+ * pre-recorded - still gets its payment booked instead of being answered 'duplicate'.
+ * The payment itself is protected by the unique externalEventId, so a retry can never
+ * double-count.
+ */
 export async function processWebhook(orgId: string, provider: string, payload: WebhookPayload, raw: string, signatureValid: boolean) {
   const existing = await db.webhookEvent.findUnique({ where: { eventId: payload.eventId } })
-  if (existing) {
+  if (existing && (existing.result === 'processed' || existing.result === 'duplicate')) {
     await db.webhookEvent.update({ where: { id: existing.id }, data: { result: 'duplicate' } })
     return { result: 'duplicate' as const, eventId: payload.eventId }
   }
   if (!signatureValid) {
-    await db.webhookEvent.create({
-      data: { orgId, provider, eventId: payload.eventId, payload: raw.slice(0, 4000), signatureValid: false, result: 'rejected', processedAt: new Date() },
-    })
+    if (existing) {
+      await db.webhookEvent.update({
+        where: { id: existing.id },
+        data: { orgId, provider, payload: raw.slice(0, 4000), signatureValid: false, result: 'rejected', processedAt: new Date() },
+      })
+    } else {
+      await db.webhookEvent.create({
+        data: { orgId, provider, eventId: payload.eventId, payload: raw.slice(0, 4000), signatureValid: false, result: 'rejected', processedAt: new Date() },
+      })
+    }
     await audit({ orgId, actorType: 'webhook', action: 'webhook.rejected', entity: 'webhook_event', meta: { provider, reason: 'invalid signature' } })
     return { result: 'rejected' as const, eventId: payload.eventId }
   }
 
   const invoice = await db.invoice.findFirst({ where: { orgId, number: payload.invoiceNumber } })
-  const event = await db.webhookEvent.create({
-    data: { orgId, provider, eventId: payload.eventId, payload: raw.slice(0, 4000), signatureValid: true, result: 'received' },
-  })
+  const event = existing
+    ? await db.webhookEvent.update({
+        where: { id: existing.id },
+        data: { orgId, provider, payload: raw.slice(0, 4000), signatureValid: true, result: 'received' },
+      })
+    : await db.webhookEvent.create({
+        data: { orgId, provider, eventId: payload.eventId, payload: raw.slice(0, 4000), signatureValid: true, result: 'received' },
+      })
   if (!invoice) {
-    await db.webhookEvent.update({ where: { id: event.id }, data: { result: 'rejected' } })
+    await db.webhookEvent.update({ where: { id: event.id }, data: { result: 'failed' } })
     throw new ApiError(404, `Invoice ${payload.invoiceNumber} not found`, 'invoice_not_found')
   }
 
-  const { payment, duplicate } = await recordVerifiedPayment(
-    orgId,
-    {
-      invoiceId: invoice.id,
-      amountCents: payload.amountCents,
-      method: payload.method ?? 'online',
-      reference: payload.reference ?? '',
-      source: 'webhook',
-      externalEventId: payload.eventId,
-      verifiedBy: 'webhook',
-    },
-    { type: 'webhook', id: provider }
-  )
+  try {
+    const { payment, duplicate } = await recordVerifiedPayment(
+      orgId,
+      {
+        invoiceId: invoice.id,
+        amountCents: payload.amountCents,
+        method: payload.method ?? 'online',
+        reference: payload.reference ?? '',
+        source: 'webhook',
+        externalEventId: payload.eventId,
+        verifiedBy: 'webhook',
+      },
+      { type: 'webhook', id: provider }
+    )
 
-  await db.webhookEvent.update({
-    where: { id: event.id },
-    data: { result: duplicate ? 'duplicate' : 'processed', processedAt: new Date() },
-  })
-  return { result: duplicate ? ('duplicate' as const) : ('processed' as const), eventId: payload.eventId, paymentId: payment.id }
+    await db.webhookEvent.update({
+      where: { id: event.id },
+      data: { result: duplicate ? 'duplicate' : 'processed', processedAt: new Date() },
+    })
+    return { result: duplicate ? ('duplicate' as const) : ('processed' as const), eventId: payload.eventId, paymentId: payment.id }
+  } catch (err) {
+    // The business effect failed. Mark the event as failed (NOT terminal) so the
+    // provider's retry can try again instead of being answered 'duplicate'.
+    await db.webhookEvent.update({ where: { id: event.id }, data: { result: 'failed' } })
+    throw err
+  }
 }

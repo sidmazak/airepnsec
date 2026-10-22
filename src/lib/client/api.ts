@@ -1,5 +1,7 @@
 'use client'
 
+import { formatCents } from '@/lib/money'
+
 /**
  * Shared frontend API client.
  * - always same-origin relative URLs
@@ -232,7 +234,7 @@ export type AuditRow = {
 export type ReadinessItem = { key: string; label: string; ok: boolean; detail?: string }
 
 export function formatMoney(cents: number, currency = 'USD'): string {
-  return `${currency} ${(cents / 100).toFixed(2)}`
+  return formatCents(cents, currency)
 }
 
 export function formatDateTime(iso: string): string {

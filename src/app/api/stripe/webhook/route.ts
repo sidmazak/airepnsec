@@ -5,6 +5,9 @@ import { processWebhook } from '@/lib/business/payments'
 import { decryptSecrets, getUsableIntegration } from '@/lib/integrations/connectors'
 import { verifyStripeSignature } from '@/lib/integrations/stripe'
 
+/** Upper bound for the "no org slug in metadata" fallback scan. */
+const MAX_UNDESIGNATED_ORG_SCAN = 20
+
 /**
  * POST /api/stripe/webhook — PUBLIC endpoint for Stripe callbacks.
  *
@@ -56,7 +59,8 @@ export const POST = withPublic(async (req) => {
     const secrets = decryptSecrets(integration)
     const secret = (secrets.webhookSecret ?? '').trim()
     if (!secret) return false
-    return verifyStripeSignature(raw, sigHeader, secret)
+    // Stripe signs with a 5 minute tolerance - an older timestamp is a replay.
+    return verifyStripeSignature(raw, sigHeader, secret, 10 * 60_000)
   }
 
   let orgId = ''
@@ -64,7 +68,13 @@ export const POST = withPublic(async (req) => {
     const org = await db.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
     if (org && (await verifyForOrg(org.id))) orgId = org.id
   } else {
-    const candidates = await db.integration.findMany({ where: { kind: 'stripe', secretsEnc: { not: '' } }, select: { orgId: true } })
+    // No slug in the metadata: try every configured Stripe integration. The scan
+    // is capped so an unsigned request cannot turn into an O(orgs) crypto DoS.
+    const candidates = await db.integration.findMany({
+      where: { kind: 'stripe', secretsEnc: { not: '' } },
+      select: { orgId: true },
+      take: MAX_UNDESIGNATED_ORG_SCAN,
+    })
     for (const candidate of candidates) {
       if (await verifyForOrg(candidate.orgId)) {
         orgId = candidate.orgId
@@ -81,17 +91,17 @@ export const POST = withPublic(async (req) => {
 
   /* -------- dedupe by Stripe event id -------- */
 
-  const existing = await db.webhookEvent.findUnique({ where: { eventId } })
-  if (existing) {
-    await db.webhookEvent.update({ where: { id: existing.id }, data: { result: 'duplicate' } })
-    return json({ received: true, result: 'duplicate', eventId })
-  }
-
   const HANDLED = ['checkout.session.completed', 'payment_intent.succeeded']
   if (!HANDLED.includes(eventType)) {
-    await db.webhookEvent.create({
-      data: { orgId, provider: 'stripe', eventId, payload: raw.slice(0, 4000), signatureValid: true, result: 'ignored', processedAt: new Date() },
-    })
+    // Not a payment event: record it once and move on. processWebhook owns the
+    // lifecycle of payment events (dedupe + retry semantics); ignored events
+    // never reach it.
+    const existing = await db.webhookEvent.findUnique({ where: { eventId }, select: { id: true } })
+    if (!existing) {
+      await db.webhookEvent.create({
+        data: { orgId, provider: 'stripe', eventId, payload: raw.slice(0, 4000), signatureValid: true, result: 'ignored', processedAt: new Date() },
+      })
+    }
     return json({ received: true, result: 'ignored', type: eventType })
   }
 
@@ -104,8 +114,11 @@ export const POST = withPublic(async (req) => {
   const stripeObjectRef = typeof obj.id === 'string' ? obj.id : ''
 
   const rejectRow = async (result: 'rejected' | 'received', note: string) => {
-    await db.webhookEvent.create({
-      data: { orgId, provider: 'stripe', eventId, payload: raw.slice(0, 4000), signatureValid: true, result, processedAt: new Date() },
+    // upsert: processWebhook may already have created the row for this event id
+    await db.webhookEvent.upsert({
+      where: { eventId },
+      create: { orgId, provider: 'stripe', eventId, payload: raw.slice(0, 4000), signatureValid: true, result, processedAt: new Date() },
+      update: { result, processedAt: new Date() },
     })
     await audit({ orgId, actorType: 'webhook', action: 'webhook.rejected', entity: 'webhook_event', meta: { provider: 'stripe', type: eventType, reason: note } })
   }

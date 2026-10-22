@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { withPublic, parseBody, json, fail, handleError, rateLimit } from '@/lib/api'
+import { withPublic, parseBody, json, fail, handleError, rateLimit, rateLimitShared, clientIp } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { randomToken } from '@/lib/crypto'
@@ -31,10 +31,6 @@ const postSchema = z.object({
   name: z.string().trim().max(120).optional(),
 })
 
-function clientIp(req: NextRequest): string {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local'
-}
-
 function threadRef(token: string): string {
   return `web:${token}`
 }
@@ -59,6 +55,10 @@ export const POST = withPublic(async (req, params) => {
     const slug = params.slug ?? ''
     if (!SLUG_RE.test(slug)) return cors(fail(404, 'Unknown business'))
     if (!rateLimit(`webchat:${clientIp(req)}:${slug}`, 30, 60_000)) {
+      return cors(fail(429, 'Too many messages — please slow down.'))
+    }
+    // Shared (database-backed) counter so the limit also holds across instances.
+    if (!(await rateLimitShared(`webchat:${clientIp(req)}:${slug}`, 30, 60_000))) {
       return cors(fail(429, 'Too many messages — please slow down.'))
     }
 
@@ -125,7 +125,12 @@ export const POST = withPublic(async (req, params) => {
     }
 
     const statusBefore = conversation!.status
-    const result = await handleReceptionistTurn(org, conversation!.id, body.message, { skipInboundPersist: true })
+    // The public chat is an anonymous channel: the tool policy blocks the tools
+    // that expose a customer's records and the staff-only diary tools.
+    const result = await handleReceptionistTurn(org, conversation!.id, body.message, {
+      skipInboundPersist: true,
+      channel: 'web',
+    })
     const fresh = await db.conversation.findUnique({ where: { id: conversation!.id } })
     if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {
       await emitEvent(org.id, 'conversation_escalated', { conversationId: conversation!.id, entityId: conversation!.id })

@@ -1,4 +1,5 @@
 import { integrationConfig, decryptSecrets, str, sanitizeMessage, type TestResult } from '@/lib/integrations/connectors'
+import { assertOutboundUrl } from '@/lib/security/outbound'
 import type { Organization } from '@prisma/client'
 
 /**
@@ -8,18 +9,28 @@ import type { Organization } from '@prisma/client'
  * Fastmail, iCloud (app-specific password), and other standard CalDAV servers.
  */
 
-export type CalDavCreds = { url: string; username: string; password: string }
+export type CalDavCreds = { url: string; username: string; password: string; allowPrivate: boolean }
 
 export function caldavCreds(integration: { configJson: string; secretsEnc: string }): CalDavCreds | null {
   const config = integrationConfig(integration)
   const secrets = decryptSecrets(integration)
   const url = str(config, 'url')
   if (!/^https?:\/\//i.test(url)) return null
-  return { url: url.replace(/\/$/, ''), username: str(config, 'username'), password: str(secrets, 'password') }
+  return {
+    url: url.replace(/\/$/, ''),
+    username: str(config, 'username'),
+    password: str(secrets, 'password'),
+    // A self-hosted calendar server normally lives on the LAN -> allowed unless
+    // the operator explicitly turns it off. Cloud metadata stays blocked.
+    allowPrivate: config.allowPrivate !== false,
+  }
 }
 
 async function davFetch(creds: CalDavCreds, path: string, method: string, body?: string, contentType = 'application/xml; charset=utf-8'): Promise<Response> {
   const url = path.startsWith('http') ? path : `${creds.url}${path.startsWith('/') ? '' : '/'}${path}`
+  // SSRF guard: the collection URL is operator-configured, but it must never be
+  // able to reach the cloud metadata service.
+  await assertOutboundUrl(url, { allowPrivate: creds.allowPrivate, label: 'CalDAV URL' })
   const auth = creds.username
     ? `Basic ${Buffer.from(`${creds.username}:${creds.password}`).toString('base64')}`
     : undefined

@@ -84,6 +84,34 @@ export function verifyTotp(secretBase32: string, code: string, opts: { window?: 
   return false
 }
 
+/**
+ * Verify a code and report WHICH time step matched. The step (counter) is what
+ * replay protection needs: a code is only accepted once per step, so a captured
+ * code cannot be replayed inside the tolerance window.
+ */
+export function verifyTotpStep(
+  secretBase32: string,
+  code: string,
+  opts: { window?: number; timeMs?: number; stepSeconds?: number; digits?: number } = {}
+): { ok: boolean; counter: number } {
+  const digits = opts.digits ?? 6
+  const cleaned = (code ?? '').replace(/\D/g, '')
+  if (cleaned.length !== digits) return { ok: false, counter: 0 }
+  const secret = base32Decode(secretBase32)
+  if (secret.length === 0) return { ok: false, counter: 0 }
+  const step = opts.stepSeconds ?? 30
+  const counter = Math.floor((opts.timeMs ?? Date.now()) / 1000 / step)
+  const window = opts.window ?? 1
+  const candidate = Buffer.from(cleaned)
+  for (let offset = -window; offset <= window; offset++) {
+    const expected = Buffer.from(hotp(secret, counter + offset, digits))
+    if (expected.length === candidate.length && timingSafeEqual(expected, candidate)) {
+      return { ok: true, counter: counter + offset }
+    }
+  }
+  return { ok: false, counter }
+}
+
 /** otpauth:// URI for QR rendering or manual entry. */
 export function otpauthUrl(input: { secret: string; account: string; issuer: string }): string {
   const issuer = input.issuer.trim() || 'AI Secretary'

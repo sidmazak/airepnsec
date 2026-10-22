@@ -60,6 +60,7 @@ model Organization {
   automations      Automation[]
   auditEvents      AuditEvent[]
   calendarBlocks   CalendarBlock[]
+  invites          Invite[]
   telephonyLines   TelephonyLine[]
   telephonyCalls   TelephonyCall[]
   settings         AppSetting[]
@@ -72,13 +73,60 @@ model User {
   passwordHash    String
   name            String
   role            String   @default("owner") // owner | admin | agent | viewer
+  active          Boolean  @default(true) // deactivated members keep their history but cannot sign in
   twoFactorSecret String   @default("") // AES-256-GCM encrypted TOTP secret (only meaningful while enrolling/enabled)
   twoFactorEnabled Boolean @default(false)
+  twoFactorLastCounter Int @default(0) // highest consumed TOTP step — blocks replay of the same code
+  lastLoginAt     DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   organization    Organization @relation(fields: [orgId], references: [id])
   sessions        Session[]
+  invitesSent     Invite[]
+  resetTokens     PasswordResetToken[]
   @@index([orgId])
+  @@index([orgId, role])
+}
+
+/// A pending invitation to join the organisation. The token is stored hashed —
+/// the plain token is only ever shown once, in the invite email / invite link.
+model Invite {
+  id           String   @id @default(cuid())
+  orgId        String
+  email        String
+  role         String   @default("agent") // owner | admin | agent | viewer
+  tokenHash    String   @unique
+  invitedById  String
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+  organization Organization @relation(fields: [orgId], references: [id])
+  invitedBy    User     @relation(fields: [invitedById], references: [id])
+  @@index([orgId])
+  @@index([email])
+}
+
+/// Single-use password reset / "set your password" token (hashed at rest).
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+/// Shared (database-backed) rate-limit bucket so limits hold across app instances.
+model RateBucket {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+  expiresAt   DateTime
+  updatedAt   DateTime @updatedAt
+  @@index([expiresAt])
 }
 
 model Session {

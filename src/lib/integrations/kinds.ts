@@ -38,6 +38,8 @@ export const smsGatewayConfigSchema = z
     authHeaderName: z.string().max(60).optional(),
     bodyTemplate: z.string().max(2000).optional(),
     testRecipient: z.string().max(40).optional(),
+    // Self-hosted gateways usually run on the same LAN: opt in explicitly.
+    allowPrivate: z.boolean().optional(),
   })
   .superRefine((val, ctx) => {
     if (val.provider === 'httpsms' && !val.from) {
@@ -51,6 +53,9 @@ export const smsGatewayConfigSchema = z
 export const caldavConfigSchema = z.object({
   url: z.string().url('url must be the CalDAV calendar collection URL'),
   username: z.string().max(200).optional(),
+  // A self-hosted calendar server usually lives on the LAN: allowed by default
+  // (cloud metadata endpoints stay blocked).
+  allowPrivate: z.boolean().optional(),
 })
 
 export const googleCalendarConfigSchema = z.object({

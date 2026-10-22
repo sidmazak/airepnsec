@@ -81,7 +81,12 @@ export async function createStripePaymentLink(
  * HMAC-SHA256 over `${t}.${rawBody}` with the webhook signing secret. Any of
  * the listed v1 signatures matching (timing-safe) counts as valid.
  */
-export function verifyStripeSignature(rawBody: string, header: string | null, secret: string): boolean {
+/**
+ * Verify a Stripe-Signature header. `maxAgeMs` rejects a captured signature
+ * that is replayed later (Stripe itself signs with a 5 minute tolerance); pass
+ * 0 to disable the age check.
+ */
+export function verifyStripeSignature(rawBody: string, header: string | null, secret: string, maxAgeMs = 0): boolean {
   if (!header || !secret) return false
   const parts = header.split(',')
   let timestamp = ''
@@ -95,6 +100,12 @@ export function verifyStripeSignature(rawBody: string, header: string | null, se
     else if (key === 'v1') signatures.push(value)
   }
   if (!timestamp || signatures.length === 0) return false
+  if (maxAgeMs > 0) {
+    const ts = Number(timestamp)
+    if (!Number.isFinite(ts)) return false
+    const age = Math.abs(Date.now() - ts * 1000)
+    if (age > maxAgeMs) return false
+  }
   try {
     const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex')
     return signatures.some((sig) => {

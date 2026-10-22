@@ -102,7 +102,7 @@ export const POST = withPublic(async (req: NextRequest) => {
   const statusBefore = conversation.status
   after(async () => {
     try {
-      const result = await handleReceptionistTurn(org, conversationId, body, { skipInboundPersist: true })
+      const result = await handleReceptionistTurn(org, conversationId, body, { skipInboundPersist: true, channel: 'whatsapp' })
       const fresh = await db.conversation.findUnique({ where: { id: conversationId } })
       // Escalation automations fire only on the transition into waiting_human.
       if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {

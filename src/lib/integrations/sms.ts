@@ -1,5 +1,69 @@
 import type { TestResult } from '@/lib/integrations/connectors'
 
+/*
+ * Inline SSRF guard for SMS gateway URLs. It is kept self-contained (instead of
+ * importing @/lib/security/outbound) so this module can be unit-tested with
+ * plain `node:test`, which does not resolve the Next.js path alias.
+ *
+ * Mirrors assertOutboundUrl: literal host check + DNS resolution check. Cloud
+ * metadata endpoints are always blocked, even when private addresses are
+ * explicitly allowed.
+ */
+const METADATA_IPS = ['169.254.169.254', '169.254.170.2', '100.100.100.200', 'fd00:ec2::254']
+const METADATA_HOSTS = ['metadata.google.internal', 'metadata.goog']
+const PRIVATE_V4 = /^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|192\.168\.|0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/
+
+function isMetadataHost(host: string): boolean {
+  const h = host.toLowerCase()
+  return METADATA_HOSTS.includes(h) || METADATA_IPS.includes(h)
+}
+
+function isPrivateAddress(address: string): boolean {
+  const a = address.toLowerCase().replace(/^\[|\]$/g, '')
+  if (a === '::1' || a === '::' || a.startsWith('fc') || a.startsWith('fd')) return true
+  if (a.startsWith('::ffff:')) return isPrivateAddress(a.slice(7))
+  return PRIVATE_V4.test(a)
+}
+
+/**
+ * Validate a gateway URL before we send to it. `allowPrivate` is the explicit
+ * opt-in for a self-hosted gateway on the operator's LAN.
+ */
+export async function resolveSafeGatewayUrl(raw: string, allowPrivate: boolean): Promise<URL> {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('SMS gateway URL is not a valid http(s) URL')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('SMS gateway URL must use http:// or https://')
+  }
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (isMetadataHost(host)) {
+    throw new Error('SMS gateway URL points to a cloud metadata endpoint - this is blocked to prevent credential theft')
+  }
+  if (allowPrivate) return url
+  if (host === 'localhost' || host.endsWith('.localhost') || isPrivateAddress(host)) {
+    throw new Error(
+      'SMS gateway URL points to a private/local address and private addresses are not allowed. Enable "allowPrivate" on the integration if the gateway runs on your own network.'
+    )
+  }
+  try {
+    const dns = await import('node:dns/promises')
+    const entries = await dns.lookup(host, { all: true })
+    if (entries.some((e) => isPrivateAddress(e.address))) {
+      throw new Error(
+        'SMS gateway URL resolves to a private/local address and private addresses are not allowed. Enable "allowPrivate" on the integration if the gateway runs on your own network.'
+      )
+    }
+  } catch (err) {
+    // A DNS failure is reported by the fetch itself; only rethrow our own verdict.
+    if (err instanceof Error && err.message.startsWith('SMS gateway URL resolves')) throw err
+  }
+  return url
+}
+
 /**
  * Universal SMS gateway adapters (BYO hardware / bridges).
  *
@@ -229,6 +293,10 @@ export async function sendSmsGateway(
 
   const req = buildSendRequest(provider, config, secrets, input)
   try {
+    // SSRF guard: the gateway URL is admin-configured, but a poisoned value must
+    // not be able to reach loopback/link-local/internal hosts. Self-hosted
+    // gateways on a trusted LAN are allowed explicitly via allowPrivate.
+    await resolveSafeGatewayUrl(req.url, config.allowPrivate === true)
     const res = await fetch(req.url, {
       method: req.method,
       headers: req.headers,
@@ -268,6 +336,7 @@ export async function testSmsGateway(provider: string, config: SmsGatewayConfig,
   const req = buildTestRequest(provider, config, secrets)
   if (!req) return { ok: false, detail: `No test probe available for ${provider}` }
   try {
+    await resolveSafeGatewayUrl(req.url, config.allowPrivate === true)
     const res = await fetch(req.url, { method: req.method, headers: req.headers, signal: AbortSignal.timeout(10_000) })
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string }

@@ -8,6 +8,7 @@ import { computeSlots } from '@/lib/business/availability'
 import { invoiceOutstanding } from '@/lib/business/invoice'
 import { parseJson, type OrgPolicies } from '@/lib/org'
 import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { formatCents } from '@/lib/money'
 import { withConversationTurnLock } from '@/lib/concurrency'
 import {
   localDateString,
@@ -30,13 +31,61 @@ type ToolCtx = {
   conversationId: string
   customer: { id: string; name: string; phone: string; email: string } | null
   actor: { type: 'ai'; id: string }
+  policy: ToolPolicy
 }
+
+/**
+ * Which channel the turn runs on. It decides WHICH tools the model may call —
+ * an anonymous website visitor must not be able to reach tools that expose a
+ * customer's bookings/invoices or that change the business diary.
+ */
+export type ReceptionistChannel = 'dashboard' | 'web' | 'sms' | 'whatsapp' | 'voice' | 'realtime'
+
+export type ToolPolicy = {
+  channel: ReceptionistChannel
+  /** Tools that read a matched customer's records (bookings, invoices, payments). */
+  identityTools: boolean
+  /** Tools only staff may run (blocking time on the business diary). */
+  staffTools: boolean
+}
+
+/**
+ * Channel policies.
+ *  - dashboard / realtime: staff — everything.
+ *  - sms / whatsapp / voice: the caller number identifies the customer, so
+ *    identity tools are allowed; staff-only tools are not.
+ *  - web: an anonymous visitor. Identity tools are blocked (there is no way to
+ *    prove who is asking) and staff tools are blocked.
+ */
+export function policyForChannel(channel: ReceptionistChannel): ToolPolicy {
+  switch (channel) {
+    case 'web':
+      return { channel, identityTools: false, staffTools: false }
+    case 'sms':
+    case 'whatsapp':
+    case 'voice':
+      return { channel, identityTools: true, staffTools: false }
+    case 'dashboard':
+    case 'realtime':
+    default:
+      return { channel, identityTools: true, staffTools: true }
+  }
+}
+
+/**
+ * Tool scope:
+ *  - public: safe for anyone who can reach the assistant.
+ *  - identity: reads or mutates ONE customer's records (needs a matched customer).
+ *  - staff: changes business-wide state (blocked periods).
+ */
+type ToolScope = 'public' | 'identity' | 'staff'
 
 type ToolDef = {
   name: string
   description: string
   args: Record<string, string> // arg name -> description (validated manually below)
   required?: string[] // subset of args the model must provide (also used for realtime tool schemas)
+  scope?: ToolScope // default: public
   execute: (args: Record<string, unknown>, ctx: ToolCtx) => Promise<unknown>
 }
 
@@ -46,7 +95,7 @@ function str(args: Record<string, unknown>, key: string): string {
 }
 
 function money(cents: number, currency: string): string {
-  return `${currency} ${(cents / 100).toFixed(2)}`
+  return formatCents(cents, currency)
 }
 
 function resolveService(orgId: string, ref: string) {
@@ -74,7 +123,15 @@ async function resolveStaff(orgId: string, ref: string) {
   )
 }
 
-/** Suffix-digit tolerant phone match + case-insensitive email match (small local datasets). */
+/**
+ * Minimum number of digits before a phone number may be matched as a SUFFIX of
+ * a stored number (a stored "+91 98765 43210" vs an inbound "9876543210").
+ * Four digits is far too loose: anybody who knew the last four digits of a
+ * customer's number could read that customer's bookings and invoices.
+ */
+export const MIN_CONTACT_DIGITS = 7
+
+/** Phone match (exact, or a country-code-free suffix) + exact email match. */
 export async function findCustomerByContact(orgId: string, phone: string, email: string) {
   if (phone) {
     const digits = phone.replace(/\D/g, '')
@@ -82,7 +139,11 @@ export async function findCustomerByContact(orgId: string, phone: string, email:
       const all = await db.customer.findMany({ where: { orgId, phone: { not: '' } }, take: 500 })
       const phoneMatch = all.find((c) => {
         const cd = c.phone.replace(/\D/g, '')
-        return cd === digits || cd.endsWith(digits) || digits.endsWith(cd)
+        if (!cd) return false
+        if (cd === digits) return true
+        // Suffix match only when BOTH sides carry enough digits to be unique.
+        if (digits.length < MIN_CONTACT_DIGITS || cd.length < MIN_CONTACT_DIGITS) return false
+        return cd.endsWith(digits) || digits.endsWith(cd)
       })
       if (phoneMatch) return phoneMatch
     }
@@ -251,6 +312,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'block_time',
+    scope: 'staff',
     description: 'Block a period so it cannot be booked (staff absence, break, private event). The block is real — it is removed from the bookable slots immediately.',
     args: {
       start_at: 'start time (same format as the check_availability "start" values)',
@@ -420,6 +482,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'my_bookings',
+    scope: 'identity',
     description: 'Look up upcoming appointments for the current customer (matched by phone/email). Required before rescheduling or cancelling.',
     args: { customer_phone: 'phone (optional if already known)', customer_email: 'email (optional if already known)' },
     execute: async (args, ctx) => {
@@ -448,6 +511,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'reschedule_booking',
+    scope: 'identity',
     description: 'Move an existing appointment to a new open slot. Match the customer identity first (my_bookings) and verify the new time with check_availability.',
     args: {
       booking_id: 'booking id from my_bookings',
@@ -502,6 +566,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'cancel_booking',
+    scope: 'identity',
     description: 'Cancel one appointment by its booking id (from my_bookings). Only with customer identity matched; business cancellation policy is enforced.',
     args: { booking_id: 'booking id from my_bookings', reason: 'why it is cancelled' },
     required: ['booking_id'],
@@ -535,6 +600,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'my_invoices',
+    scope: 'identity',
     description: 'Look up invoices and balances for the current customer (identity matched by phone/email). Use for "how much do I owe" or "what is my balance" — never guess amounts.',
     args: { customer_phone: 'phone (optional if already known)', customer_email: 'email (optional if already known)' },
     execute: async (args, ctx) => {
@@ -612,6 +678,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'payment_claim',
+    scope: 'identity',
     description: 'Record that a customer CLAIMS they paid an invoice. This NEVER marks it paid — staff verify it. Be honest about that.',
     args: { invoice_number: 'e.g. INV-2025-0001', amount_cents: 'claimed amount in cents', method: 'card/bank/cash/other', reference: 'transaction reference if given' },
     required: ['invoice_number', 'amount_cents'],
@@ -677,12 +744,28 @@ export const TOOLS: ToolDef[] = [
 
 /* ---------------- prompt & protocol ---------------- */
 
-function toolCatalog(): string {
-  return TOOLS.map((t) => {
-    const required = t.required?.length ? ` (required: ${t.required.join(', ')})` : ''
-    const args = Object.keys(t.args).length ? ` args: ${Object.entries(t.args).map(([k, v]) => `${k} — ${v}`).join('; ')}` : ''
-    return `- ${t.name}: ${t.description}${required}${args}`
-  }).join('\n')
+/**
+ * The tools a channel may call. Identity tools (a matched customer's bookings,
+ * invoices, payments) and staff tools (blocking the business diary) are only
+ * exposed where the caller can be trusted with them.
+ */
+export function allowedTools(policy: ToolPolicy): ToolDef[] {
+  return TOOLS.filter((t) => {
+    const scope = t.scope ?? 'public'
+    if (scope === 'identity') return policy.identityTools
+    if (scope === 'staff') return policy.staffTools
+    return true
+  })
+}
+
+function toolCatalog(policy: ToolPolicy): string {
+  return allowedTools(policy)
+    .map((t) => {
+      const required = t.required?.length ? ` (required: ${t.required.join(', ')})` : ''
+      const args = Object.keys(t.args).length ? ` args: ${Object.entries(t.args).map(([k, v]) => `${k} — ${v}`).join('; ')}` : ''
+      return `- ${t.name}: ${t.description}${required}${args}`
+    })
+    .join('\n')
 }
 
 export function buildReceptionistInstructions(org: Organization): string {
@@ -726,7 +809,7 @@ function buildSystemPrompt(org: Organization, ctx: ToolCtx): string {
     `Keep spoken replies concise and free of markdown when they may be read aloud on a phone call.`,
     ``,
     `AVAILABLE TOOLS:`,
-    toolCatalog(),
+    toolCatalog(ctx.policy),
     identity.greeting ? `Suggested greeting: ${identity.greeting}` : '',
   ]
     .filter((line) => line !== '')
@@ -771,7 +854,7 @@ export async function handleReceptionistTurn(
   org: Organization,
   conversationId: string,
   userMessage: string,
-  opts: { skipInboundPersist?: boolean } = {}
+  opts: { skipInboundPersist?: boolean; channel?: ReceptionistChannel } = {}
 ): Promise<TurnResult> {
   const exists = await db.conversation.findFirst({
     where: { id: conversationId, orgId: org.id },
@@ -793,7 +876,7 @@ async function runReceptionistTurn(
   org: Organization,
   conversationId: string,
   userMessage: string,
-  opts: { skipInboundPersist?: boolean } = {}
+  opts: { skipInboundPersist?: boolean; channel?: ReceptionistChannel } = {}
 ): Promise<TurnResult> {
   const conversation = await db.conversation.findFirst({ where: { id: conversationId, orgId: org.id } })
   if (!conversation) throw new Error('Conversation not found')
@@ -831,6 +914,7 @@ async function runReceptionistTurn(
     conversationId,
     customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email } : null,
     actor: { type: 'ai', id: 'receptionist' },
+    policy: policyForChannel(opts.channel ?? 'dashboard'),
   }
 
   if (!opts.skipInboundPersist) {
@@ -882,18 +966,22 @@ async function runReceptionistTurn(
         break
       }
 
+      const permitted = allowedTools(ctx.policy)
       const toolName =
         typeof parsed.tool === 'string' && parsed.tool.trim()
           ? parsed.tool.trim()
-          : TOOLS.some((t) => t.name === parsed.action)
+          : permitted.some((t) => t.name === parsed.action)
             ? parsed.action
             : ''
 
       if (parsed.action === 'tool' || toolName) {
-        const tool = TOOLS.find((t) => t.name === toolName)
+        const tool = permitted.find((t) => t.name === toolName)
         if (!tool) {
           llmMessages.push({ role: 'assistant', content: result.content })
-          llmMessages.push({ role: 'user', content: `TOOL_ERROR: unknown tool "${parsed.tool}". Available: ${TOOLS.map((t) => t.name).join(', ')}` })
+          llmMessages.push({
+            role: 'user',
+            content: `TOOL_ERROR: tool "${toolName || parsed.tool}" is not available on this channel. Available: ${permitted.map((t) => t.name).join(', ')}`,
+          })
           continue
         }
         let toolResult: unknown
@@ -980,6 +1068,7 @@ export async function runReceptionistTool(
     conversationId,
     customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email } : null,
     actor: { type: 'ai', id: 'receptionist' },
+    policy: policyForChannel('realtime'),
   }
   const tool = TOOLS.find((t) => t.name === toolName)
   if (!tool) return { error: `Unknown tool ${toolName}` }
