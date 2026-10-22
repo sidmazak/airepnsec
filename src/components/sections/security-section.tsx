@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Copy, KeyRound, Loader2, ShieldCheck, ShieldOff } from 'lucide-react'
+import { ScimSettings, SsoSettings } from '@/components/sections/sso-settings'
 
 type TwoFactorStatus = { enabled: boolean; enrollmentPending: boolean }
 
@@ -218,6 +219,10 @@ export function SecuritySection() {
           )}
         </CardContent>
       </Card>
+
+      <SsoSettings />
+
+      <ScimSettings />
     </div>
   )
 }

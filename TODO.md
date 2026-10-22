@@ -16,12 +16,23 @@ honest: they report the provider's real answer instead of a fake success.
 To close this: run the app against real credentials and record the results in
 [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
-## 2. SSO (SAML / OIDC)
+## 2. SSO (SAML / OIDC) — DONE
 
-Roles (`owner | admin | agent | viewer`) are enforced on every route and multi-user team management
-ships (members, invitations, role changes, deactivation, session revocation, password reset).
-What is still missing is federated sign-in: SAML or OIDC identity providers, account linking, and
-SCIM user provisioning. Every user currently signs in with a local password (+ optional TOTP).
+Federated sign-in is implemented with full SAML 2.0 (SP-initiated Web Browser SSO) and OIDC
+(authorization code flow with PKCE) support:
+
+- SAML: SP metadata endpoint (`/api/auth/sso/saml/metadata`), ACS endpoint with signature
+  verification, InResponseTo binding for replay protection, base64 normalization for form-posted
+  responses, IdP metadata URL fetching with SSRF guard.
+- OIDC: Discovery document fetch/caching, PKCE (S256), nonce, state cookie (HMAC, TTL-bounded),
+  ID token verification (JWKS, RS256/HS256/ES256, iss/aud/exp/nonce checks).
+- Account linking / auto-provisioning with domain allowlist, role assignment, email verification
+  policy (configurable per org).
+- SCIM 2.0 provisioning (`/api/scim/v2/Users`, `/ServiceProviderConfig`, bearer token auth,
+  create/read/update/deactivate users).
+- Admin UI: SSO settings tab with OIDC/SAML fields, SCIM settings, client secret / IdP cert
+  stored encrypted (never returned after save).
+- Audit logging for config changes, sign-ins, provisioning events.
 
 ## 3. Local speech models — Kokoro / Piper voices
 

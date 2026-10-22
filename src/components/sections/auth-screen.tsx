@@ -9,7 +9,9 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
-import { Loader2, LogIn, Sparkles, ShieldCheck, CalendarCheck, Receipt, Bot } from 'lucide-react'
+import { Loader2, LogIn, Sparkles, ShieldCheck, CalendarCheck, Receipt, Bot, KeyRound } from 'lucide-react'
+
+type SsoProvider = { kind: 'oidc' | 'saml'; label: string }
 
 export function AuthScreen() {
   const setSession = useAppStore((s) => s.setSession)
@@ -23,6 +25,7 @@ export function AuthScreen() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [demoAvailable, setDemoAvailable] = useState<boolean | null>(null)
+  const [ssoProviders, setSsoProviders] = useState<SsoProvider[]>([])
 
   const applySession = (s: SessionInfo) => setSession(s)
 
@@ -32,6 +35,21 @@ export function AuthScreen() {
       setDemoAvailable(Boolean(s.demoAvailable))
       if (s.needsSetup) setMode('setup')
     }).catch(() => setDemoAvailable(false))
+  }, [])
+
+  // federated sign-in methods offered by this instance + the reason of a failed SSO round-trip
+  useEffect(() => {
+    api.get<{ providers: SsoProvider[] }>('/api/auth/sso/providers')
+      .then((r) => setSsoProviders(r.providers ?? []))
+      .catch(() => setSsoProviders([]))
+    const params = new URLSearchParams(window.location.search)
+    const ssoError = params.get('sso_error')
+    if (ssoError) {
+      setError(ssoError)
+      params.delete('sso_error')
+      const clean = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`
+      window.history.replaceState({}, '', clean)
+    }
   }, [])
 
   const login = async (e?: React.FormEvent) => {
@@ -184,6 +202,25 @@ export function AuthScreen() {
                   {mode === 'login' ? 'First run? Create owner account' : 'Already have an account? Sign in'}
                 </button>
               </div>
+
+              {ssoProviders.length > 0 && mode === 'login' && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    {ssoProviders.map((provider) => (
+                      <Button key={provider.kind} asChild variant="outline" className="w-full">
+                        <a href={`/api/auth/sso/${provider.kind}/start`}>
+                          <KeyRound className="h-4 w-4" aria-hidden />
+                          {provider.label}
+                        </a>
+                      </Button>
+                    ))}
+                    <p className="text-xs text-muted-foreground">
+                      Single sign-on is handled by your identity provider — your password is never shared with this app.
+                    </p>
+                  </div>
+                </>
+              )}
 
               <Separator />
 

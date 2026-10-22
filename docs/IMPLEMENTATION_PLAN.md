@@ -33,7 +33,7 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ Session auth (hashed random tokens, DB-backed revocation), RBAC (owner/admin/agent/viewer), org isolation on every query, zod validation, CSRF custom-header check, in-memory rate limiting, encrypted provider keys (never returned after save), webhook signature verification, audit events, data-mode enforcement.
 ✅ Optional TOTP 2FA (RFC 6238, SHA1, 30s, ±1 step) with encrypted secret, login challenge, and password+code disable.
 ✅ Security headers set in `next.config.ts` (nosniff, deny framing, referrer policy, permissions policy, COOP, HSTS in production, CSP). No `middleware.ts`; headers are configured centrally.
-🟡 SSO (SAML/OIDC): not implemented.
+✅ SSO (SAML/OIDC): SP-initiated SAML 2.0 with metadata endpoint, ACS with signature verification + InResponseTo binding + base64 normalization; OIDC auth code flow with PKCE, nonce, JWKS verification; SCIM 2.0 provisioning; encrypted secret storage; admin UI; audit logging.
 
 ## Phase 7 — Verification & docs
 ✅ tsc + ESLint clean; browser E2E of the golden path; local-only blocking test; duplicate-webhook dedupe; overpay rejection; already-reversed 409; opt-out honored; demo seed idempotent.
@@ -109,4 +109,4 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Provider kind** `local_speech` for the `stt`/`tts` capabilities, with catalog validation (`422 bad_model`) and a real connection test that actually runs inference.
 ✅ **Voice Console**: recordings are converted to 16 kHz mono WAV in the browser when the local provider is active, so the server needs no ffmpeg for the common case.
 
-**Remaining honest gaps (2026-10-22):** SSO (SAML/OIDC), inbound email, an automated per-role endpoint sweep, live third-party provider E2E (BLOCKED_EXTERNAL — no provider credentials in this environment), and Kokoro/Piper voices in the local catalog (transformers.js v4 cannot run their model type — use an OpenAI-compatible Kokoro/Piper server instead). See [TODO.md](../TODO.md). Docker rebuilding is verified; live external provider tests remain BLOCKED_EXTERNAL (no provider credentials in this environment).
+**Remaining honest gaps (2026-10-22):** inbound email, an automated per-role endpoint sweep, live third-party provider E2E (BLOCKED_EXTERNAL — no provider credentials in this environment), and Kokoro/Piper voices in the local catalog (transformers.js v4 cannot run their model type — use an OpenAI-compatible Kokoro/Piper server instead). See [TODO.md](../TODO.md). Docker rebuilding is verified; live external provider tests remain BLOCKED_EXTERNAL (no provider credentials in this environment).

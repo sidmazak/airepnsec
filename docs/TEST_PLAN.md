@@ -41,6 +41,13 @@
 | M1 | Headers | `curl -I /` | nosniff/frame denial/referrer/permissions present; HSTS+CSP in production | P1 | ✅ |
 | M2 | Rate limits | Burst login/telephony | 429 after threshold | P1 | ✅ login; telephony not load-tested |
 | N1 | RBAC | Viewer mutation; agent admin action | 403 both | P0 | ✅ curl |
+|---|---|---|---|---|---|
+| O1 | SSO SAML | Start flow → redirect to IdP | 307 to IdP SSO URL with SAMLRequest | P0 | ✅ curl |
+| O2 | SSO SAML | ACS verifies signature + InResponseTo | Valid signed response → session; tampered/unsigned → 307 to '/' | P0 | ✅ curl |
+| O3 | SSO SAML | SP metadata endpoint | Returns valid SAML metadata XML | P0 | ✅ curl |
+| O4 | SSO OIDC | Start flow → redirect to IdP | 307 to authorization endpoint with PKCE | P0 | ✅ curl |
+| O5 | SSO OIDC | Callback verifies ID token | Valid token → session; bad sig/iss/aud/nonce → 307 to '/' | P0 | ✅ curl |
+| O6 | SSO SCIM | Create/read/update/deactivate user | CRUD via `/api/scim/v2/Users`; bearer auth | P0 | ✅ curl |
 | V1 | Voice | Browser Web Speech test call | Transcript + assistant reply; no audio persisted | P0 | ✅ browser |
 | V2 | Telephony | Signed/unsigned voice webhook + gather | Unsigned 403; signed TwiML; gather runs one validated turn | P0 | ✅ curl |
 | V3 | SMS/WhatsApp | Opt-out + outbox honesty | Inbound stored, nothing sent; failure queued/skipped with reason | P0 | ✅ curl |

@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 
 export type AuditInput = {
   orgId: string
-  actorType?: 'user' | 'ai' | 'system' | 'webhook'
+  actorType?: 'user' | 'ai' | 'system' | 'webhook' | 'scim'
   actorId?: string
   action: string
   entity?: string

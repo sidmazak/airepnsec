@@ -64,6 +64,8 @@ model Organization {
   telephonyLines   TelephonyLine[]
   telephonyCalls   TelephonyCall[]
   settings         AppSetting[]
+  ssoConfigs       SsoConfig[]
+  scimConfig       ScimConfig?
 }
 
 model User {
@@ -77,15 +79,50 @@ model User {
   twoFactorSecret String   @default("") // AES-256-GCM encrypted TOTP secret (only meaningful while enrolling/enabled)
   twoFactorEnabled Boolean @default(false)
   twoFactorLastCounter Int @default(0) // highest consumed TOTP step — blocks replay of the same code
+  // Last login timestamp — feeds the sliding time-window permissions policy.
   lastLoginAt     DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  // Federation: an OIDC/SAML subject claim links a remote IdP user to this local row.
+  ssoProvider     String   @default("") // oidc | saml (empty = local only)
+  ssoSubject      String   @default("") // claim.sub or nameId from the IdP
   organization    Organization @relation(fields: [orgId], references: [id])
   sessions        Session[]
   invitesSent     Invite[]
   resetTokens     PasswordResetToken[]
+}
+
+/// Federated sign-in configuration for one organisation and one protocol. One row
+/// per (org, kind); `enabled` is a flag turned on from the admin UI after the operator
+/// confirms the IdP token signing / account-linking policy in place. `secrets` holds the
+/// encrypted client secret / certificate so nothing sensitive leaves the server.
+model SsoConfig {
+  id        String   @id @default(cuid())
+  orgId     String
+  kind      String   // oidc | saml
+  enabled   Boolean  @default(false)
+  config    String   @default("{}") // JSON: issuer/issuerUrl, clientId, redirectUri, scopes[], autoProvision, defaultRole, domainAllowlist[]
+  secrets   String   @default("{}") // JSON: encrypted values (client secret, idp cert, etc.)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  @@unique([orgId, kind])
   @@index([orgId])
-  @@index([orgId, role])
+}
+
+/// SCIM 2.0 provisioning for one organisation. The IdP calls back here to create/manage
+/// users; the admin hands out the bear-token via the UI and revokes it at will. Passwords
+/// provisioned through SCIM are random until the user resets via the standard flow.
+model ScimConfig {
+  id          String   @id @default(cuid())
+  orgId       String
+  url         String   @default("") // absolute SCIM endpoint
+  enabled     Boolean  @default(true)
+  tokenHash   String   @unique // hashed SCIM bear token (SHA-256 of the plain token)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id])
+  @@unique([orgId])
 }
 
 /// A pending invitation to join the organisation. The token is stored hashed —
