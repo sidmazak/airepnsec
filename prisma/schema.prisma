@@ -99,6 +99,23 @@ model AppSetting {
   @@unique([orgId, key])
 }
 
+/**
+ * Instance-wide lease for background workers. A single row per worker name makes
+ * the automation runner / outbox dispatcher / data-source sync safe when more than
+ * one app instance (or a manual "run now" request) fires at the same time.
+ * `expiresAt` is moved into the past on clean completion; a crashed holder is
+ * recovered automatically once the TTL lapses.
+ */
+model WorkerLease {
+  name      String    @id
+  holder    String    @default("")
+  expiresAt DateTime
+  lastRunAt DateTime?
+  lastError String    @default("")
+  updatedAt DateTime  @updatedAt
+  @@index([expiresAt])
+}
+
 model Customer {
   id              String   @id @default(cuid())
   orgId           String
@@ -378,12 +395,17 @@ model Conversation {
   id          String   @id @default(cuid())
   orgId       String
   customerId  String?
-  channel     String   @default("web") // web | voice_test | phone | sms
+  channel     String   @default("web") // web | voice_test | phone | sms | whatsapp | realtime
   status      String   @default("open") // open | waiting_human | closed
   aiEnabled   Boolean  @default(true)
   summary     String   @default("")
   contactName String   @default("")
   externalRef String   @default("") // telephony thread key: Twilio CallSid (voice) or "sms:{from}" (sms)
+  // Serializes overlapping receptionist turns for the same thread (two SMS arriving
+  // together, web chat double-send, voice gather racing a status callback). The
+  // token prevents one worker from releasing a lock another worker now owns.
+  turnLockToken String   @default("")
+  turnLockedAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   organization Organization @relation(fields: [orgId], references: [id])
@@ -429,8 +451,8 @@ model OutboxMessage {
 model ProviderConfig {
   id          String   @id @default(cuid())
   orgId       String
-  capability  String   // llm | embedding | stt | tts | rerank | vision
-  provider    String   @default("managed") // managed | ollama | openai_compatible | browser | none
+  capability  String   // llm | embedding | stt | tts | realtime | rerank | vision
+  provider    String   @default("none") // ollama | openai_compatible | browser | local_neural | local_lexical | none
   label       String   @default("")
   baseUrl     String   @default("")
   model       String   @default("")
@@ -505,11 +527,13 @@ model AutomationRun {
 
 /**
  * Third-party integration (BYOK — bring your own key).
- * kind: smtp | twilio_sms | twilio_whatsapp | stripe | webhook_out
+ * kind: smtp | twilio_sms | twilio_whatsapp | twilio_voice | sms_gateway | stripe |
+ *       webhook_out | caldav
  * configJson: non-secret config (host, port, from address, destination URL, events…)
  * secretsEnc: AES-256-GCM encrypted JSON of secret fields — NEVER returned to the client.
- * Singleton per kind is enforced in code for smtp / twilio_sms / twilio_whatsapp / stripe;
- * webhook_out allows many rows (one per destination URL).
+ * Singleton per kind is enforced in code for smtp / twilio_sms / twilio_whatsapp /
+ * twilio_voice / sms_gateway / stripe / caldav; webhook_out allows many rows (one per
+ * destination URL).
  */
 model Integration {
   id            String    @id @default(cuid())
@@ -554,7 +578,7 @@ model TelephonyCall {
   from        String    @default("")
   to          String    @default("")
   lineId      String    @default("")
-  status      String    @default("started") // started | answered | completed | failed | missed
+  status      String    @default("started") // started | answered | completed | failed | missed | no_answer
   startedAt   DateTime  @default(now())
   endedAt     DateTime?
   durationSec Int       @default(0)

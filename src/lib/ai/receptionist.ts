@@ -7,6 +7,7 @@ import { recordPaymentClaim } from '@/lib/business/payments'
 import { computeSlots } from '@/lib/business/availability'
 import { invoiceOutstanding } from '@/lib/business/invoice'
 import { parseJson, type OrgPolicies } from '@/lib/org'
+import { withConversationTurnLock } from '@/lib/concurrency'
 import {
   localDateString,
   localDayBounds,
@@ -667,11 +668,37 @@ export type TurnResult = {
 }
 
 /**
- * Run one assistant turn: retrieve context → LLM tool loop → validated tool execution →
- * persist customer + final assistant messages. The LLM only chooses tools; every state
- * change goes through validated business services.
+ * Run one assistant turn for a conversation.
+ *
+ * Every channel (dashboard chat, public web chat, SMS, WhatsApp, phone gather,
+ * realtime tool loop) funnels through here, so the per-conversation lock below is
+ * the single place that prevents overlapping turns from interleaving replies —
+ * including when two inbound SMS arrive at the same time or two app instances
+ * process them concurrently.
  */
 export async function handleReceptionistTurn(
+  org: Organization,
+  conversationId: string,
+  userMessage: string,
+  opts: { skipInboundPersist?: boolean } = {}
+): Promise<TurnResult> {
+  const exists = await db.conversation.findFirst({
+    where: { id: conversationId, orgId: org.id },
+    select: { id: true },
+  })
+  if (!exists) throw new Error('Conversation not found')
+
+  return withConversationTurnLock(conversationId, () =>
+    runReceptionistTurn(org, conversationId, userMessage, opts)
+  )
+}
+
+/**
+ * The turn body. Callers must go through `handleReceptionistTurn` so turns are
+ * serialized; this function re-reads the conversation AFTER the lock is held so a
+ * staff takeover or a queued message is never missed.
+ */
+async function runReceptionistTurn(
   org: Organization,
   conversationId: string,
   userMessage: string,

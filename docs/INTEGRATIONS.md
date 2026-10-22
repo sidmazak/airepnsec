@@ -1,22 +1,20 @@
 # Integrations — AI Secretary
 
-How the app talks to third-party services: email (SMTP), SMS/WhatsApp (Twilio), real telephony
-(Twilio Voice inbound calls + inbound SMS), Stripe payments, CalDAV calendar push sync, and signed
-outbound webhooks. Speech recognition/synthesis for the browser **Voice Console** is not an
-integration row — it rides the AI provider layer (capabilities `stt`/`tts`, same BYOK + data-mode
-policy as chat; see [ARCHITECTURE.md](./ARCHITECTURE.md) §9). Everything here is **BYOK
-(bring your own key)** — the app ships with zero third-party accounts and makes
-no network calls until you configure a channel.
+How the app talks to third-party services: email (SMTP), SMS/WhatsApp (Twilio or a self-hosted
+SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), Stripe payments, CalDAV
+calendar sync (push + pull), and signed outbound webhooks. Speech recognition/synthesis for the
+browser **Voice Console** is not an integration row — it rides the AI provider layer (capabilities
+`stt`/`tts`, same BYOK + data-mode policy as chat; see [ARCHITECTURE.md](./ARCHITECTURE.md) §9).
+Everything here is **BYOK (bring your own key)** — the app ships with zero third-party accounts and
+makes no network calls until you configure a channel.
 
 Status summary (details per section below): integrations CRUD, the outbox
 dispatcher, Stripe payment links + signature-verified webhooks, generic inbound
 payment webhooks, outbound signed webhooks, the ICS calendar feed, the real
-phone/SMS receptionist (Twilio Voice webhooks), and CalDAV push sync are
-**implemented and live** (see the capability ledger in
-[IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md)). The per-kind connection
-*test routines* are implemented in the connector layer but are **not yet
-exposed as an HTTP endpoint** — enabling an integration and dispatching a real
-message is the current verification path.
+phone/SMS receptionist (Twilio Voice webhooks), SMS-gateway delivery, and
+CalDAV push/pull sync are **implemented and live**. Every kind has a real
+connection test exposed at `POST /api/integrations/[id]/test` (results stored in
+`lastTest*` and shown on the card); the test never claims message delivery.
 
 ## 1. Philosophy
 
@@ -41,8 +39,9 @@ message is the current verification path.
 ### Dispatcher mechanics (`src/lib/integrations/dispatcher.ts`)
 
 - Runs **every 30 s** in-process (worker in `src/instrumentation.ts`), batch of
-  15 queued messages whose `scheduledFor <= now`, FIFO by creation. A lock
-  guarantees a message is never delivered twice concurrently.
+  15 queued messages whose `scheduledFor <= now`, FIFO by creation. A DB
+  `WorkerLease` (single-flight, TTL-recovered) guarantees a message is never
+  delivered twice concurrently, including across replicas.
 - **Channel not configured** → message stays `queued` with reason
   `waiting for <channel> integration (configure in Integrations)` and a
   **10-minute recheck**, so it is picked up the moment you configure the
@@ -56,7 +55,8 @@ message is the current verification path.
   tick.
 - **Manual flush**: `POST /api/outbox/dispatch` (owner/admin) releases the
   backoff for every enabled channel and dispatches immediately — returns
-  `{ ok, stats: { processed, sent, failed, waiting } }`.
+  `{ ok, stats: { processed, sent, failed, waiting } }`; `409 worker_busy` when
+  the dispatcher lease is held.
 - `inapp` channel messages are marked `sent` immediately (delivery is the UI).
 
 ## 2. Kind-by-kind reference
@@ -64,8 +64,8 @@ message is the current verification path.
 Config = non-secret fields (`configJson`), Secrets = encrypted fields.
 `GET /api/integrations` returns config plus `configured`, `enabled`,
 `lastTestAt/Ok/Error` — never secrets. Singleton kinds (one row per org):
-`smtp`, `twilio_sms`, `twilio_whatsapp`, `twilio_voice`, `caldav`, `stripe`;
-`webhook_out` allows one row per destination URL.
+`smtp`, `twilio_sms`, `twilio_whatsapp`, `twilio_voice`, `sms_gateway`, `caldav`,
+`stripe`; `webhook_out` allows one row per destination URL.
 
 ### `smtp` — email delivery
 
@@ -91,6 +91,21 @@ already_configured`.
 | Delivery | `POST …/Messages.json` (form: `To`, `From`, `Body`), Basic auth, 15 s timeout; for `twilio_whatsapp` the destination is normalized to `whatsapp:+…`. Returns the Twilio message `sid` into the audit trail. |
 | Failure examples | `Twilio API rejected the credentials (HTTP 401): Authenticate` (bad authToken) · `Twilio error 400: Unable to create record: The 'To' number is not a valid phone number` · `From` number not WhatsApp-enabled → Twilio 400/401 on send. |
 
+### `sms_gateway` — BYO Android modem / HTTP SMS bridge
+
+| | |
+|---|---|
+| Config | `provider` (required): `textbee`, `httpsms`, `android_sms_gateway`, or `generic_http`; `baseUrl?` (override the provider default); `from?` (required for httpSMS); `deviceId?` (TextBee); generic_http: `url` (required), `method` (`POST`/`PUT`), `authHeaderName?`, `bodyTemplate?`, `testRecipient?` |
+| Secrets | Provider-dependent: `apiKey?` (TextBee/httpSMS), `token?` or `username`+`password?` (android-sms-gateway; local mode may need none), `authValue?` (generic custom header). Absent credentials are legitimate; sends/tests fail honestly. |
+| Test routine | Read-only probe: TextBee `GET /gateway/devices`, httpSMS `GET /v1/messages?limit=1`, android-sms-gateway `GET /3rdparty/v1/messages?limit=1` (10 s). `generic_http` has no standard probe — it **sends a real SMS** to `testRecipient` if set, otherwise returns an explicit "set a testRecipient" failure. |
+| Delivery | `sendOrgSms()` prefers an enabled `twilio_sms` row; otherwise the enabled `sms_gateway`. Requests: TextBee `POST /gateway/send-sms`, httpSMS `POST /v1/messages/send`, android-sms-gateway `POST /3rdparty/v1/messages`, generic template with `{{to}}`/`{{message}}`/`{{from}}`. |
+| Honesty | HTTP 2xx means **accepted by the gateway**, not delivered to a handset. `statusReason` says "awaiting handset delivery"; delivery receipts require separate gateway webhooks (not implemented). Errors are sanitized/redacted. |
+| Wiring | Create the row, add credentials, click **Test**, enable it. Pending SMS outbox rows are nudged and retried on the next 30 s tick. |
+
+`generic_http` SSRF note: private/LAN addresses are intentionally allowed here because a
+self-hosted bridge is the normal deployment. Point it only at your own bridge; the URL is
+admin-supplied and never customer-controlled.
+
 ### `stripe` — payment links + payment webhooks
 
 | | |
@@ -106,9 +121,9 @@ Full payment flow in §4.
 
 | | |
 |---|---|
-| Config | `url` (required, http(s)) — one integration per destination URL |
+| Config | `url` (required, http(s)) — one integration per destination URL; `allowPrivate?` (default false) — explicit owner/admin opt-in for LAN/loopback receivers (SSRF guard otherwise rejects them) |
 | Secrets | `secret?` — optional signing secret; omit for unsigned delivery |
-| Test routine | Really POSTs `{event:"integration.test", sentAt, org}` to the URL with the same signing scheme, expects a 2xx within 8 s. |
+| Test routine | Validates the destination through the shared SSRF guard, then really POSTs `{event:"integration.test", sentAt, org}` with the same signing scheme, expecting 2xx within 8 s. |
 | Delivery | see §6. |
 
 `webhook_out` may be enabled without a secret (unsigned mode is explicit —
@@ -144,14 +159,14 @@ will fail behind proxies. Every attempt is stored in `WebhookEvent` with `signat
 `result` (`received | processed | duplicate | rejected`), and a previously rejected event never
 blocks a properly signed retry.
 
-### `caldav` — calendar push sync (bookings → your calendar)
+### `caldav` — two-way calendar sync (bookings ↔ your calendar)
 
 | | |
 |---|---|
 | Config | `url` (required — the CalDAV **calendar collection** URL, not the account root, e.g. `https://host/user/calendar/`), `username?` |
 | Secrets | `password?` — **optional** (some local servers allow anonymous writes). Use an **app password** wherever the provider requires one (Nextcloud, Fastmail, iCloud). |
 | Test routine | Real `PROPFIND` against the collection (15 s timeout); `207`/`200` = alive → `CalDAV collection verified (207, calendar collection) at …`. Honest failures: `401` (check username/app-password), `403` (collection denied), `404` (point at the collection, not the account root), anything else → "is this a CalDAV collection?" |
-| Sync | `POST /api/integrations/caldav-sync` (owner/admin; the **Sync now** button on the card) pushes upcoming `pending|confirmed` bookings (default next 45 days, `days` 1–120, cap 500) as `booking-{id}@{orgslug}.ics` via idempotent `PUT` — RFC 5545 VEVENTs with UTC stamps, folding/escaping, and an `X-AIS-ORG` org marker. Per-item results (`pushed/failed/total`); the last-sync summary is persisted and shown on the card. A PROPFIND health check runs first (unless `verifyFirst: false`) and updates `lastTest*`. |
+| Sync | `POST /api/integrations/caldav-sync` (owner/admin; the **Sync now** button) defaults to `direction: both` for upcoming `pending|confirmed` bookings (default next 45 days, `days` 1–120). **Push:** idempotent `PUT` of `booking-{id}@{orgslug}.ics` (RFC 5545 VEVENTs, UTC stamps, folding/escaping, `X-AIS-ORG`), cap 500. **Pull:** reads events back — remote `STATUS:CANCELLED` cancels the booking; a moved `DTSTART` reschedules through the validated booking service (out-of-hours/conflict → per-item `failed`, never partially applied); remotely deleted events are reported `missing` and deliberately do **not** cancel local bookings. A PROPFIND health check runs first (unless `verifyFirst: false`) and updates `lastTest*`. Per-item results and a persisted summary (`caldav_sync:<integrationId>`) drive the card. |
 
 Server examples:
 
@@ -168,9 +183,12 @@ Server examples:
 - **iCloud**: url `https://caldav.icloud.com/<user>/calendars/`, password = an app-specific
   password.
 
-This is **push** (one-way, app → calendar): upserts are idempotent per booking UID. A
-`deleteRemoteEvent` helper exists in the connector layer but is not wired to any endpoint yet —
-pull/two-way sync is documented future work (see [ARCHITECTURE.md](./ARCHITECTURE.md) §9).
+This is **two-way but conservative**: pushes are idempotent per booking UID; pulls apply only
+explicit cancellation or a moved start time. A missing remote event is surfaced as `missing`
+(a never-pushed or manually-deleted event) and never auto-cancels a booking, so an accidental
+calendar wipe cannot destroy the local schedule. Push only covers `pending|confirmed` bookings;
+there is no delete-on-cancel push, so a locally cancelled booking's remote event is left for the
+operator to remove (and is reported `missing` only after that).
 
 ## 3. The outbox
 

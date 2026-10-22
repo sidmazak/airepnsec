@@ -674,3 +674,76 @@ Work Log:
 
 Stage Summary:
 - Tour no longer shows empty/misplaced highlights; off-screen targets are scrolled into view; mobile gets centered modals. All checks green.
+
+---
+Task ID: 21
+Agent: completion pass
+Task: Iteration 2 — production hardening, concurrency, PABX routing, docs truth pass
+
+Work Log:
+- **Concurrency / workers:** added DB-backed `WorkerLease` (`src/lib/concurrency.ts`) + `src/lib/db-tuning.ts`; instrumentation now runs automation (60 s), outbox (30 s), and datasource auto-sync (60 s) workers under single-flight leases with TTL recovery (`AIS_DISABLE_WORKERS`, `AIS_WORKER_*` toggles). Manual `/api/automations/run`, `/api/outbox/dispatch`, `/api/datasources/[id]/sync` return honest `409 worker_busy` / `sync_busy` instead of racing. Added a DB-backed per-conversation turn lock so concurrent chat/SMS/voice turns return `409 conversation_busy` instead of interleaving.
+- **SQLite tuning:** WAL, `busy_timeout=5000`, `synchronous=NORMAL` at boot; `/api/health/detail` now reports live journal mode/busy timeout plus per-worker lease status and provider state.
+- **Telephony:** PABX line model/endpoints (`/api/telephony/lines[/id]`) with least-busy (real active calls), CAS round-robin, redirect; `TelephonyLine` / `TelephonyCall`; status callback prefers `DialCallStatus`; shared no-input state; incoming calls record calls and route via `<Dial>`; rate limits raised to 300–600/min.
+- **Security/API:** persistent session revocation (logout + `/api/auth/sessions/revoke-all`), per-IP login limit (30/min) beside per-email (10/min); integration/telephony/datasource rate-limit knobs; `next.config.ts` headers (nosniff/frame deny/referrer/permissions/COOP/HSTS/CSP), favicon, Radix dialog description IDs.
+- **Packaging/UI:** Docker `DATABASE_PROVIDER=sqlite|postgresql`, `.next/static` + `public/` copied into standalone, OpenSSL in runtime; disabled build-error ignoring and enabled strict mode; diagnostics/usage/integration UI updated for tests and truthful states; credentials dialog form semantics fixed. Remaining non-fatal browser DOM warning: password inputs outside forms in AI Providers/Security.
+- **AI providers:** corrected STT capability kinds to `browser | openai_compatible` (removed unsupported `ollama`); no managed/hosted provider exists.
+- **Docs (truth pass):** rewrote/updated README, IMPLEMENTATION_PLAN, ARCHITECTURE, DATA_MODEL, SECURITY, SELF_HOSTING, INTEGRATIONS, PRODUCT_SPEC, TEST_PLAN, API, AGENTS (30 models, node:test/CI), ALL audit docs (FEATURE_MATRIX, PROVIDER_MATRIX, SECURITY_AUDIT, REMEDIATION_PLAN, TEST_GAPS, ITERATION_LOG); marked INITIAL_AUDIT/RAG_AUDIT historical. Removed stale claims: integration tests are exposed, Stripe/PABX/WhatsApp/CalDAV two-way exist, no deterministic assistant fallback, no `sandbox SDK`, no user-management API/UI.
+- **Verification:** `npx tsc --noEmit` clean; `npm run lint` clean; `npm run test:unit` 27/27 pass (SMS adapters, TTS chunking, SQL guard, TOTP vectors, telephony routing/status). API smoke: health/detail DB+workers, lease-busy 409s, session revoke-all, telephony-lines CRUD, CalDAV pull cancel/reschedule/missing semantics, Stripe/generic webhook idempotency/overpay/signature paths. Browser pass covered sections/dialogs/guided tour; no new browser pass after the final docs-only changes.
+- **Blocked/known:** Docker rebuild not verifiable here (no daemon); external Twilio/Stripe/SMTP/CalDAV/pg/mysql credentials unavailable (BLOCKED_EXTERNAL); accepted risks remain (per-process rate limits, spoofable first `x-forwarded-for` without trusted proxy, admin-supplied outbound webhook SSRF, at-least-once outbox after crash, DNS-rebind TOCTOU S10); no multi-user management API/UI. `npm run build` intentionally not run locally (CI runs it).
+
+Stage Summary:
+- Iteration 2 closes the concurrency/worker/PABX/SQLite/packaging gaps and aligns all docs with shipped behavior. All local checks green; remaining gaps are explicitly documented and not faked. Docker/credential-dependent verification remains for a configured host.
+
+---
+Task ID: 22
+Agent: docs + ops pass
+Task: Documentation truth pass, architecture diagrams, readiness probe and self-host packaging audit
+
+Work Log:
+- Rewrote README as the definitive project map (features, diagrams, quick start, self-hosting, operations, security, testing, limitations, troubleshooting) and corrected stale provider/deployment claims.
+- Rewrote `docs/SELF_HOSTING.md` with Postgres/SQLite/systemd profiles, env reference, safe additive schema boot, readiness/liveness checks, APP_SECRET rotation warning, tested backup/restore commands, upgrades/rollback, monitoring and troubleshooting. Rewrote `infra/README.md` and aligned `infra/.env.example` (blank required password forces setup; blank APP_SECRET generates a secure key file).
+- Added Mermaid diagrams: system context + module map and deployment topology in ARCHITECTURE; request and worker sequences; high-level ER diagram in DATA_MODEL; README contains system, request, inbound-turn and worker diagrams. Corrected request-lifecycle auth wording (SHA-256 hashed random session token, not HMAC) and worker intervals (automation 60s, outbox 30s, datasource 5m).
+- Added `GET /api/health/ready` (public): real `SELECT 1`, `{ok,db,latencyMs,time}` or `503`; Dockerfile HEALTHCHECK now uses it. Documented readiness in README/API/ARCHITECTURE/TEST_PLAN/infra docs. Counts updated to 97 route files / 122 handlers.
+- Audited Dockerfile/compose: additive-only `prisma db push --skip-generate`, no `--accept-data-loss`, stdlib asset copy corrected, persistent `.data`/`backups`/`.models`, log rotation, init/graceful stop, Postgres dependency health, SQLite single-instance profile. Remaining honest caveat: no Docker daemon here, so packaging must be rebuilt/smoke-tested on a host.
+- Verification: `npx tsc --noEmit` clean; `npm run lint` clean; `npm run test:unit` 27/27 pass; dev server `/api/health/ready` returned 200 `{ok:true,db:"ok",latencyMs:2}`; docs counts re-measured (97/122).
+- Not run: `npm run build` (per repo policy; CI owns it), Docker build (no daemon), external provider live tests (no credentials). No source behavior changed in this pass except the readiness endpoint/doc-driven packaging.
+
+Stage Summary:
+- Documentation now matches shipped behavior, with honest verification boundaries. Readiness probing and self-host instructions are operational. All local checks green.
+
+---
+Task ID: 23
+Agent: final consistency pass
+Task: Close documentation/behavior gaps found in final audit
+
+Work Log:
+- Added a guard to `POST /api/admin/backup`: it now returns `400 unsupported_database` on PostgreSQL instead of attempting SQLite-only `VACUUM INTO`; docs point to `pg_dump`. SQLite behavior unchanged.
+- Converted the remaining ASCII request-lifecycle flow in ARCHITECTURE to Mermaid and documented auth/validation ordering and per-service audit coupling.
+- Removed unsupported "Docker image was verified earlier" claims from ARCHITECTURE, IMPLEMENTATION_PLAN, Dockerfile and compose; all now state the packaging must be rebuilt/smoke-tested on the host.
+- Corrected `PUBLIC_BASE_URL` comments: it is only a Twilio signature-verification fallback (integration `publicBaseUrl` wins), not a payment-webhook setting.
+- Re-ran `npx tsc --noEmit`, `npm run lint`, `npm run test:unit` (27/27) and `/api/health/ready` (200, DB ok) after the changes.
+
+Stage Summary:
+- Final docs and backup behavior are consistent. All local checks green; host-only Docker/provider verification remains explicitly documented.
+
+---
+
+Task ID: 24
+Agent: Docker + SSRF verification pass
+Task: Host Docker rebuild/smoke tests, packaging fixes, outbound webhook SSRF closure
+
+Work Log:
+- Started Docker Desktop and built/ran both Compose profiles from `infra/`:
+  - PostgreSQL at `localhost:3100` (`ais-smoke`): app + db healthy, schema boot, demo seed (including duplicate seed), login, health detail, JSON export, CSRF rejection, PostgreSQL backup guard, readiness, ONNX model ready.
+  - SQLite at `localhost:3101` (`ais-smoke-sqlite`): healthy, schema boot, demo seed, login, SQLite backup (`VACUUM INTO`), readiness 200, ONNX model ready.
+- Fixed standalone runtime packaging: copy `onnxruntime-node` and the complete `onnxruntime-common` package into the runtime `node_modules`, pruning foreign-platform binaries; verified `[ai] local embedding model ready` in both containers.
+- Fixed demo seed on PostgreSQL: provider config defaults now use `upsert` instead of `create`, avoiding the unique constraint on repeat/fresh seed runs; duplicate `/api/demo/seed` returns the same org without error.
+- Added PostgreSQL guard to `POST /api/admin/backup` (`400 unsupported_database`); SQLite snapshots unchanged.
+- Added `APP_PORT` host-port override to both Compose profiles and documented it; `.env.example` leaves `POSTGRES_PASSWORD` blank so Compose fails closed until configured.
+- Added shared `src/lib/security/outbound.ts` (`isPrivateIp`, `assertOutboundUrl`) and migrated datasource adapters to it. Applied the guard to outbound webhook test + delivery; private/local targets are blocked unless the owner/admin explicitly enables `allowPrivate` in the integration config/UI.
+- Added `tests/unit/outbound-url.test.mts` (5 cases): private IPv4/IPv6 detection, public literals, protocol rejection, explicit private opt-in.
+- Updated README, SELF_HOSTING, ARCHITECTURE, IMPLEMENTATION_PLAN, infra docs, SECURITY_AUDIT (S11 fixed), TEST_GAPS, ITERATION_LOG and REMEDIATION_PLAN with verified Docker status. S10 DNS-rebind TOCTOU remains documented open (no IP pinning).
+- Verification: `npx tsc --noEmit` clean, `npm run lint` clean, `npm run test:unit` 32/32 pass; live API webhook test with `http://127.0.0.1:9/hook` returned the SSRF rejection on both dev and rebuilt PostgreSQL container.
+
+Stage Summary:
+- Both Docker profiles are genuinely built and smoke-tested on this host. Packaging defects and the webhook SSRF gap are fixed with tests. External Twilio/Stripe/SMTP/CalDAV/pg/mysql live tests remain BLOCKED_EXTERNAL; S10 remains an accepted documented risk.

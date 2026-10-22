@@ -10,7 +10,7 @@ export type ProviderKind = 'ollama' | 'openai_compatible' | 'browser' | 'local_n
 export const CAPABILITY_INFO: Record<Capability, { label: string; description: string; kinds: ProviderKind[] }> = {
   llm: { label: 'Conversation model (LLM)', description: 'Powers the AI receptionist chat and voice replies. Bring your own local Ollama model or an OpenAI-compatible endpoint.', kinds: ['ollama', 'openai_compatible', 'none'] },
   embedding: { label: 'Knowledge retrieval (RAG embeddings)', description: 'Embeds and retrieves your approved documents. The built-in neural model runs entirely on this machine.', kinds: ['local_neural', 'ollama', 'openai_compatible', 'local_lexical'] },
-  stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The browser mic path works out of the box.', kinds: ['browser', 'openai_compatible', 'ollama'] },
+  stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The browser mic path works out of the box.', kinds: ['browser', 'openai_compatible'] },
   tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The browser synth path works out of the box.', kinds: ['browser', 'openai_compatible'] },
   realtime: { label: 'Realtime voice (optional)', description: 'Low-latency WebRTC voice with an OpenAI-compatible realtime endpoint. Falls back to the conversation model when not set.', kinds: ['none', 'openai_compatible'] },
   rerank: { label: 'Reranking (optional)', description: 'Improves ordering of retrieved knowledge. Optional.', kinds: ['none', 'openai_compatible'] },

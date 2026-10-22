@@ -8,11 +8,9 @@ import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams,
   logWebhook, plainResponse, twiml, gatherSpeech, say, dialNumber, hangup,
 } from '@/lib/telephony/twiml'
+import { bumpNoInput, resetNoInput } from '@/lib/telephony/no-input'
 
 export const pathname = '/api/telephony/voice/gather'
-
-/** In-memory consecutive no-input counter per call (worst case after restart: one extra reprompt). */
-const noInputCounts = new Map<string, number>()
 
 /**
  * POST /api/telephony/voice/gather — Twilio speech-result webhook.
@@ -64,10 +62,9 @@ export const POST = withPublic(async (req: NextRequest) => {
   }
 
   if (!speech) {
-    const misses = (noInputCounts.get(callSid) ?? 0) + 1
-    noInputCounts.set(callSid, misses)
+    const misses = bumpNoInput(callSid)
     if (misses >= 3) {
-      noInputCounts.delete(callSid)
+      resetNoInput(callSid)
       await db.conversation.update({ where: { id: conversation.id }, data: { status: 'closed' } })
       await audit({ orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice', action: 'telephony.call_ended', entity: 'conversation', entityId: conversation.id, meta: { callSid, reason: 'no_input' } })
       return twiml(say('It seems we got disconnected. Do give us a call back — goodbye.', { voice: voiceName, language }) + hangup)
@@ -77,7 +74,7 @@ export const POST = withPublic(async (req: NextRequest) => {
       language, voiceName,
     }))
   }
-  noInputCounts.delete(callSid)
+  resetNoInput(callSid)
 
   await logWebhook({ orgId: org.id, provider: 'twilio_voice', eventId: `gather:${callSid}:${Date.now()}`, payload: { ...params, SpeechResult: speech.slice(0, 400) }, signatureValid: true, result: 'processed' })
 
@@ -110,4 +107,4 @@ export const POST = withPublic(async (req: NextRequest) => {
     say(reply, { voice: voiceName, language }) +
     gatherSpeech('/api/telephony/voice/gather', { sayText: 'Is there anything else I can help you with?', language, voiceName })
   )
-})
+}, { rateLimit: { limit: 600 } })

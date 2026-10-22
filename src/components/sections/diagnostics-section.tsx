@@ -35,11 +35,22 @@ import {
 
 type ProviderMini = { provider?: string; enabled?: boolean; lastTestOk?: boolean }
 
+type WorkerRow = {
+  name: 'automation' | 'outbox' | 'datasources'
+  enabled?: boolean
+  running?: boolean
+  lastRunAt?: string | null
+  lastError?: string
+  leaseExpiresAt?: string | null
+}
+
 type HealthDetail = {
   db?: boolean
+  database?: { kind?: string; journalMode?: string; busyTimeoutMs?: number | null } | null
   encryptionKey?: boolean
   webhookSecret?: boolean
   workerHeartbeat?: { lastTick?: string | null; healthy?: boolean }
+  workers?: WorkerRow[]
   providers?: { llm?: ProviderMini; embedding?: ProviderMini }
   counts?: {
     customers?: number
@@ -58,6 +69,18 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const WORKER_LABELS: Record<string, string> = {
+  automation: 'Automation engine',
+  outbox: 'Outbox dispatcher',
+  datasources: 'Data-source sync',
+}
+
+const WORKER_DESCRIPTIONS: Record<string, string> = {
+  automation: 'Runs scheduled triggers, reminders, and escalation follow-ups every 60 seconds.',
+  outbox: 'Delivers queued email / SMS / WhatsApp / webhook messages every 30 seconds with backoff.',
+  datasources: 'Re-pulls enabled external data sources when their sync interval is due.',
 }
 
 const DATA_MODE_INFO: Record<string, { label: string; body: string }> = {
@@ -221,6 +244,15 @@ export function DiagnosticsSection() {
 
   const heartbeat = data?.workerHeartbeat
   const heartbeatHealthy = heartbeat?.healthy === true
+  const automationWorker = data?.workers?.find((w) => w.name === 'automation')
+  const automationDisabled = automationWorker?.enabled === false
+  const dbDetail = data?.database
+    ? data.database.kind === 'sqlite'
+      ? `SQLite · journal ${data.database.journalMode ?? 'unknown'} · busy timeout ${data.database.busyTimeoutMs ?? 0} ms`
+      : data.database.kind === 'postgres'
+        ? 'PostgreSQL'
+        : `Database kind: ${data.database.kind ?? 'unknown'}`
+    : undefined
   const llm = data?.providers?.llm
   const embedding = data?.providers?.embedding
   const counts = data?.counts
@@ -262,7 +294,7 @@ export function DiagnosticsSection() {
         </div>
       </div>
 
-      {!heartbeatHealthy && (
+      {!heartbeatHealthy && !automationDisabled && (
         <Alert role="alert" className="border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
           <TriangleAlert className="h-4 w-4" aria-hidden />
           <AlertTitle>Automation worker is not ticking</AlertTitle>
@@ -308,6 +340,7 @@ export function DiagnosticsSection() {
                       ? 'Database check failed — records cannot be read or written right now.'
                       : 'Not reported by the server.'
                 }
+                detail={dbDetail}
               />
               <CheckRow
                 state={tri(data?.encryptionKey)}
@@ -378,6 +411,73 @@ export function DiagnosticsSection() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Activity className="h-4 w-4" aria-hidden />
+            Background workers
+          </CardTitle>
+          <CardDescription>
+            Lease-protected across app instances — only one instance runs each worker at a time. Turn workers off on
+            web-only instances with <code className="text-xs">AIS_DISABLE_WORKERS=1</code>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!data?.workers?.length ? (
+            <p className="text-sm text-muted-foreground">Worker state was not reported by the server.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Worker</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Last run</TableHead>
+                  <TableHead>Last error</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.workers.map((worker) => (
+                  <TableRow key={worker.name}>
+                    <TableCell className="min-w-0">
+                      <p className="text-sm font-medium">{WORKER_LABELS[worker.name] ?? worker.name}</p>
+                      <p className="text-xs text-muted-foreground">{WORKER_DESCRIPTIONS[worker.name] ?? ''}</p>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1.5">
+                        <Badge variant={worker.enabled === false ? 'secondary' : 'default'}>
+                          {worker.enabled === false ? 'Disabled' : 'Enabled'}
+                        </Badge>
+                        {worker.enabled !== false && (
+                          <Badge variant={worker.running ? 'default' : 'outline'}>
+                            {worker.running ? 'Running' : 'Idle'}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                      {worker.lastRunAt ? formatDateTime(worker.lastRunAt) : 'Never'}
+                    </TableCell>
+                    <TableCell className="max-w-[24rem] text-xs text-muted-foreground">
+                      {worker.lastError ? (
+                        <span className="text-destructive break-words">{worker.lastError}</span>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          {automationDisabled && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              The automation worker is disabled by environment configuration on this instance. Run a dedicated worker
+              instance with <code>AIS_WORKER_AUTOMATION=1</code> if scheduled jobs should run.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>

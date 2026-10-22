@@ -167,10 +167,10 @@ function CopyButton({ value, label, className }: { value: string; label: string;
 
 /* ------------------------------ drafts ------------------------------ */
 
-type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string; baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string }
+type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string; baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean }
 type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string; password: string; apiKey: string; username: string; passwordGw: string; token: string; authValue: string }
 
-const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee', baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '' }
+const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee', baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false }
 const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '', apiKey: '', username: '', passwordGw: '', token: '', authValue: '' }
 
 function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
@@ -205,7 +205,11 @@ function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
     if (d.username.trim()) out.username = d.username.trim()
     return out
   }
-  if (kind === 'webhook_out') return { url: d.url.trim() }
+  if (kind === 'webhook_out') {
+    const out: Record<string, unknown> = { url: d.url.trim() }
+    if (d.allowPrivate) out.allowPrivate = true
+    return out
+  }
   return {} // stripe — config only holds secrets
 }
 
@@ -353,6 +357,7 @@ function ConnectorCard({
       provider: str(c.provider) || 'textbee', baseUrl: str(c.baseUrl), deviceId: str(c.deviceId),
       method: str(c.method) || 'POST', authHeaderName: str(c.authHeaderName),
       bodyTemplate: str(c.bodyTemplate), testRecipient: str(c.testRecipient),
+      allowPrivate: c.allowPrivate === true,
     })
     setDlgOpen(true)
   }
@@ -631,15 +636,22 @@ function ConfigureDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto" aria-describedby={`int-desc-${kind}`}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{existing ? `Configure ${meta.title}` : `Set up ${meta.title}`}</DialogTitle>
-          <DialogDescription id={`int-desc-${kind}`}>
+          <DialogDescription>
             {existing ? 'Changes apply to future sends immediately. Saved credentials are never shown again.' : meta.blurb}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (busy) return
+            void save(false).then((ok) => { if (ok) onOpenChange(false) })
+          }}
+        >
           {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
 
           {kind === 'smtp' && (
@@ -726,9 +738,18 @@ function ConfigureDialog({
           )}
 
           {kind === 'webhook_out' && (
-            <div className="space-y-1.5">
-              <Label htmlFor={`${idBase}-url`}>Destination URL</Label>
-              <Input id={`${idBase}-url`} type="url" value={cfg.url} onChange={(e) => setCfg((s) => ({ ...s, url: e.target.value }))} placeholder="https://hooks.zapier.com/hooks/catch/…" autoComplete="off" className="min-h-[44px]" />
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-url`}>Destination URL</Label>
+                <Input id={`${idBase}-url`} type="url" value={cfg.url} onChange={(e) => setCfg((s) => ({ ...s, url: e.target.value }))} placeholder="https://hooks.zapier.com/hooks/catch/…" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+                <div>
+                  <Label htmlFor={`${idBase}-private`}>Allow private/local destination</Label>
+                  <p className="text-xs text-muted-foreground">Off blocks loopback/LAN URLs (SSRF protection). Enable only for a trusted self-hosted receiver.</p>
+                </div>
+                <Switch id={`${idBase}-private`} checked={cfg.allowPrivate} onCheckedChange={(v) => setCfg((s) => ({ ...s, allowPrivate: v }))} aria-label="Allow private webhook destination" />
+              </div>
             </div>
           )}
 
@@ -903,30 +924,30 @@ function ConfigureDialog({
               <AlertDescription>{testResult.ok ? 'Test passed. ' : 'Test failed. '}{testResult.detail}</AlertDescription>
             </Alert>
           )}
-        </div>
-
-        <DialogFooter className="flex-col gap-2 sm:flex-row">
-          <Button variant="outline" className="min-h-[44px]" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button
-            className="min-h-[44px]"
-            disabled={!canManage || busy}
-            onClick={async () => { if (await save(false)) onOpenChange(false) }}
-            aria-label={`Save ${meta.title}`}
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-            Save
-          </Button>
-          <Button
-            variant="outline"
-            className="min-h-[44px]"
-            disabled={!canManage || busy}
-            onClick={() => void save(true)}
-            aria-label={`Save and test ${meta.title}`}
-          >
-            {savingTest ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
-            Save &amp; test
-          </Button>
-        </DialogFooter>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button
+              type="submit"
+              className="min-h-[44px]"
+              disabled={!canManage || busy}
+              aria-label={`Save ${meta.title}`}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+              Save
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-[44px]"
+              disabled={!canManage || busy}
+              onClick={() => void save(true)}
+              aria-label={`Save and test ${meta.title}`}
+            >
+              {savingTest ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+              Save &amp; test
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )
@@ -1064,10 +1085,10 @@ function WebhookDestinationsCard({
 
       {/* add destination dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="sm:max-w-md" aria-describedby="webhook-add-desc">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add webhook destination</DialogTitle>
-            <DialogDescription id="webhook-add-desc">
+            <DialogDescription>
               Automation events are POSTed as JSON to this URL, signed with your secret (x-signature header) when one is set.
             </DialogDescription>
           </DialogHeader>

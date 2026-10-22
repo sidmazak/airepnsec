@@ -1,4 +1,5 @@
 import { DEFAULT_LIMIT, HARD_LIMIT, type DataSourceConfig, type DataSourceKind } from './registry'
+import { assertOutboundUrl } from '@/lib/security/outbound'
 
 /**
  * Data-source adapters. Each kind is normalized to a raw row array so the sync
@@ -72,58 +73,8 @@ function assertSafeTable(table: string): string {
 
 /* ---------------- SSRF guard for http_json ---------------- */
 
-function isPrivateIp(host: string): boolean {
-  const h = host.toLowerCase().replace(/^\[|\]$/g, '')
-  if (h === 'localhost' || h.endsWith('.localhost')) return true
-  if (h === '::1') return true
-  if (h.startsWith('fc') || h.startsWith('fd')) return true // unique local IPv6
-  if (h.startsWith('fe80')) return true // link-local IPv6
-  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])]
-    if (a === 10) return true
-    if (a === 127) return true
-    if (a === 0) return true
-    if (a === 169 && b === 254) return true
-    if (a === 172 && b >= 16 && b <= 31) return true
-    if (a === 192 && b === 168) return true
-  }
-  return false
-}
-
-async function assertUrlAllowed(raw: string, allowPrivate: boolean): Promise<URL> {
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    throw new Error('url is not a valid URL')
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Only http/https URLs are allowed')
-  }
-  if (!allowPrivate) {
-    // Guard 1: literal hostname (fast path, catches bracketed/numeric hosts).
-    if (isPrivateIp(url.hostname)) {
-      throw new Error('This URL points to a private/local address. Enable "allow private addresses" if this is intentional (SSRF protection).')
-    }
-    // Guard 2: resolve the hostname and reject if ANY resolved address is private.
-    // Defends against DNS records that point at internal ranges. (A determined
-    // attacker could still rebind DNS between this check and the fetch; this
-    // closes the common case and is documented as a known limitation.)
-    let addresses: Array<{ address: string }> = []
-    try {
-      const dns = await import('node:dns/promises')
-      addresses = await dns.lookup(url.hostname, { all: true })
-    } catch {
-      throw new Error('Could not resolve the endpoint hostname (DNS lookup failed)')
-    }
-    if (addresses.some((a) => isPrivateIp(a.address))) {
-      throw new Error('This URL resolves to a private/local address. Enable "allow private addresses" if this is intentional (SSRF protection).')
-    }
-  }
-  return url
-}
-
+// Shared with integrations (outbound webhooks) so every user/admin-supplied URL
+// gets the same literal + DNS-resolution checks.
 function getByPath(data: unknown, path: string | undefined): unknown {
   if (!path || !path.trim()) return data
   let cur: unknown = data
@@ -203,7 +154,7 @@ async function fetchMysql(connection: Connection, sql: string): Promise<RawFetch
 async function fetchHttpJson(connection: Connection, config: DataSourceConfig, limit: number): Promise<RawFetchResult> {
   const rawUrl = String(connection.url ?? '')
   if (!rawUrl) throw new Error('Endpoint URL is required')
-  const url = await assertUrlAllowed(rawUrl, Boolean(config.allowPrivate))
+  const url = await assertOutboundUrl(rawUrl, { allowPrivate: Boolean(config.allowPrivate), label: 'Endpoint URL' })
   const authHeader = String(connection.authHeader ?? '')
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 20_000)

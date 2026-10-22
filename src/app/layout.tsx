@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   description: "Self-hosted AI receptionist with real bookings, invoices, ledger, knowledge retrieval and phone support. Bring your own AI provider (local Ollama or OpenAI-compatible) — your data stays yours.",
   keywords: ["AI receptionist", "AI secretary", "bookings", "invoices", "self-hosted", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui"],
   authors: [{ name: "AI Secretary" }],
-  icons: { icon: "/favicon.ico" },
+  icons: { icon: [{ url: "/logo.svg", type: "image/svg+xml" }], shortcut: "/logo.svg" },
   openGraph: {
     title: "AI Secretary",
     description: "Self-hosted AI receptionist with real bookings, invoices and ledger",

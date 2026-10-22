@@ -6,8 +6,12 @@ import { parseJson } from '@/lib/org'
 import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams, logWebhook, plainResponse, twiml, say, hangup,
 } from '@/lib/telephony/twiml'
+import { resetNoInput } from '@/lib/telephony/no-input'
+import { normalizeCallStatus } from '@/lib/telephony/routing'
 
 export const pathname = '/api/telephony/voice/status'
+
+const TERMINAL = new Set(['completed', 'missed', 'failed', 'no_answer'])
 
 /** POST /api/telephony/voice/status — Twilio call status callback (signature-verified, audit only). */
 export const POST = withPublic(async (req: NextRequest) => {
@@ -39,27 +43,53 @@ export const POST = withPublic(async (req: NextRequest) => {
   })
   if (!signatureValid) return plainResponse(403, 'Invalid Twilio signature')
 
-  const status = params.CallStatus ?? 'unknown'
-  // update telephony call record if routed
+  // The <Dial action> callback reports the agent leg in DialCallStatus; the parent
+  // CallStatus can still be "in-progress" at that moment. Prefer the dial outcome.
+  const rawStatus = (params.routed === '1' && params.DialCallStatus) || params.CallStatus || 'unknown'
+  const status = normalizeCallStatus(rawStatus)
+  const terminal = TERMINAL.has(status)
+
+  if (terminal) resetNoInput(callSid)
+
   const tcall = await db.telephonyCall.findFirst({ where: { orgId: route.orgId, callSid } })
   if (tcall) {
-    await db.telephonyCall.update({ where: { id: tcall.id }, data: { status: status === 'completed' ? 'completed' : (status === 'no-answer' ? 'missed' : (status === 'busy' ? 'missed' : status)), endedAt: new Date(), durationSec: Number(params.CallDuration ?? '0') || 0 } }).catch(() => {})
+    if (terminal && TERMINAL.has(tcall.status)) {
+      // Already finalized (status callback and Dial action can both fire) — don't regress.
+    } else {
+      await db.telephonyCall
+        .update({
+          where: { id: tcall.id },
+          data: {
+            status: status === 'unknown' ? tcall.status : status,
+            ...(terminal
+              ? { endedAt: new Date(), durationSec: Number(params.CallDuration ?? '0') || 0 }
+              : {}),
+          },
+        })
+        .catch(() => {})
+    }
   }
+
   const conversation = await db.conversation.findFirst({ where: { orgId: route.orgId, channel: 'phone', externalRef: callSid } })
-  if (conversation && ['completed', 'busy', 'failed', 'no-answer', 'canceled'].includes(status)) {
-    if (status === 'completed') {
+  if (conversation && terminal) {
+    if (conversation.status !== 'waiting_human') {
       await db.conversation.update({ where: { id: conversation.id }, data: { status: 'closed' } }).catch(() => {})
     }
     await audit({
       orgId: route.orgId, actorType: 'webhook', actorId: 'twilio_voice',
       action: 'telephony.call_status', entity: 'conversation', entityId: conversation.id,
-      meta: { callSid, status, durationSec: params.CallDuration ?? '' },
+      meta: { callSid, status, rawStatus, durationSec: params.CallDuration ?? '' },
     })
   }
   const voiceName = (typeof config.voiceName === 'string' && config.voiceName) || 'alice'
   const language = (typeof config.language === 'string' && config.language) || 'en-US'
-  if (params.routed === '1' && ['no-answer', 'busy', 'failed'].includes(status)) {
-    return twiml(say('Our team is unavailable right now. Please leave a brief message after the tone, or call back shortly. Goodbye.', { voice: voiceName, language }) + hangup)
+  if (params.routed === '1' && ['no_answer', 'missed', 'failed'].includes(status)) {
+    return twiml(
+      say('Our team is unavailable right now. Please leave a brief message after the tone, or call back shortly.', { voice: voiceName, language }) +
+        '<Record maxLength="60" playBeep="true"/>' +
+        say('Goodbye.', { voice: voiceName, language }) +
+        hangup
+    )
   }
   return plainResponse(204, '')
-})
+}, { rateLimit: { limit: 600 } })

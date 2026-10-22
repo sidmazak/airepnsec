@@ -385,10 +385,10 @@ export function DataSourcesSection() {
 
       {/* create / edit dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="ds-form-desc">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{form.id ? 'Edit data source' : 'New data source'}</DialogTitle>
-            <DialogDescription id="ds-form-desc">
+            <DialogDescription>
               Point the assistant at your own database. Credentials are encrypted and never leave this server in plaintext.
             </DialogDescription>
           </DialogHeader>

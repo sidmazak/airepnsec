@@ -1,49 +1,60 @@
 # Feature Matrix — AI Secretary
 
 Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomplete/honest-gap;
-**MISSING** = not implemented; **N/A** = not applicable. Last reviewed: Iteration 1.
+**MISSING** = not implemented; **N/A** = not applicable. Last reviewed: iteration 2, 2026-10-22.
 
-## SPA sections (15 + auth)
-| Section | Route/API | Status | Notes |
+## SPA sections (18 + auth)
+| Section | Primary APIs | Status | Notes |
 |---|---|---|---|
-| Dashboard | `/api/dashboard*` | DONE | KPIs feed. |
-| Inbox | `/api/conversations*` | DONE | Web chat conversations. Browser-only Web Speech voice test. |
-| Voice Console | `/api/voice/*` | PARTIAL | Twilio voice webhooks exist; **voice/speed prefs persist to localStorage only** (not server-side). |
-| Bookings | `/api/bookings*`, `/api/availability` | DONE | Availability → booking → audit. |
-| Customers | `/api/customers*` | DONE | RBAC fixed this iteration. |
-| Invoices & Payments | `/api/invoices*`, `/api/payments/*` | DONE | Payment integrity fixed this iteration. |
-| Ledger | `/api/ledger*` | DONE | Append-only, reversals. |
-| Knowledge & FAQs | `/api/knowledge*` | DONE | Approve/reindex/search. |
-| Data Sources | `/api/datasources*` | DONE | BYO SQLite/Postgres/MySQL/http_json → RAG (iteration 12). |
-| Automations | `/api/automations*` | DONE | Engine + triggers + runs. |
-| AI Providers | `/api/providers/*` | DONE | Test route **added** this iteration. |
-| Business Profile | `/api/settings/*` | DONE | |
-| Integrations | `/api/integrations/*` | DONE | Test route **added** this iteration. |
-| Diagnostics | `/api/diagnostics`, `dev.log` | DONE | |
-| Setup Wizard | `/api/setup*` | DONE | |
-| Auth screen | `/api/auth/*` | DONE | Custom session cookies (next-auth present but unused). |
+| Dashboard | `/api/dashboard` | DONE | KPIs, overdue, outbox, readiness. |
+| Inbox | `/api/conversations*`, `/api/public/chat/*` | DONE | Web/SMS/WhatsApp/phone transcripts, human takeover, agent replies. |
+| Voice Console | `/api/ai/asr`, `/api/ai/tts`, `/api/conversations/*` | DONE | Browser Web Speech fallback; real server STT/TTS via OpenAI-compatible endpoints; latency badges. |
+| Realtime Voice | `/api/ai/realtime/*` | DONE | OpenAI-compatible WebRTC session + validated tools; falls back to the conversation model. |
+| Bookings | `/api/bookings*`, `/api/availability` | DONE | Transactional overlap checks; reschedule/cancel/remind. |
+| Customers | `/api/customers*` | DONE | CRUD, import, statement, consent/opt-out. |
+| Invoices & Payments | `/api/invoices*`, `/api/payments/*` | DONE | Claims stay pending; verification guards; Stripe links/webhooks. |
+| Ledger | `/api/ledger*` | DONE | Append-only; reversals only. |
+| Usage & Billing | `/api/usage` | DONE | Token/latency/cost estimates from `AiLog`; unknown model pricing flagged. |
+| Knowledge & FAQs | `/api/knowledge*` | DONE | Approve/reindex/search; neural + lexical hybrid. |
+| Data Sources | `/api/datasources*` | DONE | sqlite/postgres/mysql/http_json → RAG; read-only SQL; SSRF guard; auto-sync. |
+| Automations | `/api/automations*` | DONE | Triggers, conditions, delays, quiet hours, test mode, runs. |
+| AI Providers | `/api/providers/*` | DONE | BYOK Ollama/OpenAI-compatible; encrypted keys; real connection tests. |
+| Security | `/api/auth/2fa/*`, `/api/auth/sessions/revoke-all` | DONE | TOTP enrollment/disable; revoke other sessions. |
+| Business Profile | `/api/setup`, `/api/settings/*` | DONE | Profile, hours, policies, AI identity, collections config. |
+| Integrations | `/api/integrations/*` | DONE | SMTP, Twilio, SMS gateways, Stripe, CalDAV, outbound webhooks; per-kind tests. |
+| Diagnostics | `/api/health/detail` | DONE | DB tuning, worker leases, heartbeat, providers, counts. |
+| Setup Wizard | `/api/setup*` | DONE | Autosave/resume; readiness checks; end-to-end test. |
+| Auth screen | `/api/auth/*`, `/api/session` | DONE | scrypt passwords, hashed sessions, optional TOTP. |
 
 ## Cross-cutting features
 | Capability | Status | Evidence / gap |
 |---|---|---|
-| BYOK LLM providers | DONE | `managed`, `ollama`, `openai_compatible`; AES-GCM key storage. |
-| Local-only data mode | DONE | `assertAiPolicy()` blocks cloud providers when `dataMode==='local_only'`. |
+| BYOK LLM providers | DONE | `ollama`, `openai_compatible`, `none`; AES-GCM key storage. |
+| Local-only data mode | DONE | `assertAiPolicy()` blocks cloud endpoints when `dataMode==='local_only'`; private/LAN endpoints stay allowed. |
 | Embeddings (independent config) | DONE | `local_neural` default; `ollama`/`openai_compatible`/`local_lexical`. |
-| RAG pipeline | DONE | chunk → embed → hybrid cosine+BM25 → search (approved only). |
-| BYO external data sources | DONE | 4 kinds; read-only SQL + SSRF guard; auto-sync worker. |
-| Reranking | **MISSING** | Declared in `Capability` but not wired into retrieval; test now reports not-implemented. |
-| Vision | **MISSING** | Declared but not implemented. |
-| STT / TTS | DONE | `managed`, `browser` (Web Speech), `openai_compatible`. |
-| Real-time streaming | **MISSING** | No SSE/token streaming; no full-duplex voice. |
-| Native tool-calling | PARTIAL | Prompt-based JSON tool loop (`receptionist.ts`), not provider function-calling. |
-| SMS | PARTIAL | Twilio only (`sendTwilio`); **no gateway abstraction** (TextBee/httpSMS/Android SMS Gateway). |
-| WhatsApp | PARTIAL | Twilio only. |
-| Outbound email | DONE | SMTP via nodemailer. |
+| RAG pipeline | DONE | chunk → embed → hybrid cosine+BM25 → approved-only search. |
+| BYO external data sources | DONE | 4 kinds; read-only SQL + DNS-aware SSRF guard; per-source sync lease. |
+| Reranking | **MISSING** | Declared capability; tests report not-implemented. |
+| Vision | **MISSING** | Declared capability; not implemented. |
+| STT / TTS (server) | DONE | `openai_compatible` only; browser Web Speech path works client-side. |
+| Real-time voice | DONE | WebRTC via OpenAI-compatible realtime endpoint; no local/browser realtime implementation. |
+| Streaming token output | **MISSING** | Synchronous JSON responses; no SSE token stream. |
+| Native tool-calling | PARTIAL | Strict JSON tool loop (`receptionist.ts`), not provider function-calling. |
+| SMS | DONE | Twilio plus `sms_gateway` adapters: TextBee, httpSMS, android-sms-gateway, generic HTTP. |
+| WhatsApp | DONE | Twilio inbound/outbound; inbound webhook signature-verified. |
+| Outbound email | DONE | SMTP via nodemailer; invoice HTML/text templates. |
 | Inbound email | **MISSING** | No IMAP/webhook ingest. |
-| Calendar | PARTIAL | ICS (public, read-only) + one-way CalDAV. |
-| Payments online | PARTIAL | Stripe connector + generic signed webhook. |
-| Automations | DONE | 60s worker tick. |
-| Hardware detection / model catalog | **MISSING** | No GPU/RAM probe, no recommended-model endpoint. |
-| Audit log | DONE | `src/lib/audit.ts`. |
-| Rate limiting / CSRF | DONE | In-memory sliding window + `x-requested-with: ais`. |
-| Security headers / middleware | **MISSING** | No `middleware.ts`; README/TEST_PLAN claims are inaccurate. |
+| Calendar | DONE | ICS feed + per-booking `.ics` + two-way CalDAV push/pull. |
+| Payments online | DONE | Stripe Payment Links + Stripe/generic signed webhooks. |
+| Automations | DONE | 60s lease-protected worker tick; manual run shares the lease. |
+| Outbox delivery | DONE | 30s lease-protected dispatcher; backoff and honest statuses. |
+| Hardware detection / model catalog | **MISSING** | No GPU/RAM probe or recommended-model endpoint. |
+| Audit log | DONE | `src/lib/audit.ts`; append-only rows. |
+| Rate limiting / CSRF | DONE | In-memory sliding window (per-process); `x-requested-with: ais` on mutations. |
+| Security headers | DONE | Configured in `next.config.ts` (HSTS/CSP in production). No middleware. |
+| 2FA / session revocation | DONE | TOTP RFC 6238; DB sessions with `revokedAt`; revoke-all endpoint. |
+| Worker single-flight | DONE | `WorkerLease` + TTL recovery; manual endpoints return 409 while busy. |
+| Conversation turn serialization | DONE | DB lock + token; stale-lock takeover; 409 `conversation_busy`. |
+| PABX routing | DONE | least-busy/round-robin/redirect, line pause/disable, real load, call records. |
+| SSO (SAML/OIDC) | **MISSING** | Email+password/TOTP only. |
+| Team user management | **MISSING** | Roles exist and are enforced, but there is no users/invite/role-management API or UI in this build; each org has its owner account. |

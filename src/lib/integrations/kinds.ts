@@ -57,6 +57,8 @@ export const stripeConfigSchema = z.object({}).partial()
 
 export const webhookOutConfigSchema = z.object({
   url: z.string().url('url must be a valid http(s) URL'),
+  // Admin opt-in for LAN/self-hosted receivers; otherwise private IPs are SSRF-blocked.
+  allowPrivate: z.boolean().optional(),
 })
 
 /** Secrets accepted per kind (full-replacement semantics on PATCH). */

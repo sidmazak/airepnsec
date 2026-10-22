@@ -119,4 +119,4 @@ export const POST = withPublic(async (req: NextRequest) => {
   })
 
   return twiml('')
-})
+}, { rateLimit: { limit: 300 } })

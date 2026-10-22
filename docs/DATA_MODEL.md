@@ -1,319 +1,202 @@
 # Data Model — AI Secretary
 
-Source of truth: `prisma/schema.prisma`. This document is the field-level reference plus the
-**invariants** the service layer must enforce.
+Source of truth: `prisma/schema.prisma` (**30 models**). This document is a field-level reference for
+the operational tables plus the invariants the service layer enforces.
 
-> **Schema status note (honest).** At the start of this build, `schema.prisma` contained only the
-> scaffold placeholder models (`User`, `Post`). The model set below is the authoritative target the
-> data-foundation phase implements. The "Status" column reflects the build recorded in
-> `worklog.md`; if the schema on disk diverges from this document, update this document in the same
-> change.
+Portability rules (SQLite → PostgreSQL): no Prisma enums (string columns + zod unions), no native
+`Json` columns (JSON in `String` columns), money is `Int` cents, no DB-specific column types.
 
-Portability rules (SQLite sandbox → PostgreSQL production): no Prisma enums (strings + zod unions),
-no native `Json` columns (JSON held in `String` columns, validated in services), money is `Int`
-cents, no DB-specific types.
+Conventions: IDs are `String @id @default(cuid())`; business tables carry `orgId`; timestamps are
+`createdAt`/`updatedAt` unless noted; `*Json`/JSON columns are strings validated by zod on read/write.
 
 ## 1. Model index
 
-| Model | Purpose | Status (this build) |
-|---|---|---|
-| `Organization` | Tenant root; business profile, timezone, currency | Implemented |
-| `User` | Login identity (email + scrypt hash) | Implemented |
-| `Membership` | User ↔ Organization with role | Implemented |
-| `Customer` | End customers of the business | Implemented |
-| `Service` | Bookable service catalog item | Implemented |
-| `Staff` | Staff/practitioner/crew member | Implemented |
-| `StaffService` | Staff ↔ Service skills join | Implemented |
-| `BusinessHours` | Weekly opening template | Implemented |
-| `Resource` | Capacity unit (apartment/vehicle/room) | Implemented |
-| `Booking` | Reservation of service + staff/resource | Implemented |
-| `Invoice` | Billable document for a customer | Implemented |
-| `InvoiceLine` | Invoice line items | Implemented |
-| `Payment` | Money received against an invoice | Implemented |
-| `WebhookEvent` | Inbound webhook log (dedupe + replay safety) | Implemented |
-| `LedgerEntry` | Append-only financial ledger | Implemented |
-| `KnowledgeItem` (`KnowledgeDoc` in schema) | FAQ/knowledge for assistant grounding (`KnowledgeChunk` now stores per-chunk embedding `model` + `dim`; vectors are neural by default, lexical hash as fallback) | Implemented |
-| `DataSource` | Bring-your-own external DB/JSON endpoint ingested into the same knowledge/RAG pipeline (kind + encrypted connection + query config; rows → `KnowledgeDoc`s) | Implemented |
-| `Conversation` / `Message` | Assistant transcripts incl. tool calls | Implemented |
-| `AssistantRun` | Per-turn provider/latency/error metadata | Implemented |
-| `AutomationRule` / `AutomationRun` | Automation definitions and executions | Implemented |
-| `OutboundMessage` | Outbound messages (queued/draft; delivery **Deferred**) | Implemented (creation/audit) |
-| `ProviderConfig` | AI/payment provider configs; encrypted keys | Implemented |
-| `Setting` | Org settings, wizard state, feature flags | Implemented |
-| `AuditEvent` | Consequential-change audit trail | Implemented |
+| Model | Purpose |
+|---|---|
+| `Organization` | Tenant root: business profile, timezone, locale, currency, hours, policies, AI identity, setup state, data mode. |
+| `User` | Login identity; password hash, role, encrypted TOTP secret. |
+| `Session` | Hashed session token, expiry, `revokedAt`. |
+| `AppSetting` | Org key/value JSON (webhook secret, wizard state, channels, CalDAV sync summary). |
+| `WorkerLease` | Single-flight lease for automation/outbox/data-source workers (TTL recovery). |
+| `Customer` | End customer: contact, tags, `consentContact`, absolute `optOut`, external ref. |
+| `Service` | Bookable service: duration, buffers, capacity, price/deposit cents, active. |
+| `Staff` | Staff/practitioner/crew member. |
+| `StaffService` | Staff ↔ service join (`@@id([staffId, serviceId])`). |
+| `WorkingHour` | Per-staff or org-wide (`staffId:null`) weekly hours by `dow` + minute offsets. |
+| `Booking` | Reservation with `startAt/endAt`, status, source, price snapshot. |
+| `Invoice` | Invoice header: number, status, subtotal/tax/total/paid cents, issue/due dates. |
+| `InvoiceItem` | Invoice line: description, qty, unit/total cents. |
+| `Payment` | Payment record with method, status, idempotency/external-event keys. |
+| `LedgerEntry` | Append-only double-entry row (debit/credit accounts, reversal pointer). |
+| `WebhookEvent` | Inbound webhook dedupe/audit row (provider, unique event id, signature result). |
+| `KnowledgeDoc` | Knowledge/FAQ document; approved-only retrieval; data-source link + content hash. |
+| `DataSource` | BYO external DB/JSON source: encrypted connection, query config, sync status/counts. |
+| `KnowledgeChunk` | Chunk text + JSON vector + model/dimension for hybrid retrieval. |
+| `Conversation` | Channel thread (web/sms/whatsapp/phone/realtime/voice_test), status, AI toggle, turn-lock fields. |
+| `Message` | Conversation message; roles `customer/assistant/agent/system`; tool metadata in JSON. |
+| `OutboxMessage` | Outbound email/SMS/WhatsApp/webhook/in-app row with attempts + honest status. |
+| `ProviderConfig` | AI capability row; encrypted API key; enabled/test state. |
+| `AiLog` | Metrics-only AI call log (capability/provider/model/latency/tokens/error). |
+| `Automation` | Rule: trigger, conditions, delay, actions, quiet hours, caps, test mode. |
+| `AutomationRun` | Per-run status/attempts/input/output/error + dedupe key. |
+| `Integration` | Third-party channel row; non-secret config JSON + encrypted secrets. |
+| `TelephonyLine` | PABX agent line: number, priority, enabled, `acceptingCalls`, destination. |
+| `TelephonyCall` | Call record: CallSid, from/to, line, normalized status, duration, metadata. |
+| `AuditEvent` | Append-only audit trail (actor, action, entity, metadata). |
 
-`Post` from the scaffold is **removed** by the data-foundation phase (it was placeholder only).
+## 2. Relationships
 
-## 2. Entity relationships
-
+```mermaid
+erDiagram
+  ORGANIZATION ||--o{ USER : has
+  USER ||--o{ SESSION : owns
+  ORGANIZATION ||--o{ CUSTOMER : has
+  ORGANIZATION ||--o{ SERVICE : offers
+  ORGANIZATION ||--o{ STAFF : employs
+  STAFF ||--o{ STAFF_SERVICE : provides
+  SERVICE ||--o{ STAFF_SERVICE : assigned
+  ORGANIZATION ||--o{ WORKING_HOUR : defines
+  CUSTOMER ||--o{ BOOKING : books
+  SERVICE ||--o{ BOOKING : booked_as
+  STAFF ||--o{ BOOKING : handles
+  CUSTOMER ||--o{ INVOICE : billed
+  INVOICE ||--o{ INVOICE_ITEM : contains
+  INVOICE ||--o{ PAYMENT : paid_by
+  PAYMENT ||--o{ LEDGER_ENTRY : posts
+  INVOICE ||--o{ LEDGER_ENTRY : charged_by
+  ORGANIZATION ||--o{ KNOWLEDGE_DOC : owns
+  KNOWLEDGE_DOC ||--o{ KNOWLEDGE_CHUNK : split_into
+  DATA_SOURCE ||--o{ KNOWLEDGE_DOC : ingests
+  CUSTOMER ||--o{ CONVERSATION : contacts
+  CONVERSATION ||--o{ MESSAGE : contains
+  ORGANIZATION ||--o{ AUTOMATION : configures
+  AUTOMATION ||--o{ AUTOMATION_RUN : executes
+  ORGANIZATION ||--o{ INTEGRATION : configures
+  ORGANIZATION ||--o{ OUTBOX_MESSAGE : queues
+  ORGANIZATION ||--o{ TELEPHONY_LINE : routes
+  TELEPHONY_LINE ||--o{ TELEPHONY_CALL : receives
+  ORGANIZATION ||--o{ AUDIT_EVENT : records
+  ORGANIZATION ||--o{ WORKER_LEASE : coordinates
 ```
-Organization 1─* Membership *─1 User
-Organization 1─* Customer / Service / Staff / Resource / BusinessHours
-Staff *─* Service          (StaffService)
-Organization 1─* Booking  ──1 Customer
-                           ──1 Service
-                           ──0..1 Staff / Resource
-Booking 1─0..1 Invoice 1─* InvoiceLine
-Invoice 1─* Payment (verified payments reduce balance)
-Invoice 1─* LedgerEntry (CHARGE)   Payment 1─1 LedgerEntry (PAYMENT)
-Organization 1─* KnowledgeItem / Conversation 1─* Message
-Organization 1─* DataSource 1─* KnowledgeItem (ingested rows; cascade-delete with the source)
-Conversation 1─* AssistantRun
-Organization 1─* AutomationRule 1─* AutomationRun
-Organization 1─* OutboundMessage / ProviderConfig / Setting / AuditEvent / WebhookEvent(provider-level org)
-```
 
-## 3. Model reference
+All business tables carry `orgId`; every query filters it. `User.orgId` is the membership link — there
+is no separate Membership model (one user belongs to one organization in this build).
 
-Conventions: all ids are `String @id @default(cuid())`; all business tables carry `organizationId`
-with a relation to `Organization`; `createdAt DateTime @default(now())`, `updatedAt @updatedAt`
-unless noted. `*_Json` columns are `String` holding JSON, validated by zod on read/write.
+Financial relationships are append-only: `LEDGER_ENTRY` rows reference an invoice/payment and can point
+at a reversal row; they are never updated or deleted.
+
+## 3. Key tables
 
 ### Organization
-| Field | Type | Notes |
-|---|---|---|
-| name | String | Display name |
-| slug | String @unique | URL-safe identifier |
-| businessProfile | String | One of `APARTMENT_RENTALS \| CAR_RENTALS \| SALON \| CLINIC \| CONTRACTOR` (zod-validated) |
-| timezone | String | IANA tz; used for hours/booking display |
-| currency | String | ISO 4217; default `USD`; money stored in minor units |
-| settings_Json | String | Org-level settings blob |
-| demo | Boolean | Marks demo orgs (seed/reset, excluded from real counts) |
+`name`, unique `slug`, `businessType` (`apartment_rental|car_rental|salon|clinic|contractor|generic`),
+`timezone`, `locale`, `currency`, `address/phone/email`, JSON `openingHours`/`holidays`/`policies`/
+`aiIdentity`/`collectionsCfg`, `demo`, `setupState`, `setupComplete`, `dataMode`
+(`local_only|hybrid|cloud_first`).
 
-### User
-| Field | Type | Notes |
-|---|---|---|
-| email | String @unique | Login id, lowercased |
-| name | String? | Display name |
-| passwordHash | String | `scrypt` hash (never exposed to client) |
-| lastLoginAt | DateTime? | Audited on login |
-
-### Membership
-| Field | Type | Notes |
-|---|---|---|
-| userId | String (FK User) | |
-| organizationId | String (FK Organization) | |
-| role | String | `OWNER \| ADMIN \| AGENT \| VIEWER` (zod-validated) |
-| *Invariant* | | `@@unique([userId, organizationId])`; an org has exactly one OWNER |
+### User / Session
+- `User`: unique `email`, scrypt `passwordHash`, `role` (`owner|admin|agent|viewer`), encrypted
+  `twoFactorSecret`, `twoFactorEnabled`.
+- `Session`: unique `tokenHash` (SHA-256 of the cookie token), `expiresAt`, nullable `revokedAt`.
 
 ### Customer
-| Field | Type | Notes |
-|---|---|---|
-| name | String | |
-| email | String? | |
-| phone | String? | Normalized digits+`+`; used by assistant lookup |
-| notes | String? | Free-form |
-| tags_Json | String | Array of strings |
-| consentMarketing | Boolean @default(false) | Outbound marketing allowed |
-| consentTransactional | Boolean @default(true) | Booking/invoice messages allowed |
-| optedOut_Json | String | Channel opt-outs `{ "EMAIL": ts, "SMS": ts }` |
-| externalRef | String? | Operator's external id |
+`name`, `email`, `phone`, notes, JSON `tags`, `consentContact` (service communications),
+`optOut` (absolute outbound block), `externalRef`.
 
-### Service
-| Field | Type | Notes |
-|---|---|---|
-| name | String | |
-| description | String? | |
-| category | String? | Profile-specific grouping |
-| durationMin | Int | Slot length in minutes (or base unit for day-based profiles) |
-| bufferMin | Int @default(0) | Buffer after each booking |
-| priceCents | Int | Money in cents (Int) |
-| dayBased | Boolean @default(false) | True for night/day rentals |
-| active | Boolean @default(true) | |
-
-### Staff
-| Field | Type | Notes |
-|---|---|---|
-| name | String | |
-| email / phone | String? | |
-| active | Boolean @default(true) | |
-
-### StaffService — `@@unique([staffId, serviceId])`
-
-### BusinessHours
-| Field | Type | Notes |
-|---|---|---|
-| weekday | Int | 0=Sunday … 6=Saturday |
-| openMin / closeMin | Int | Minutes from local midnight (org timezone) |
-| closed | Boolean @default(false) | |
-| *Invariant* | | One row per (organizationId, weekday): `@@unique([organizationId, weekday])` |
-
-### Resource
-| Field | Type | Notes |
-|---|---|---|
-| name | String | e.g. "Apt 3B", "Corolla #7", "Room 2" |
-| type | String | Profile-specific (`UNIT \| VEHICLE \| ROOM \| OTHER`) |
-| active | Boolean @default(true) | |
+### Service / Staff / WorkingHour
+- `Service`: `durationMin`, `bufferBeforeMin`/`bufferAfterMin`, `maxPerSlot`,
+  `requiresDeposit`/`depositCents`, `priceCents`, `currency`, `active`.
+- `Staff`: role/contact/active; `StaffService` joins skills.
+- `WorkingHour`: `staffId?`, `dow` 0=Sun, `startMin`/`endMin`; org-wide rows use `staffId:null`.
 
 ### Booking
-| Field | Type | Notes |
-|---|---|---|
-| customerId | FK Customer | |
-| serviceId | FK Service | |
-| staffId | FK Staff? | Required for slot-based services that need staff |
-| resourceId | FK Resource? | Required for capacity-type profiles |
-| startAt / endAt | DateTime | UTC in DB; interpreted in org timezone |
-| status | String | `PENDING \| CONFIRMED \| CANCELLED \| COMPLETED \| NO_SHOW` |
-| source | String | `WEB \| ASSISTANT \| WIZARD \| API` |
-| notes | String? | |
-| cancelledAt / cancellationReason | DateTime? / String? | Set on cancel |
-| *Invariant* | | **No double-booking**: conflict check + insert inside one Prisma interactive transaction; see §4 |
+`customerId`, `serviceId`, `staffId?`, `startAt`/`endAt`, `status`
+(`pending|confirmed|cancelled|completed|no_show`), `source` (`manual|ai_chat|ai_voice|web|import`),
+`priceCents` snapshot, `cancelReason`. No `resourceId` exists in the current schema; capacity is
+modeled by `Service.maxPerSlot` and working hours.
 
-### Invoice
-| Field | Type | Notes |
-|---|---|---|
-| number | String | Org-unique human-readable number (`@@unique([organizationId, number])`) |
-| customerId | FK Customer | |
-| bookingId | FK Booking? | Source booking if any |
-| status | String | `DRAFT \| ISSUED \| PARTIALLY_PAID \| PAID \| VOID \| UNCOLLECTIBLE` |
-| totalCents | Int | Sum of lines at issue time (Int cents) |
-| currency | String | From org at creation |
-| issuedAt / dueAt | DateTime? | |
-| voidedAt / voidReason | DateTime? / String? | |
-| *Invariant* | | `balanceCents = totalCents − Σ(VERIFIED payments)`; status transitions derived from verified payments (§4) |
+### Invoice / InvoiceItem / Payment
+- `Invoice`: org-unique `number`, status (`draft|sent|partial|paid|void|uncollectible`), `currency`,
+  subtotal/tax/total/paid cents, `issueDate`/`dueDate`, JSON-ish `rentalPeriod`.
+- `InvoiceItem`: qty/unit price/total cents.
+- `Payment`: `amountCents`, `method` (`manual|card|bank|cash|online`), `status`
+  (`pending_verification|verified|failed|refunded`), `source` (`manual|webhook|customer_claim`),
+  globally unique nullable `idempotencyKey` and `externalEventId`, `verifiedAt/verifiedBy`.
+  Only `verified` payments affect balances.
 
-### InvoiceLine
-| Field | Type | Notes |
-|---|---|---|
-| invoiceId | FK Invoice | Cascade delete with invoice while DRAFT only |
-| description | String | |
-| quantity | Int | Whole units (profiles needing fractions store per-unit lines) |
-| unitPriceCents / totalCents | Int | `line.totalCents = quantity × unitPriceCents` checked on write |
-
-### Payment
-| Field | Type | Notes |
-|---|---|---|
-| invoiceId | FK Invoice | |
-| amountCents | Int | > 0 |
-| status | String | `PENDING \| VERIFIED \| FAILED \| REFUNDED` |
-| method | String | `MANUAL \| CASH \| BANK \| GENERIC_WEBHOOK` |
-| reference | String? | Operator/provider reference |
-| idempotencyKey | String? | `@@unique([organizationId, idempotencyKey])` |
-| verifiedAt | DateTime? | Set by verification flow |
-| *Invariant* | | Only VERIFIED payments affect invoice balance & ledger (§4) |
+### LedgerEntry
+`ts`, `type` (`charge|payment|refund|adjustment|reversal`), `debitAccount`, `creditAccount`,
+`amountCents`, optional `invoiceId`/`paymentId`/`bookingId`, `memo`, `reversalOfId`, `createdBy`.
+Append-only by code; corrections reference the original row.
 
 ### WebhookEvent
-| Field | Type | Notes |
-|---|---|---|
-| provider | String | e.g. `generic`, later `stripe` (**Deferred**) |
-| eventId | String | `@@unique([provider, eventId])` — replay/dedupe anchor |
-| payload_Json | String | Raw body (for replay/debug) |
-| signatureVerified | Boolean | HMAC check result |
-| status | String | `RECEIVED \| PROCESSED \| SKIPPED_DUPLICATE \| FAILED` |
-| error | String? | |
+`provider`, globally unique `eventId`, raw `payload`, `signatureValid`, `result`
+(`received|processed|duplicate|rejected`), `processedAt`.
 
-### LedgerEntry (append-only)
-| Field | Type | Notes |
-|---|---|---|
-| entryDate | DateTime | |
-| type | String | `CHARGE \| PAYMENT \| ADJUSTMENT \| REVERSAL` |
-| amountCents | Int | Signed: charges positive, payments negative, adjustments either |
-| refType / refId | String / String | `INVOICE`+id, `BOOKING`+id, `MANUAL`+memo id |
-| memo | String? | |
-| createdBy | String | Actor id (`system`/user id) |
-| reversesEntryId | String? (self-FK) | Set on ADJUSTMENT/REVERSAL referencing the corrected entry |
-| *Invariant* | | **No UPDATE/DELETE paths in code.** Corrections only via ADJUSTMENT/REVERSAL referencing the original (§4) |
-
-### KnowledgeItem
-| Field | Type | Notes |
-|---|---|---|
-| question / answer | String | FAQ pair |
-| tags_Json | String | Array of strings |
-| embedding_Json | String? | Float array (JSON) when embeddings available; lexical search used otherwise; pgvector column at production switch |
-| embeddingStatus | String | `NONE \| PENDING \| READY \| FAILED` |
-
-### DataSource (schema name; conceptual "external source")
-| Field | Type | Notes |
-|---|---|---|
-| name | String | Operator label |
-| kind | String | `postgres \| mysql \| sqlite \| http_json` (zod-validated) |
-| connectionEnc | String | AES-256-GCM blob of the per-kind connection (string/path/url+authHeader); never returned |
-| configJson | String | Non-secret config: `query`/`table`/`itemsPath`, `idColumn`, `titleColumn`, `textColumns[]`, `template`, `contentPrefix`, `limit`, `approved`, `allowPrivate` |
-| enabled / autoSync / syncIntervalMin | Boolean / Boolean / Int | Retrieval enablement + worker auto-sync schedule |
-| lastTestAt / lastTestOk / lastTestError | DateTime? / Boolean / String | Connection-test bookkeeping |
-| lastSyncAt / lastSyncOk / lastSyncError / lastSyncStats | DateTime? / Boolean / String / String(JSON) | Last sync result + `{fetched,created,updated,unchanged,deleted,failed,ms}` |
-| documentCount / chunkCount | Int | Denormalized index sizes for honest UI display |
-| *Invariant* | | Each ingested `KnowledgeDoc` is linked by `(dataSourceId, externalId)` `@@unique`; re-sync is idempotent (content-hash skip), removed rows cascade-delete their docs |
+### KnowledgeDoc / DataSource / KnowledgeChunk
+- `KnowledgeDoc`: `title`, `source` (`manual|paste|file|datasource`), `content`, `approved`,
+  `tags`, optional `dataSourceId`, `externalId`, `contentHash`; unique `(dataSourceId, externalId)`.
+- `DataSource`: `kind` (`sqlite|postgres|mysql|http_json`), encrypted `connectionEnc`, JSON
+  `configJson`, `enabled`, `autoSync`, `syncIntervalMin`, last test/sync state, doc/chunk counts.
+- `KnowledgeChunk`: `docId`, `ord`, `text`, JSON `vector`, `model`, `dim`; dense cosine only when
+  model+dim match the active embedding model.
 
 ### Conversation / Message
-| Field | Type | Notes |
-|---|---|---|
-| Conversation: customerId | FK? | Channel, status (`OPEN \| CLOSED`), startedAt/endedAt |
-| Message: conversationId | FK Conversation | |
-| role | String | `USER \| ASSISTANT \| SYSTEM \| TOOL` |
-| content | String | |
-| toolName / toolArgs_Json / toolResult_Json | String? | Set for role=TOOL; persisted for full audit |
-| *Invariant* | | Every assistant tool invocation is persisted before the result is used to continue the loop |
+- `Conversation`: `channel`, `status` (`open|waiting_human|closed`), `aiEnabled`, `summary`,
+  `contactName`, `externalRef` (CallSid or `sms:{digits}` / `whatsapp:{digits}`),
+  `turnLockToken` + `turnLockedAt` for per-thread serialization, `customerId?`.
+- `Message`: role `customer|assistant|agent|system`, `content`, JSON `meta` (toolCalls/usage/provider).
+  Tool calls/results live in `meta`, not a separate TOOL role.
 
-### AssistantRun
-| Field | Type | Notes |
-|---|---|---|
-| conversationId | FK Conversation | One row per assistant turn |
-| provider / model / mode | String | `mode`: `LOCAL \| HYBRID \| CLOUD \| FALLBACK` |
-| toolCalls | Int | Iterations used |
-| status | String | `OK \| ERROR \| TIMEOUT \| POLICY_BLOCKED` |
-| error / latencyMs | String? / Int? | |
-
-### AutomationRule / AutomationRun
-| Field | Type | Notes |
-|---|---|---|
-| Rule: name, triggerType | String | see ARCHITECTURE §6 |
-| Rule: triggerConfig_Json / conditions_Json / actions_Json | String | zod-validated shapes |
-| Rule: delaySeconds | Int @default(0) | |
-| Rule: enabled | Boolean @default(true) | |
-| Run: ruleId, subjectType, subjectId | FK / String | What the run acted on |
-| Run: dedupeKey | String @unique | `(ruleId, subjectType, subjectId, window)` |
-| Run: status | String | `QUEUED \| RAN \| SKIPPED \| FAILED \| CANCELLED` |
-| Run: attempts, lastError, scheduledFor, ranAt | Int, String?, DateTime, DateTime? | Retry bookkeeping |
-
-### OutboundMessage
-| Field | Type | Notes |
-|---|---|---|
-| customerId | FK Customer? | |
-| channel | String | `EMAIL \| SMS` (delivery **Deferred**) |
-| body / template | String | |
-| status | String | `QUEUED \| SENT \| FAILED \| OPTED_OUT \| CANCELLED` — in this build, terminal state is QUEUED (draft/audit) |
-| dedupeKey | String? | Reminder dedupe |
-| *Invariant* | | Consent/opt-out checked at creation **and** at send time; opted-out → OPTED_OUT, never silently dropped |
+### OutboxMessage
+`channel` (`email|sms|whatsapp|webhook|inapp`), `recipient`, `subject`, `body`, optional `html`,
+`status` (`queued|sent|failed|skipped`), `statusReason`, `attempts`, `relatedType/relatedId`,
+unique nullable `dedupeKey`, `scheduledFor`, `sentAt`.
 
 ### ProviderConfig
-| Field | Type | Notes |
-|---|---|---|
-| kind | String | `LLM \| EMBEDDING \| PAYMENTS` |
-| provider | String | `ollama \| openai-compatible \| sandbox-sdk \| generic-webhook` |
-| baseUrl / model | String? | |
-| encryptedKey | String? | **AES-256-GCM ciphertext**; plaintext never stored, never returned to client |
-| isDefault | Boolean | One default per kind per org |
-| status / lastCheckedAt | String / DateTime? | `UNVERIFIED \| HEALTHY \| UNHEALTHY` |
+`capability` (`llm|embedding|stt|tts|realtime|rerank|vision`), `provider`
+(`ollama|openai_compatible|browser|local_neural|local_lexical|none`), base URL/model, encrypted
+`apiKeyEnc`, JSON config, `enabled`, last test state; unique `(orgId, capability)`.
 
-### Setting
-| Field | Type | Notes |
-|---|---|---|
-| key | String | e.g. `wizard.progress`, `ai.mode`, `collections.policy` |
-| value_Json | String | |
-| *Invariant* | | `@@unique([organizationId, key])` |
+### Automation / AutomationRun
+- `Automation`: `triggerType` (`invoice_overdue|booking_created|booking_reminder|
+  conversation_escalated|manual`), JSON `triggerCfg`/`conditions`/`actions`, `delayMinutes`,
+  `maxRunsPerDay`, JSON `quietHours`, `testMode`, `enabled`.
+- `AutomationRun`: `status` (`running|success|failed|skipped`), `attempt`, `dedupeKey`,
+  input/output/error JSON, `scheduledFor`/`startedAt`/`finishedAt`; unique `(automationId, dedupeKey)`.
+
+### Integration
+`kind` (`smtp|twilio_sms|twilio_whatsapp|twilio_voice|sms_gateway|caldav|stripe|webhook_out`),
+non-secret `configJson`, encrypted `secretsEnc`, `enabled`, last test state. Singleton kinds are
+enforced in code; `webhook_out` allows multiple destinations.
+
+### WorkerLease
+`name` (PK), `holder`, `expiresAt`, `lastRunAt`, `lastError`, `updatedAt`. Expired leases are
+recoverable; a completed worker moves `expiresAt` into the past.
+
+### TelephonyLine / TelephonyCall
+- `TelephonyLine`: `integrationId`, `label`, `phoneNumber`, destination kind/value, `priority`,
+  `enabled`, `acceptingCalls`.
+- `TelephonyCall`: `callSid`, from/to, `lineId`, `status`
+  (`started|answered|completed|failed|missed|no_answer`), `startedAt`/`endedAt`, `durationSec`,
+  JSON `meta`. Status normalization lives in `src/lib/telephony/routing.ts`.
 
 ### AuditEvent
-| Field | Type | Notes |
-|---|---|---|
-| actorType / actorId | String / String? | `USER \| SYSTEM \| ASSISTANT` |
-| action | String | e.g. `booking.create`, `payment.verify`, `ai.mode.change`, `data.export` |
-| entityType / entityId | String / String? | |
-| before_Json / after_Json | String? | Diff snapshots for consequential changes |
-| ip | String? | Where applicable |
-| *Invariant* | | Written in the same transaction as the change it describes; never user-editable |
+`ts`, `actorType` (`user|ai|system|webhook`), `actorId`, `action`, `entity`, `entityId`, JSON `meta`.
+Append-only; never user-editable.
 
-## 4. Invariants (enforcement contract)
+## 4. Invariants
 
 | # | Invariant | Where enforced |
 |---|---|---|
-| 1 | **Booking overlap protection.** A booking is rejected (409) if it overlaps another non-CANCELLED booking for the same staff or resource, respecting service duration + buffer. Check-and-insert runs inside a single Prisma interactive transaction so concurrent requests serialize; SQLite's single-writer model makes this atomic in the sandbox; PostgreSQL production relies on the same transaction boundary (a unique/exclusion index is a planned hardening once on Postgres) | `src/lib/business/bookings` |
-| 2 | **Invoice balance.** `balanceCents = totalCents − Σ payments where status=VERIFIED`. PARTIALLY_PAID/PAID transitions are derived and written in the same transaction as the payment verification | `src/lib/business/payments` |
-| 3 | **Ledger corrections.** Ledger is append-only. Changing a wrong entry is only possible by writing an ADJUSTMENT or REVERSAL entry with `reversesEntryId` pointing at the original. No code path updates or deletes ledger rows | `src/lib/business/ledger` |
-| 4 | **Payment idempotency.** A payment is accepted once per `idempotencyKey` (unique per org). Webhook-driven payments are accepted once per `(provider, eventId)`; duplicates are logged as `SKIPPED_DUPLICATE` and produce no ledger/balance effect | `src/lib/business/payments` + webhook handler |
-| 5 | **Organization scoping.** Every business table carries `organizationId`; every service call receives the org id from the verified session (never from the client body alone). Cross-org reads/writes must 404/403 | `src/lib/business` + route handlers |
-| 6 | **Money integer rule.** All monetary values are `Int` cents. No floats anywhere in the write path | schema + zod |
-| 7 | **Verified payments only.** PENDING payments never affect balances, ledger, or collections | `src/lib/business/payments` |
-| 8 | **Consent gating.** Outbound-message automations resolve consent/opt-out at run time; suppressed actions are recorded as SKIPPED/OPTED_OUT | automation runner |
-| 9 | **Audit coupling.** Consequential changes write their AuditEvent inside the same transaction; a failed audit write fails the operation | all mutating services |
-| 10 | **Wizard state survives restarts.** Wizard progress persisted per org in `Setting(wizard.progress)`; completion is an explicit flag, never implied | wizard API |
+| 1 | **Booking conflict protection.** Overlaps for the same staff/service capacity are rejected (409); check-and-insert runs in a transaction. SQLite serializes writers; Postgres relies on the transaction boundary (exclusion index is future hardening). | `src/lib/business/booking*` |
+| 2 | **Invoice balance.** `paidCents` is the verified-payment sum; status transitions derive from verified payments only. | `src/lib/business/payments` |
+| 3 | **Ledger corrections.** No update/delete paths; corrections are `adjustment`/`reversal` rows referencing `reversalOfId`. | `src/lib/business/ledger` |
+| 4 | **Payment idempotency.** Unique `idempotencyKey` and `externalEventId`; duplicate webhooks return the original result and never double-post. | `src/lib/business/payments` |
+| 5 | **Org scoping.** Every business query filters `orgId` from the session; cross-org IDs return 404. | routes + services |
+| 6 | **Money is integer cents.** No floats in write paths. | schema + zod |
+| 7 | **Only verified payments count.** Pending claims/inbound events never change balances. | payments |
+| 8 | **Consent gating.** `optOut` or `consentContact=false` blocks outbound SMS/WhatsApp/email; inbound is still stored. | collections/dispatcher/telephony |
+| 9 | **Conversation serialization.** A DB token lock with stale TTL prevents overlapping turns; busy requests fail with `conversation_busy`. | `src/lib/concurrency.ts` + receptionist |
+| 10 | **Worker single-flight.** Automation/outbox/data-source workers and manual runs share leases; crashed holders recover after TTL. | `WorkerLease` + `runWithWorkerLease` |
+| 11 | **Wizard state survives restarts.** Persisted in `Organization.setupState`; completion is explicit. | setup routes |
+| 12 | **Audit after mutation.** Consequential mutations write `AuditEvent`; audit is append-only (usually after the write, not always one transaction). | services/routes |

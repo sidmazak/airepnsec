@@ -13,12 +13,49 @@ Next.js 16 App Router deployment; the conceptual boundaries map to directories:
 | **apps/web** — admin dashboard + setup wizard | `src/app/page.tsx` (single-page app, client sections), `src/components/**` | Owner/admin UI: dashboard, wizard, customers, bookings, invoices, ledger, settings, Voice Console, text chat |
 | **apps/api** — HTTP API | Next.js route handlers under `src/app/api/**` (no server actions) | Auth/session, RBAC, zod validation, org scoping, orchestration of business services |
 | — business services (part of api boundary) | `src/lib/business/**` | Booking engine, invoice/payment math, ledger rules, customer service, automation service. Pure-ish TypeScript over Prisma; transactions live here |
-| **apps/worker** — automation tick | `src/instrumentation.ts` (`register()` starts the interval) + manual `POST /api/automations/run` | Periodic automation processing (due runs, retries); the manual endpoint allows operators/cron to trigger a tick |
+| **apps/worker** — automation/outbox/data-source ticks | `src/instrumentation.ts` (`register()` starts the intervals) + manual `POST /api/automations/run`, `POST /api/outbox/dispatch` | Lease-protected periodic processing (due runs, retries, outbox delivery, due data-source sync); manual endpoints share the same leases and return 409 while a worker is running |
 | **apps/voice** — voice channel | Voice Console section (`src/components/sections/voice-section.tsx`), STT/TTS lib (`src/lib/ai/speech.ts`), telephony lib (`src/lib/telephony/twiml.ts`); routes `src/app/api/ai/{asr,tts}` + `src/app/api/telephony/**` | Browser voice console (real STT/TTS) + true phone/SMS receptionist via Twilio (see §9) |
 | package: db | `src/lib/db.ts` (Prisma client singleton) | Data access; schema in `prisma/schema.prisma` |
-| package: ai | `src/lib/ai/**` | Provider adapters (sandbox SDK, Ollama, OpenAI-compatible), embeddings, policy gate (local-only/hybrid/cloud) |
+| package: ai | `src/lib/ai/**` | Provider adapters (Ollama, OpenAI-compatible), embeddings, policy gate (local_only/hybrid/cloud_first) |
 | package: datasources — bring-your-own DB into RAG | `src/lib/datasources/**` (registry, adapters, sync) + routes `src/app/api/datasources/**` + UI `src/components/sections/data-sources-section.tsx` | Connect an external relational DB (postgres/mysql/sqlite) or JSON HTTP endpoint; normalize rows → `KnowledgeDoc`s → the shared chunk/embed pipeline. Read-only SQL enforcement, SSRF guard, encrypted credentials, idempotent re-sync, worker auto-sync |
 | package: integrations | `src/lib/integrations/**` | SMTP/Twilio/Stripe/CalDAV adapters, outbox dispatcher, ICS feed + CalDAV push sync, generic signed-webhook adapter |
+
+```mermaid
+flowchart TB
+  subgraph "Browser SPA"
+    UI[React sections + wizard + diagnostics]
+  end
+  subgraph "Next.js server"
+    ROUTES[API route handlers]
+    AUTH[api.ts wrappers<br/>session · RBAC · CSRF · rate limit]
+    BIZ[business services]
+    AUTO[automation engine]
+    AI[AI provider layer<br/>+ receptionist tools]
+    INT[integration adapters]
+    DS[datasource sync]
+    TEL[telephony / TwiML]
+  end
+  PRISMA[(Prisma client)]
+  DB[(SQLite / PostgreSQL)]
+  EXT[Ollama / OpenAI-compatible<br/>SMTP · Twilio · Stripe · CalDAV · webhooks]
+
+  UI -->|fetch JSON| ROUTES
+  ROUTES --> AUTH
+  AUTH --> BIZ
+  AUTH --> AI
+  AUTH --> INT
+  AUTH --> DS
+  ROUTES --> TEL
+  BIZ --> PRISMA
+  AUTO --> PRISMA
+  AI --> PRISMA
+  AI --> EXT
+  INT --> PRISMA
+  INT --> EXT
+  DS --> PRISMA
+  TEL --> BIZ
+  PRISMA --> DB
+```
 
 Boundary rules:
 
@@ -31,13 +68,13 @@ Boundary rules:
 
 | Concern | This build (sandbox) | Self-hosted production target |
 |---|---|---|
-| Runtime | Next.js dev server (`npm run dev`, port 3000; Node.js + npm — no Bun) | Docker Compose in `infra/` (**Planned** — not in this build): web + postgres + optional ollama |
-| Database | **SQLite** via Prisma (`file:.../db/custom.db`) | **PostgreSQL** (+ **pgvector** for embeddings) |
-| Migrations | `prisma db push` (sandbox convenience) | `prisma migrate deploy` with committed migrations |
-| Embeddings | Stored in-app; lexical/cosine fallback (SQLite has no vector index) | pgvector index |
+| Runtime | Next.js dev server (`npm run dev`, port 3000; Node.js + npm — no Bun) | Docker Compose in `infra/` (app + Postgres/pgvector or single-container SQLite); both profiles built and smoke-tested on 2026-10-22 |
+| Database | **SQLite** via Prisma (`file:.../db/custom.db`), WAL + 5s busy timeout | **PostgreSQL** selected by the `DATABASE_PROVIDER` build arg |
+| Migrations | `prisma db push` | `prisma db push` at container start (committed migrations are future work) |
+| Embeddings | JSON vectors, hybrid cosine + BM25 in-process | pgvector index is an optimization, not required to run |
 | AI provider | none built-in — **BYOK only**: Ollama (local) or any OpenAI-compatible endpoint | Keys AES-256-GCM encrypted server-side, never returned |
-| Rate limiting | In-memory per-process | DB/Redis-backed (multi-instance) |
-| TLS/headers termination | Caddy in sandbox routes to :3000 | Caddyfile in `infra/` with HSTS |
+| Rate limiting | In-memory per-process | DB/Redis-backed shared limiter is future work |
+| TLS/headers termination | Security headers in `next.config.ts`; no proxy shipped | Reverse proxy (Caddy/nginx) required for TLS; headers remain app-side |
 
 **Schema portability rules** (enforced by review, checked in [DATA_MODEL.md](./DATA_MODEL.md)):
 
@@ -49,26 +86,55 @@ These rules keep the SQLite→PostgreSQL switch a datasource-provider change, no
 
 ## 3. Request lifecycle
 
-```
-Browser (SPA)
-  │  fetch (JSON, session cookie)
-  ▼
-Route handler  src/app/api/**/route.ts
-  1. Rate limit check (per IP + per session)
-  2. Auth: verify HMAC-signed session cookie → user
-  3. Org scope: resolve membership + role for target orgId
-  4. Parse & validate body/query with zod schema (unknown keys rejected)
-  5. RBAC assertion for the action
-  6. Call business service (src/lib/business) — may open a Prisma $transaction
-  7. Service writes consequential AuditEvent rows inside the same transaction
-  8. Handler returns JSON; errors map to typed status codes (400/401/403/404/409/429/500)
+```mermaid
+flowchart TD
+  B[Browser / provider webhook] -->|JSON + session cookie| H[Route handler<br/>src/app/api/**/route.ts]
+  H --> RL{Rate limit<br/>per IP + path}
+  RL -->|over| E429[429 rate_limited]
+  RL --> AUTH{Session cookie<br/>SHA-256 match}
+  AUTH -->|invalid/expired| E401[401 / redirect]
+  AUTH --> ZOD{zod parse<br/>unknown keys rejected}
+  ZOD -->|invalid| E400[400 validation_error]
+  ZOD --> RBAC{Role allowed?}
+  RBAC -->|no| E403[403 forbidden]
+  RBAC --> SVC[Business service<br/>src/lib/business]
+  SVC --> TX[Prisma transaction<br/>org-scoped queries]
+  TX --> AUDIT[AuditEvent<br/>per-service]
+  AUDIT --> R[JSON response]
+  SVC -->|ApiError| ERR[Typed status + code]
 ```
 
-Automation tick lifecycle (apps/worker): `instrumentation.ts register()` starts an interval →
-claims due `AutomationRun` rows (status QUEUED, `scheduledFor <= now`) → executes actions via
-business/integration services → records result, schedules retry with backoff or dedupe-skips →
-writes audit. `POST /api/automations/run` (admin) triggers the same processing synchronously for
-operators and cron setups.
+Auth sequencing detail: `withAuth` checks the session cookie before the zod body parse;
+`withPublic` skips auth but keeps rate limiting. CSRF is enforced for authenticated
+mutations (`x-requested-with: ais`). Audit writes are coupled per service, not one global
+transaction around every request.
+
+```mermaid
+sequenceDiagram
+  participant T as Timer (instrumentation)
+  participant W as Worker wrapper
+  participant L as WorkerLease (DB)
+  participant J as Job
+  T->>W: tick (no overlap inside this process)
+  W->>L: acquire(name, holder, TTL)
+  alt lease held by another instance
+    L-->>W: busy
+    W-->>T: skip
+  else acquired or stale TTL reclaimed
+    W->>J: run automation / outbox / datasource sync
+    J-->>W: result or error
+    W->>L: release (expiresAt=0) + record lastRun/error
+  end
+```
+
+Worker lifecycle: `instrumentation.ts register()` starts three intervals (automation, outbox,
+data-source sync). Each tick first acquires a DB `WorkerLease` (`runWithWorkerLease`, TTL recovery),
+then claims due work: `AutomationRun` rows, queued `OutboxMessage` rows, or due `DataSource` syncs.
+An in-process guard prevents overlapping ticks when a slow batch exceeds its interval; across
+instances the DB lease is authoritative. Results/retries/dedupe/skips are persisted; a crashed
+holder is recovered once the lease TTL lapses. Manual `POST /api/automations/run`,
+`POST /api/outbox/dispatch` and datasource sync use the same leases and return
+`409 worker_busy`/`sync_busy` instead of racing a scheduled or another-instance tick.
 
 ## 4. AI receptionist tool-loop design
 
@@ -77,9 +143,11 @@ through server-side validated tools.
 
 ```
 ┌────────────┐  user msg   ┌─────────────────────────────┐
-│ Browser    │────────────▶│ /api/assistant (route)      │
-│ chat/voice │             │  policy gate (mode check)   │
-└────────────┘             │  build context (org, FAQ)   │
+│ Browser    │────────────▶│ /api/conversations/[id]/messages
+│ chat/voice │             │ /api/public/chat/[slug]     │
+└────────────┘             │ /api/ai/realtime/tool       │
+                           │  policy gate (mode check)   │
+                           │  build context (org, FAQ)   │
                            ▼                             │
                      ┌───────────┐  strict JSON tool call │
                      │ LLM via   │──────────────────────▶ tools: {name, args}
@@ -88,6 +156,7 @@ through server-side validated tools.
                            │  final assistant message
                            ▼
                  Conversation + Message rows persisted (incl. every tool call)
+                 (DB turn lock serializes overlapping turns for the same conversation)
 ```
 
 Protocol rules:
@@ -102,24 +171,24 @@ Protocol rules:
    uses — booking conflict rules, org scoping, and audit apply identically.
 4. **Loop bounds.** Max tool iterations per turn (default 6); exceeded → graceful handoff message
    ("I'll hand this to a human").
-5. **Tool categories.** Read: availability, customer lookup, service/price lookup, FAQ search.
-   Write: create booking, create invoice draft, record payment intent. Destructive tools
-   (cancel/void) require explicit confirmation token from the user in-thread.
+5. **Tool categories.** Read: services/staff, availability, bookings, invoices, business info,
+   FAQ search. Write: create/reschedule/cancel booking, payment claim, take-message/escalation.
+   Cancellation policy is enforced by the tool; there is no invoice-void tool.
 6. **Auditability.** Each tool invocation is persisted as a `Message` row (role TOOL) with args and
    result, plus `AssistantRun` metadata (provider, model, mode, latency, error).
-7. **Deterministic fallback.** If no provider is healthy, a rule-based responder handles the core
-   intents and is labeled as such in the transcript.
+7. **No silent fallback.** If no provider is enabled/unhealthy, the turn fails with an explicit,
+   user-visible error; there is no bundled deterministic booking bot.
 
 ## 5. AI provider policies: local-only / hybrid / cloud
 
 | Mode | Allowed providers | Enforcement |
 |---|---|---|
-| **local-only** (default for self-hosters) | Ollama / local endpoints only | Policy gate in `src/lib/ai` checked before **every** provider call; cloud endpoint → hard error (not silent fallback). Also blocks outbound telemetry paths |
-| **hybrid** | Local preferred; configured cloud allowed for specific features | Gate routes per-feature config |
-| **cloud** | BYOK cloud endpoints | Keys stored AES-256-GCM encrypted, server-side only |
+| **local_only** | Ollama / local or private-network endpoints | Policy gate checked before every AI call; external `openai_compatible` → hard error (no silent fallback) |
+| **hybrid** | Operator-configured local or cloud endpoints | Gate permits configured endpoints |
+| **cloud_first** | Operator-configured cloud endpoints | Keys AES-256-GCM encrypted, server-side only |
 
-- The mode is an org-level setting, default **local-only**; changing it is an admin action that is audited.
-- The sandbox SDK adapter counts as a *cloud* provider and is therefore disabled in local-only mode.
+- The mode is an org-level setting (schema/UI seed `hybrid`); changing it is audited.
+- There is no managed/bundled provider and no proprietary AI SDK.
 - **RAG embeddings** follow the same gate. Default is the **built-in local neural embedder**
   (`Xenova/all-MiniLM-L6-v2`, 384-d, ONNX via transformers.js, cached in `.models/`) — real
   semantic vectors with no API key and zero data egress. Alternatives: local Ollama
@@ -133,8 +202,9 @@ Protocol rules:
   server boot (`instrumentation.ts`) so the first search is fast.
 - On PostgreSQL production, chunk vectors should move to **pgvector**; the JSON-vector layout
   (SQLite build) is documented as the portable intermediate representation.
-- Health checks (`/api/ai/providers` status) mark providers HEALTHY/UNHEALTHY; the assistant
-  refuses to start a turn with an unhealthy configured provider rather than silently failing.
+- Provider connection tests (`POST /api/providers/[capability]/test`) store honest
+  `lastTestOk/lastTestError`; the assistant surfaces a clear error when no enabled provider is
+  available rather than silently pretending to answer.
 
 ## 6. Automation engine
 
@@ -142,11 +212,13 @@ Model: **trigger → (conditions) → (delay) → actions**, executed by the wor
 
 | Aspect | Design |
 |---|---|
-| Triggers | Event-based: `booking.created`, `booking.cancelled`, `invoice.issued`, `invoice.overdue`, `payment.verified`, `message.received`. Schedule-based: due-date ticks (e.g. daily overdue scan) |
-| Conditions | Field predicates on the subject (e.g. `status == CONFIRMED`, `balanceCents > 0`, `consentMarketing == true`), AND-composed |
-| Delay | `delaySeconds` between trigger and execution; run is persisted as QUEUED with `scheduledFor`, so restarts don't lose it |
-| Actions | Create task/reminder, flag customer, draft message (queued — delivery **Deferred**), call automation webhook (generic signed POST), write audit note |
-| Retry | Exponential backoff, max attempts (default 3), `lastError` recorded per run |
+| Triggers | `invoice_overdue`, `booking_created`, `booking_reminder`, `conversation_escalated`, `manual` |
+| Conditions | Field predicates (e.g. status, balance/outstanding, consent), AND-composed |
+| Delay | `delayMinutes` between trigger and execution; the run is persisted with `scheduledFor`, so restarts don't lose it |
+| Actions | `send_invoice_reminder`, direct `send_email` / `send_sms` / `send_webhook`, `notify_inapp`, `flag_for_review` |
+| Retry | Exponential backoff with attempt tracking; `lastError` recorded per run |
+| Test mode | Logs what would be queued/sent instead of sending |
+| Worker | 60 s lease-protected tick; manual run shares the lease |
 | Dedupe | `dedupeKey` (rule, subject, calendar window) unique — prevents duplicate reminders for the same booking/invoice |
 | Audit | Every run persisted (`AutomationRun`) with status QUEUED/RAN/SKIPPED/FAILED/CANCELLED + error; skipped-by-dedupe and skipped-by-opt-out are explicit statuses, not silent drops |
 
@@ -164,12 +236,21 @@ makes the action SKIPPED with reason OPTED_OUT (see [SECURITY.md](./SECURITY.md)
 
 ## 8. Observability & operations
 
-- `dev.log` captures dev server output; API failures log structured messages server-side.
-- `/api/health` returns basic liveness + provider/db status summary.
+- `dev.log`/container stdout captures server output; API failures are logged server-side and
+  returned as typed errors (no stack traces to clients).
+- `GET /api/health` is a pure liveness probe (no DB access).
+- `GET /api/health/ready` performs a real `SELECT 1` and returns `503` when the database is
+  unreachable; Docker/compose uses it as the readiness healthcheck.
+- `GET /api/health/detail` (authenticated) reports DB tuning, worker leases, provider state,
+  heartbeat and counts for operators.
 - Audit trail (`AuditEvent`) is the primary "what happened" record; dashboard ledger view is the
   financial record.
-- Backups: JSON export via `/api/admin/backup` (implemented); binary snapshot script `infra/backup.sh`
-  ships with the production packaging (**Planned**).
+- Backups: `POST /api/admin/backup` runs SQLite `VACUUM INTO`; `GET /api/admin/export` produces a
+  secrets-free JSON snapshot. On Postgres use `pg_dump` (the in-app backup endpoint is SQLite-only).
+- Diagnostics: `/api/health/detail` reports DB round-trip/tuning, worker leases, heartbeat, provider
+  state and org counts; no scheduled backup script is shipped.
+- Container operations: log rotation, `init`, stop grace period and a readiness healthcheck are
+  configured in the Docker packaging.
 
 ## 9. Voice, telephony & calendar sync
 
@@ -189,11 +270,43 @@ is decoded, transcribed, and dropped; TTS audio is returned as base64 for playba
 stored; on phone calls the media never touches this server at all (Twilio's own `<Say>/<Gather>`
 handle speech). Inbound SMS bodies are additionally captured verbatim in `WebhookEvent` payloads.
 
-**Calendar sync — push design.** `src/lib/integrations/caldav.ts` is a raw-HTTP CalDAV client:
+**Calendar sync — two-way design.** `src/lib/integrations/caldav.ts` is a raw-HTTP CalDAV client:
 `PROPFIND` health check (207/200), `PUT {uid}.ics` idempotent upsert, `DELETE`; HTTP Basic auth;
 a real RFC 5545 VEVENT builder (line folding, escaping, UTC stamps, `X-AIS-ORG` org marker).
-`POST /api/integrations/caldav-sync` (owner/admin, "Sync now" in the UI) pushes upcoming
-`pending|confirmed` bookings (default 45 days) as `booking-{id}@{orgslug}.ics` with per-item
-results and a persisted last-sync summary — verified live against Radicale. **Pull/two-way sync
-is documented future work** (external-event ingestion, conflict handling, Google OAuth); the
-read-only ICS feed remains the subscription path for now.
+`POST /api/integrations/caldav-sync` (owner/admin, "Sync now") pushes upcoming `pending|confirmed`
+bookings (default 45 days) and pulls previously pushed events: remote `STATUS:CANCELLED` cancels
+the booking, a moved `DTSTART` reschedules through the validated booking service, and remote
+deletes are reported as `missing` rather than auto-cancelled. Per-item results and a persisted
+last-sync summary are returned; verified against Radicale.
+
+**PABX routing (phone lines).** `src/lib/telephony/routing.ts` contains pure helpers used by the
+voice incoming route: `least_busy` (real active-call load), `round_robin` (CAS-updated cursor in
+the line config), and `redirect` (deterministic priority target). Disabled or `acceptingCalls:false`
+lines are excluded; lines without a `TelephonyLine` row remain eligible with zero load. Every call
+creates a `TelephonyCall` row; status callbacks prefer Twilio `DialCallStatus` for `<Dial>` results
+and normalize `ringing/queued → started`, `in-progress → answered`, `no-answer/busy/canceled → missed`.
+No-input counters are shared between gather and status so completed calls clear their state.
+
+## 10. Production deployment topology
+
+```mermaid
+flowchart LR
+  U[Users / Twilio / payment provider] -->|HTTPS| P[Reverse proxy<br/>Caddy or nginx<br/>TLS + request limits]
+  P -->|HTTP :3000| A[app container<br/>Next standalone + workers]
+  A -->|Prisma| D[(PostgreSQL 16<br/>pgdata volume)]
+  A -->|SMTP/HTTPS| X[Optional BYOK providers<br/>SMTP · Twilio · Stripe · CalDAV]
+  A --> V[(Volumes<br/>.data key · backups · .models)]
+  M[Host monitoring] -->|/api/health| A
+  M -->|/api/health/ready| A
+```
+
+Operational invariants:
+
+- Terminate TLS at the proxy; never publish the app port directly on the public internet.
+- The app writes only to its database and mounted `app_data`/`app_backups`/`app_models` volumes.
+- `APP_SECRET` (or the generated `.data/secret.key`) must be backed up with the database; without it,
+  encrypted provider/integration credentials are unrecoverable.
+- Schema boot applies only additive changes. Destructive changes fail the boot and require an
+  explicit operator migration after a backup.
+- Run SQLite with exactly one app container. Use PostgreSQL for multiple replicas; workers are
+  lease-protected, but only one instance needs to run them (`AIS_DISABLE_WORKERS=1` elsewhere).

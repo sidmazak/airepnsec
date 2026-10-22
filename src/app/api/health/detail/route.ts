@@ -2,6 +2,8 @@ import { withAuth, json } from '@/lib/api'
 import { db } from '@/lib/db'
 import { getServerKey } from '@/lib/crypto'
 import { workerHeartbeat } from '@/lib/automation/engine'
+import { getWorkerStatuses } from '@/lib/concurrency'
+import { getDbTuning } from '@/lib/db-tuning'
 
 /**
  * GET /api/health/detail — real diagnostics only, every value is honestly measured:
@@ -25,7 +27,7 @@ export const GET = withAuth(async (req, ctx) => {
     encryptionKey = false
   }
 
-  const [secretRow, heartbeat, llmRow, embeddingRow, customers, bookings, invoices, conversations, outboxQueued] =
+  const [secretRow, heartbeat, llmRow, embeddingRow, customers, bookings, invoices, conversations, outboxQueued, workers] =
     await Promise.all([
       db.appSetting.findUnique({ where: { orgId_key: { orgId, key: 'webhook_secret' } }, select: { id: true } }),
       workerHeartbeat(orgId),
@@ -36,13 +38,16 @@ export const GET = withAuth(async (req, ctx) => {
       db.invoice.count({ where: { orgId } }),
       db.conversation.count({ where: { orgId } }),
       db.outboxMessage.count({ where: { orgId, status: 'queued' } }),
+      getWorkerStatuses(),
     ])
 
   return json({
     db: dbOk,
+    database: await getDbTuning(),
     encryptionKey,
     webhookSecret: Boolean(secretRow),
     workerHeartbeat: heartbeat,
+    workers,
     providers: {
       llm: {
         provider: llmRow?.provider ?? 'not_configured',

@@ -618,10 +618,10 @@ export function AutomationsSection() {
 
       {/* editor dialog */}
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="automation-editor-desc">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editor.id ? 'Edit automation' : 'New automation'}</DialogTitle>
-            <DialogDescription id="automation-editor-desc">
+            <DialogDescription>
               Define when it fires and what it does. Start in test mode to watch runs without messaging anyone.
             </DialogDescription>
           </DialogHeader>

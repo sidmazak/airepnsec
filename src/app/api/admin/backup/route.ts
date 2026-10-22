@@ -3,6 +3,7 @@ import path from 'node:path'
 import { withAuth, json, fail } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
+import { getDbTuning } from '@/lib/db-tuning'
 
 /**
  * POST /api/admin/backup (owner/admin) — SQLite `VACUUM INTO` snapshot.
@@ -12,6 +13,11 @@ import { audit } from '@/lib/audit'
 export const POST = withAuth(
   async (req, ctx) => {
     try {
+      const tuning = await getDbTuning()
+      if (tuning && tuning.kind !== 'sqlite') {
+        return fail(400, 'In-app backups use SQLite VACUUM INTO. On PostgreSQL use pg_dump (see docs/SELF_HOSTING.md).', { code: 'unsupported_database' })
+      }
+
       const dir = path.join(process.cwd(), 'backups')
       await fs.promises.mkdir(dir, { recursive: true })
       const filename = `backup-${Date.now()}.db`

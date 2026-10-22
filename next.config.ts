@@ -24,9 +24,9 @@ const nextConfig: NextConfig = {
   // Native/heavy AI packages must stay outside the server bundle (loaded at runtime via require)
   serverExternalPackages: ["@huggingface/transformers", "onnxruntime-node", "pg", "mysql2"],
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
-  reactStrictMode: false,
+  reactStrictMode: true,
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

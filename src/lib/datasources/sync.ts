@@ -3,6 +3,7 @@ import { ApiError } from '@/lib/api'
 import { decryptSecret, sha256 } from '@/lib/crypto'
 import { parseJson } from '@/lib/org'
 import { indexDocument } from '@/lib/ai/embeddings'
+import { runWithWorkerLease } from '@/lib/concurrency'
 import { fetchRawRows, testDataSource, type AdapterTestResult, type Connection } from './adapters'
 import { DEFAULT_LIMIT, isDataSourceKind, type DataSourceConfig, type DataSourceKind } from './registry'
 
@@ -103,8 +104,20 @@ export type SyncResult = {
   chunkCount: number
 }
 
-/** Run a full sync for one source. Throws ApiError(502) on connection/query failure. */
+/**
+ * Run a full sync for one source. Throws ApiError(502) on connection/query failure.
+ * A per-source lease prevents a manual sync and the auto-sync worker (possibly on
+ * another instance) from re-indexing the same rows concurrently.
+ */
 export async function syncDataSource(orgId: string, sourceId: string): Promise<SyncResult> {
+  const outcome = await runWithWorkerLease(`datasource:${sourceId}`, () => syncDataSourceUnlocked(orgId, sourceId))
+  if (!outcome.ran) {
+    throw new ApiError(409, 'A sync for this data source is already running. Try again when it finishes.', 'sync_busy')
+  }
+  return outcome.result
+}
+
+async function syncDataSourceUnlocked(orgId: string, sourceId: string): Promise<SyncResult> {
   const source = await loadSource(orgId, sourceId)
   const kind = source.kind as DataSourceKind
   const connection = connectionOf(source)

@@ -1,0 +1,50 @@
+# Single-box self-host profile: SQLite instead of PostgreSQL.
+#
+# Use this for a small single-instance deployment. SQLite is a single file and
+# does not support multiple app replicas writing concurrently; run exactly one
+# `app` container. For horizontal scaling use docker-compose.yml (Postgres).
+#
+#   cd infra
+#   cp .env.example .env       # set POSTGRES_* (unused here) and APP_SECRET
+#   docker compose -f docker-compose.sqlite.yml up -d --build
+#
+# Backup: POST /api/admin/backup writes VACUUM INTO snapshots into app_backups.
+# Persist the app_backups and app_data volumes; app_data holds secret.key when
+# APP_SECRET is unset.
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      args:
+        DATABASE_PROVIDER: sqlite
+    init: true
+    stop_grace_period: 30s
+    environment:
+      DATABASE_URL: file:/app/db/custom.db
+      NODE_ENV: production
+      # Generate with: openssl rand -hex 32. Leave empty only if you will persist
+      # and back up the app_data volume (secret.key).
+      APP_SECRET: ${APP_SECRET:-}
+      # PUBLIC_BASE_URL: https://receptionist.example.com
+    ports:
+      # Host port is configurable so a local dev server can keep 3000.
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - app_db:/app/db
+      - app_data:/app/.data
+      - app_backups:/app/backups
+      - app_models:/app/.models
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  app_db:
+  app_data:
+  app_backups:
+  app_models:

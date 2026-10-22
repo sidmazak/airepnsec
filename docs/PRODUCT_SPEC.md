@@ -1,7 +1,7 @@
 # Product Specification — AI Secretary
 
-> Status: authoritative product contract for this build. Implementation state is tracked in
-> [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md); anything not marked DONE there must be read as planned, not shipped.
+> Status: product contract for this build. Implementation status is tracked in
+> [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md); anything marked Planned/Deferred there is not shipped.
 
 ## 1. Objective
 
@@ -12,22 +12,22 @@ infrastructure the operator controls.
 
 Design principles:
 
-1. **Local-first.** The operator's data lives in a database they own. No vendor cloud is required
-   for core flows (bookings, invoices, ledger, automations).
-2. **AI is optional and swappable.** The assistant works against local models (e.g. Ollama) or
-   operator-supplied cloud keys (BYOK). The product must complete its full business vertical slice
-   with **zero cloud AI keys**.
+1. **Local-first.** The operator's data lives in a database they own (SQLite by default; Postgres
+   supported through the Docker deployment). No vendor cloud is required for core flows.
+2. **AI is optional and swappable.** The assistant works against local models (Ollama), a local
+   neural embedder, or an operator-supplied OpenAI-compatible endpoint (BYOK). No proprietary AI
+   SDK. The business vertical slice (steps 1–7 in §7) must work with **zero AI providers**; the
+   assistant itself needs a configured model and never invents a deterministic fallback reply.
 3. **One shared core, configured per business type.** Apartments, cars, salons, clinics, and
-   contractors are *profiles*, not forks. A single booking/invoicing/ledger engine serves all of them.
-4. **Honesty over demos.** Features that are not implemented are labeled Deferred/Planned. The
-   system never fakes success (e.g. "message sent" when nothing was sent).
+   contractors are *profiles*, not forks: one booking/invoicing/ledger engine serves all.
+4. **Honesty over demos.** Unimplemented features are labeled Planned/Deferred. The system never
+   fakes success ("message sent" when only queued, "paid" when only claimed, "tested" when not).
 
 ## 2. Supported business profiles
 
-A **business profile** is a configuration object selected in the setup wizard. It seeds vocabulary,
-templates, booking semantics, and default services. It does **not** change the code path: every
-profile runs on the same services (`src/lib/business`), the same Prisma schema, and the same
-assistant tool set.
+A **business profile** is a configuration object selected in the 8-step setup wizard. It seeds
+vocabulary, templates, booking semantics, and default services. It does not change the code path:
+every profile runs on the same services (`src/lib/business`), Prisma schema, and assistant tool set.
 
 | Profile | Bookable "thing" | Booking unit | Capacity model | Typical default services |
 |---|---|---|---|---|
@@ -37,105 +37,98 @@ assistant tool set.
 | Clinic | Appointment type | Time slot | Practitioner (staff) + room (optional resource) | Consultation, follow-up, procedure |
 | Contractor | Job type | Time window | Crew member (staff) | Site visit, estimate, repair visit |
 
-What varies per profile (config, not code):
+What varies per profile (config, not code): terminology, booking duration semantics, default
+catalog/import templates, dunning defaults, and knowledge starters. What never varies: conflict
+rules, invoice/payment math, ledger rules, RBAC checks, audit, automation engine, org isolation.
 
-- Terminology labels in the UI and assistant prompts ("listing" vs "vehicle" vs "service").
-- Booking duration semantics (slots in minutes vs. day/night ranges).
-- Default service catalog and CSV import templates.
-- Dunning (collections) defaults and escalation message templates.
-- Knowledge/FAQ starter examples.
-
-What never varies: booking conflict rules, invoice/payment math, ledger rules, RBAC, audit,
-automation engine, org isolation.
-
-## 3. Feature list
+## 3. Feature status
 
 | Area | Feature | Status (this build) |
 |---|---|---|
-| Setup | 8-step setup wizard, autosave, resumable | Implemented (see [SETUP_WIZARD.md](./SETUP_WIZARD.md)) |
+| Setup | 8-step setup wizard (Business, Services & staff, Import, Knowledge, AI provider, Channels, Collections, Test & activate), autosave, resumable, readiness gate | Implemented |
 | Setup | Business profiles (5) with seeded templates | Implemented |
 | Setup | CSV import for customers/services with templates + row-level validation report | Implemented |
-| Customers | CRUD, notes, tags, consent flags | Implemented |
-| Scheduling | Services, staff, business hours, real booking engine with overlap protection | Implemented |
+| Customers | CRUD, notes, tags, consent/opt-out flags | Implemented |
+| Scheduling | Services, staff, business hours, validated booking engine with overlap protection | Implemented |
 | Scheduling | Resource booking (units/vehicles/rooms) | Implemented (schema + service layer) |
-| Invoicing | Invoice creation from bookings, line items, balances, void/adjust | Implemented |
-| Payments | Record payment, verification workflow, idempotency keys, generic signed-webhook adapter | Implemented |
-| Payments | Provider-specific webhooks (Stripe/PayPal event schemas) | **Deferred** — needs real provider credentials; generic HMAC adapter is the seam |
+| Invoicing | Invoice creation from bookings, line items, balances, void | Implemented |
+| Payments | Record/verify payments, claims vs verified payments, idempotency keys, generic signed inbound webhook | Implemented |
+| Payments | Stripe payment links + signature-verified Stripe webhooks | Implemented (BYOK) |
+| Payments | PayPal/other provider-specific schemas | **Planned** — use the generic webhook or Stripe |
 | Ledger | Append-only ledger, adjustments/reversals only, per-invoice reconciliation | Implemented |
-| Assistant | Text chat receptionist with strict JSON tool loop | Implemented |
-| Assistant | Voice Console — real STT/TTS (built-in gateway or OpenAI-compatible BYOK) driving the same tool loop | Implemented |
-| Assistant | Real telephony: inbound voice (Twilio Voice/TwiML) with the full tool loop + escalation transfer; inbound SMS threads | Implemented (BYOK Twilio) |
-| Assistant | Outbound PSTN dialing / voice broadcast | **Deferred** — inbound telephony only in this build |
-| Knowledge | FAQ/knowledge items, retrieval for assistant grounding | Implemented |
-| AI providers | Local model detection (Ollama), OpenAI-compatible BYOK, sandbox SDK adapter, policy gate | Implemented |
-| Automations | Trigger/condition/delay/action engine, retry, dedupe, audit | Implemented |
-| Automations | Outbound message **delivery** (email via SMTP, SMS via Twilio, signed webhooks) through the outbox dispatcher | Implemented (BYOK integrations; consent & opt-out enforced at queue and run time) |
-| Collections | Overdue policy, dunning schedule, escalation | Implemented (as automations producing audited queued messages/tasks) |
-| Channels | Web text chat, Voice Console (browser), phone (Twilio Voice), inbound SMS threads | Implemented |
-| Channels | WhatsApp/Instagram inbound | **Planned** |
-| Calendar | Read-only ICS feed + CalDAV push sync (bookings → external calendar servers) | Implemented |
-| Calendar | Two-way/pull sync (Google OAuth, external-event ingestion) | **Planned** — push sync only in this build |
-| Reporting | Dashboard (today's bookings, outstanding balances, ledger view) | Implemented (basic) |
-| Data | Org-scoped JSON export, backup endpoint | Implemented (JSON export) |
-| Data | Binary snapshot backup/restore scripts (`infra/`) | **Planned** — `infra/` packaging ships with the production Docker Compose work |
+| Assistant | Text chat receptionist with strict JSON tool loop and validated tools | Implemented |
+| Assistant | Voice Console — browser Web Speech fallback or BYOK OpenAI-compatible STT/TTS driving the same tool loop | Implemented |
+| Assistant | Inbound telephony (Twilio Voice/TwiML, speech Gather, escalation, PABX line routing) + inbound SMS/WhatsApp threads | Implemented (BYOK) |
+| Assistant | Outbound PSTN dialing / voice broadcast | **Deferred** — inbound telephony only |
+| Assistant | Server-side streaming, native provider tool calls, reranking, vision | **Not implemented** — the tool loop is non-streaming JSON |
+| Knowledge | FAQ/knowledge items, approved-only retrieval, local lexical + neural embeddings | Implemented |
+| Knowledge | External datasources (Postgres/MySQL/SQLite read-only, HTTP JSON) into the same RAG pipeline | Implemented (BYOK; SSRF-guarded) |
+| AI providers | Local Ollama, any OpenAI-compatible endpoint, browser STT, built-in local neural/lexical embeddings, policy gate | Implemented; **no managed/hosted default** |
+| Automations | Trigger/condition/delay/action engine, retry, dedupe, audit, per-day caps, quiet hours | Implemented |
+| Automations | Outbound delivery (SMTP, Twilio SMS/WhatsApp, BYO SMS gateway, signed webhooks) via the leased outbox dispatcher | Implemented; consent/opt-out enforced at queue and run time |
+| Collections | Overdue policy, dunning schedule, escalation | Implemented (audited queued messages/tasks; nothing auto-sends unverified) |
+| Channels | Web text chat, public embedded web chat, Voice Console, phone, inbound SMS, inbound WhatsApp | Implemented |
+| Channels | Instagram inbound | **Planned** |
+| Calendar | Read-only ICS feed + CalDAV push/pull sync (remote cancel/move applied conservatively) | Implemented |
+| Calendar | Google/Microsoft OAuth, external-event ingestion beyond CalDAV | **Planned** |
+| Reporting | Dashboard, usage metrics (`AiLog`), diagnostics (DB/workers/providers) | Implemented (basic) |
+| Data | Org-scoped JSON export, SQLite backup endpoint, Docker/Compose deployment | Implemented |
+| Data | One-click restore/rollback scripts | **Not shipped** — snapshot via `VACUUM INTO`/`pg_dump` documented in SELF_HOSTING |
+| Team | Multiple users per org with role management UI | **Not shipped** — roles are enforced server-side, but this build has no user-management API/UI; each org has its owner account |
 
 ## 4. Non-goals
 
-- **Not a multi-tenant SaaS.** One deployment serves one organization. Multi-tenancy is per-instance.
+- **Not a multi-tenant SaaS.** One deployment serves one organization; org scoping exists for
+  isolation and demo data, not for public multi-tenancy.
 - **No payment custody.** The system records and verifies payments; it never holds or moves funds.
-- **No email/SMS delivery without your own provider.** Delivery is BYOK (SMTP/Twilio) through
-  the outbox; nothing sends until an integration is enabled, and nothing is ever faked as sent.
-- **No native mobile apps.** The admin UI is responsive web; the voice test runs in the browser.
-- **Not a general chatbot framework.** The assistant is scoped to reception/booking/billing intents
-  over first-party data, with a fixed validated tool set.
-- **No marketplace, no public directory, no SEO surface.** The only public surfaces are
-  operator-configured, signature-verified webhooks (assistant channels via Twilio, payment
-  callbacks).
-- **No dark-pattern collection.** Analytics/telemetry do not exist; local-only mode forbids outbound calls.
+- **No email/SMS delivery without your own provider.** Delivery is BYOK (SMTP/Twilio/SMS gateway)
+  through the outbox; nothing sends until an integration is enabled, and nothing is ever faked.
+- **No native mobile apps.** Responsive web UI; voice runs in the browser or over Twilio.
+- **No general chatbot framework.** Fixed validated tool set scoped to reception/booking/billing.
+- **No marketplace/public directory/SEO surface.** The public surfaces are the public web-chat
+  endpoint (anyone who knows the org slug can start a chat), signature-verified inbound webhooks,
+  and the session-authenticated ICS feed. There is no listing/discovery page.
+- **No dark-pattern collection.** No analytics/telemetry; `local_only` blocks cloud providers.
 
-## 5. User roles
+## 5. Roles (enforced server-side)
 
-| Role | Capabilities |
+| Role | Current capabilities |
 |---|---|
-| **Owner** | Everything an Admin can do, plus: delete organization, manage ownership transfer, rotate server-side secrets (encryption key rotation procedure), delete all org data |
-| **Admin** | Manage users & roles, services/staff/hours, AI providers & keys, automations, channels, ledger adjustments, export/backup, void invoices |
-| **Agent** | Day-to-day operations: customers CRUD, create/change bookings, create invoices, record payments (verification per policy), manage knowledge items, run assistant conversations. Cannot: manage users, edit AI keys, edit automations, adjust ledger |
-| **Viewer** | Read-only dashboards, bookings, invoices, ledger. Cannot mutate anything. Assistant conversations visible in transcript view only |
+| **Owner** | Everything an Admin can do; the only role that can complete owner-only setup actions. No ownership-transfer or org-deletion endpoint exists yet. |
+| **Admin** | Services/staff/hours, AI providers & keys, integrations, automations, data sources, ledger adjustments, export/backup, void invoices, telephony lines, conversation takeover. |
+| **Agent** | Customers, bookings, invoices, payments, knowledge, conversations. Cannot manage users/settings/AI keys/automations/ledger. |
+| **Viewer** | Read-only across dashboards, bookings, invoices, ledger, conversations, diagnostics. |
 
-Enforcement is server-side: every route handler resolves the session → membership → role, and
-business services assert permission before mutation. The full matrix lives in
-[SECURITY.md](./SECURITY.md) §RBAC.
+Every route resolves session → user → org and checks role server-side; business services validate
+again. The full matrix lives in [SECURITY.md](./SECURITY.md). **Gap:** there is no user-management
+API or UI in this build, so an org effectively has one owner account; the role checks are still
+exercised by tests and remain the enforcement layer for future team support.
 
 ## 6. Demo mode
 
-Demo mode exists so an operator can evaluate the product **without any external accounts**.
-
-- Seeded demo organization with one profile (apartment rentals by default), sample customers,
-  services, staff, hours, FAQ entries, bookings, invoices, and ledger entries.
-- Demo assistant runs in **local-only** semantics: if no local model is detected and no keys are
-  configured, the chat falls back to a deterministic rule-based responder so bookings/invoices can
-  still be demonstrated. This fallback is clearly labeled in the UI ("deterministic mode — no model
-  configured"), never presented as an LLM.
-- No outbound network calls are made by demo mode. Ever.
-- Demo data is disposable: a reset action recreates the seed. Demo organizations are visually
-  flagged and excluded from "real" counts where mixed.
-- Demo mode does **not** bypass auth: it creates a real (local) demo account.
+- `POST /api/demo/seed` (public, rate-limited, idempotent) creates a clearly-labeled demo org
+  (`demo@aisecretary.local` / `demo-1234`) with customers, services, staff, hours, FAQ, bookings,
+  invoices (paid/partial/overdue), ledger entries, and a seeded inbox conversation.
+- **No deterministic assistant fallback exists.** Demo AI provider rows start disabled; chat reports
+  an explicit configuration error until the operator enables a local/OpenAI-compatible model.
+- Demo mode makes no outbound network calls of its own. It does not bypass auth; it creates a real
+  local account. Re-running the seed reuses/updates the demo org rather than duplicating it.
+- There is no one-click demo reset endpoint; delete `db/custom.db` (or the demo rows) to reset.
 
 ## 7. Acceptance criteria — minimum vertical slice
 
-The product passes acceptance when this slice completes end-to-end **without any cloud AI keys**:
+The business slice passes **without any cloud AI keys**:
 
 | # | Step | Pass condition |
 |---|---|---|
-| 1 | Install & run | `npm install`, `.env` with `DATABASE_URL`, `npm run db:push`, `npm run dev` → app serves on port 3000 with no runtime errors in `dev.log` |
-| 2 | Setup wizard | All 8 steps complete; progress survives reload; wizard is completable with zero external integrations (AI provider optional at this stage) |
-| 3 | Customer + service | A customer and a bookable service exist, created via UI or CSV import, scoped to the organization |
-| 4 | Booking via real engine | Booking created against business hours + staff/resource; an overlapping booking attempt is **rejected with 409** (conflict logic in the service layer inside a transaction, not UI-only) |
-| 5 | Invoice | Invoice issued from the booking with correct line math; balance = total − verified payments |
-| 6 | Verified payment | Payment recorded with an idempotency key; replaying the same key/webhook event ID does **not** double-credit; invoice status transitions DRAFT/ISSUED → PARTIALLY_PAID → PAID |
-| 7 | Ledger inspect | Ledger shows the charge entry for the invoice and the payment entry; corrections are only possible as adjustment/reversal entries referencing the original; per-invoice ledger sums reconcile with invoice balance |
-| 8 | No cloud AI keys | None of steps 1–7 required or invoked a cloud AI provider; if the assistant was used, it ran on a local model or deterministic fallback |
+| 1 | Install & run | `npm install`, `.env` with `DATABASE_URL`, `npm run db:push`, `npm run dev` → port 3000 with no runtime errors in `dev.log` |
+| 2 | Setup wizard | All 8 steps complete; progress survives reload; completable with zero external integrations (AI provider optional) |
+| 3 | Customer + service | Created via UI/CSV, scoped to the organization |
+| 4 | Booking | Created against hours + staff/resource; overlap rejected **409** inside the booking transaction |
+| 5 | Invoice | Correct line math; balance = total − verified payments |
+| 6 | Payment | Idempotency key/webhook event replay does not double-credit; status transitions `draft/issued → partial → paid` |
+| 7 | Ledger | Charge + payment entries reconcile per invoice; corrections only as reversal/adjustment entries |
+| 8 | AI optional | Steps 1–7 required no cloud AI provider; any assistant use ran on a local model or reported an explicit error |
 
-A customer-facing assistant conversation that creates a booking (verified via the browser voice
-test or text chat) is the stretched goal on top of this slice; the business slice above must pass
-even with the assistant disabled.
+The assistant vertical slice (tool-created booking + verified reply via text or Twilio voice) is the
+stretch goal; the business slice must pass even with the assistant disabled.

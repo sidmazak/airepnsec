@@ -1,7 +1,8 @@
-import { withAuth, json } from '@/lib/api'
+import { withAuth, json, fail } from '@/lib/api'
 import { dispatchOutbox, nudgeChannel } from '@/lib/integrations/dispatcher'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
+import { runWithWorkerLease } from '@/lib/concurrency'
 
 /**
  * POST /api/outbox/dispatch (owner/admin) — run the outbox dispatcher NOW for
@@ -17,7 +18,11 @@ export const POST = withAuth(
       await nudgeChannel(ctx.org.id, kind)
     }
 
-    const stats = await dispatchOutbox()
+    const outcome = await runWithWorkerLease('outbox', () => dispatchOutbox(ctx.org.id))
+    if (!outcome.ran) {
+      return fail(409, 'The outbox dispatcher is already running. Try again in a moment.', { code: 'worker_busy' })
+    }
+    const stats = outcome.result
 
     await audit({
       orgId: ctx.org.id,

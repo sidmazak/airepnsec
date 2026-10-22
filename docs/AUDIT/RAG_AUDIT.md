@@ -1,5 +1,10 @@
 # RAG Audit — AI Secretary
 
+> **Historical baseline (iteration 1).** The pipeline description remains broadly accurate
+> (local neural default, hybrid cosine+BM25, approved-only); see [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md)
+> and [ITERATION_LOG.md](./ITERATION_LOG.md) for later changes. Vectors are still JSON in SQLite —
+> the Postgres/pgvector deployment does not switch the vector store.
+
 Core: `src/lib/ai/embeddings.ts`. Storage: `KnowledgeDoc` + `KnowledgeChunk` (SQLite).
 Vectors are stored as JSON strings in `KnowledgeChunk.vector`; **no pgvector**.
 

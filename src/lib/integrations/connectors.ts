@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { decryptSecret, hmacSign } from '@/lib/crypto'
 import { parseJson } from '@/lib/org'
+import { assertOutboundUrl } from '@/lib/security/outbound'
 
 /**
  * Typed connector layer for third-party integrations (BYOK).
@@ -157,6 +158,12 @@ async function testWebhookOut(orgId: string, integration: { configJson: string; 
   const secrets = decryptSecrets(integration)
   const url = str(config, 'url')
   if (!/^https?:\/\//i.test(url)) return { ok: false, detail: 'webhook_out config needs a destination URL starting with http:// or https://' }
+  let target: URL
+  try {
+    target = await assertOutboundUrl(url, { allowPrivate: config.allowPrivate === true, label: 'Webhook URL' })
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : 'Webhook URL is not allowed' }
+  }
   const secret = str(secrets, 'secret')
 
   const org = await db.organization.findUnique({ where: { id: orgId }, select: { slug: true } })
@@ -166,7 +173,7 @@ async function testWebhookOut(orgId: string, integration: { configJson: string; 
     org: org?.slug ?? '',
   })
   try {
-    const res = await fetch(url, {
+    const res = await fetch(target, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

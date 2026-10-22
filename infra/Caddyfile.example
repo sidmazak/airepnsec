@@ -1,0 +1,36 @@
+# Caddy reverse proxy example — TLS termination for AI Secretary.
+#
+# 1. Point your DNS A/AAAA record at the host.
+# 2. Replace receptionist.example.com and the upstream if needed.
+# 3. Run Caddy on the same Docker network as `app`, or change the upstream to
+#    http://127.0.0.1:3000 when Caddy runs directly on the host.
+#
+# Caddy obtains and renews certificates automatically. Keep port 3000 private
+# (do not publish it publicly); only 80/443 should be reachable.
+
+receptionist.example.com {
+	encode zstd gzip
+
+	# Caddy sets/overwrites X-Forwarded-For by default. The app trusts the first
+	# hop for rate limiting, so never put another untrusted proxy in front unless
+	# you configure trusted proxies deliberately.
+	reverse_proxy app:3000 {
+		# Long-running AI turns can exceed default proxy timeouts; these are still
+		# bounded so a stuck upstream cannot hold a connection forever.
+		transport http {
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
+
+	header {
+		# App also sets security headers; keep HSTS here for the TLS edge.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { decryptSecrets, getEnabledIntegration, integrationConfig, sanitizeMessage, sendEmail, sendTwilio, signWebhookPayload, str } from '@/lib/integrations/connectors'
 import { sendSmsGateway } from '@/lib/integrations/sms'
 import type { OutboxMessage } from '@prisma/client'
+import { assertOutboundUrl } from '@/lib/security/outbound'
 
 /**
  * Outbox dispatcher — turns queued OutboxMessages into REAL deliveries through
@@ -27,13 +28,18 @@ function lockOk(): boolean {
   return true
 }
 
-export async function dispatchOutbox(): Promise<DispatchStats> {
+/**
+ * @param orgId optional org filter used by the manual "flush now" button so an
+ * admin only dispatches their own queue. The background worker omits it and
+ * serves every org.
+ */
+export async function dispatchOutbox(orgId?: string): Promise<DispatchStats> {
   const stats: DispatchStats = { processed: 0, sent: 0, failed: 0, waiting: 0 }
   if (!lockOk()) return stats
 
   try {
     const due = await db.outboxMessage.findMany({
-      where: { status: 'queued', scheduledFor: { lte: new Date() } },
+      where: { status: 'queued', scheduledFor: { lte: new Date() }, ...(orgId ? { orgId } : {}) },
       orderBy: { createdAt: 'asc' },
       take: BATCH,
     })
@@ -180,9 +186,17 @@ async function deliverWebhook(message: OutboxMessage): Promise<Outcome> {
 
   const secrets = decryptSecrets(target)
   const secret = (secrets.secret ?? '').trim()
+  const config = integrationConfig(target)
+
+  let destination: URL
+  try {
+    destination = await assertOutboundUrl(message.recipient, { allowPrivate: config.allowPrivate === true, label: 'Webhook URL' })
+  } catch (err) {
+    return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), target))
+  }
 
   try {
-    const res = await fetch(message.recipient, {
+    const res = await fetch(destination, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

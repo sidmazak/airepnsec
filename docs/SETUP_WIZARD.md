@@ -81,7 +81,7 @@ the org from "setup" to "live", and it is explicit.
 
 - Overdue policy: grace days, reminder cadence, escalation threshold, who gets escalated
   (internal staff vs customer contact).
-- Template preview for reminder messages (drafted, not sent — delivery Deferred).
+- Template preview for reminder messages (drafted, not sent from the wizard; delivery requires an enabled email/SMS integration via the outbox).
 - Consent notice: outbound messages honor customer opt-outs; suppressed messages are logged as
   OPTED_OUT, not silently dropped.
 - Validation: cadence days ≥ 1; escalation threshold ≥ last reminder day.
@@ -111,5 +111,5 @@ the org from "setup" to "live", and it is explicit.
 ## Verification hooks
 
 - Wizard progress survives a hard reload (tested per [TEST_PLAN.md](./TEST_PLAN.md) §A).
-- All 8 steps complete with zero external services (no DNS calls besides localhost) — verified by
-  running with the sandbox SDK disabled.
+- All 8 steps complete with zero external services (no DNS calls besides localhost) — verified with
+  no AI provider or integration enabled; only optional connection tests make external calls.

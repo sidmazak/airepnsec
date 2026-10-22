@@ -23,13 +23,13 @@ Read `worklog.md` (repo root) first — it contains the build history and enviro
 9. **Secrets stay server-side.** Provider API keys: AES-256-GCM encrypted (`src/lib/crypto.ts`), never returned after save. No proprietary AI SDK is used — only your own Ollama or OpenAI-compatible endpoint.
 10. **Local-only mode must be honored:** `assertAiPolicy()` blocks cloud providers when `org.dataMode === 'local_only'`.
 11. **Audit consequential actions** with `src/lib/audit.ts` (bookings, payments, settings, automations, exports, logins).
-12. **No test-framework code** in this sandbox. Verify via tsc + `npm run lint` + dev.log + browser.
+12. **Unit tests use Node's built-in `node:test`** (`tests/unit/*.mts`, `npm run test:unit`) — no Vitest/Jest/Playwright. Verify via `npx tsc --noEmit`, `npm run lint`, `npm run test:unit`, dev.log + browser. CI (`.github/workflows/ci.yml`) also runs the build.
 13. **Don't run `npm run build`**; dev server on port 3000 is already running (`dev.log` is the log). Don't restart it.
 14. **Prisma on SQLite:** no `mode: 'insensitive'` filters, no enum types, no native Json columns (use String + `parseJson` from `src/lib/org.ts`).
 
 ## Where things live
 
-- `prisma/schema.prisma` — 27 models (org-scoped; includes `DataSource`). After edits: `npm run db:push`.
+- `prisma/schema.prisma` — 30 models (org-scoped; includes `DataSource`, `WorkerLease`, `TelephonyLine/Call`). After edits: `npm run db:push`.
 - `src/lib/db.ts` — Prisma client singleton (`import { db } from '@/lib/db'`).
 - `src/lib/api.ts` — `withAuth`/`withPublic` wrappers (CSRF header `x-requested-with: ais` on mutations, rate limiting, session loading), `json`/`fail`/`parseBody`.
 - `src/lib/business/` — availability, booking, invoice, payments, ledger, collections (deterministic core; routes are thin).

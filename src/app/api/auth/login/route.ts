@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { withPublic, json, fail, parseBody, rateLimit, createSession, sessionCookie } from '@/lib/api'
+import { withPublic, json, fail, parseBody, rateLimit, clientIp, createSession, sessionCookie } from '@/lib/api'
 import { db } from '@/lib/db'
 import { decryptSecret, secretIsEncrypted, verifyPassword } from '@/lib/crypto'
 import { verifyTotp } from '@/lib/security/totp'
@@ -23,14 +23,24 @@ export const POST = withPublic(async (req) => {
   const email = body.email.trim().toLowerCase()
 
   if (!rateLimit(`login:${email}`, 10, 60_000)) {
-    return fail(429, 'Too many sign-in attempts. Try again in a minute.')
+    return fail(429, 'Too many sign-in attempts. Try again in a minute.', undefined, { 'retry-after': '60' })
+  }
+  // Per-IP throttle catches credential stuffing across many different emails.
+  if (!rateLimit(`login-ip:${clientIp(req)}`, 30, 60_000)) {
+    return fail(429, 'Too many sign-in attempts from this address. Try again in a minute.', undefined, { 'retry-after': '60' })
   }
 
-  // Email case is normalized in JS (SQLite has no case-insensitive unique lookup).
-  const users = await db.user.findMany({
-    select: { id: true, orgId: true, email: true, passwordHash: true, name: true, role: true, twoFactorEnabled: true, twoFactorSecret: true },
-  })
-  const user = users.find((u) => u.email.toLowerCase() === email)
+  const select = {
+    id: true, orgId: true, email: true, passwordHash: true, name: true, role: true,
+    twoFactorEnabled: true, twoFactorSecret: true,
+  } as const
+  // Emails are stored lowercase on registration; use the unique index directly.
+  // Fall back to a scan only for legacy rows created before normalization.
+  let user = await db.user.findUnique({ where: { email }, select })
+  if (!user) {
+    const users = await db.user.findMany({ select })
+    user = users.find((u) => u.email.toLowerCase() === email) ?? null
+  }
 
   if (!user || !verifyPassword(body.password, user.passwordHash)) {
     return fail(401, 'Invalid email or password', { code: 'invalid_credentials' })

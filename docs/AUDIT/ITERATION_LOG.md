@@ -54,3 +54,58 @@ no automated tests/CI (G8), DNS-rebind TOCTOU (S10), outbound-webhook SSRF (S11)
 ### Blocked (external)
 Real Ollama/OpenAI-compatible endpoints, pg/mysql servers, SIP/PSTN telephony, real SMS gateways,
 Docker daemon — not available in this environment; documented, not faked.
+
+---
+
+## Iteration 2 — 2026-10-22 — Concurrency, PABX routing, deployment hardening, docs refresh
+
+### Objective
+Close production-readiness gaps around concurrent turns/workers, telephone routing, static/Docker
+packaging, and bring the documentation set back in line with the shipped code.
+
+### Changes
+- **Worker leases:** added `WorkerLease` and `src/lib/concurrency.ts` (`runWithWorkerLease`,
+  TTL recovery, status reporting). Automation tick, outbox dispatch and data-source sync are
+  single-flight across instances; manual endpoints return `409 worker_busy` / `sync_busy`.
+- **Conversation turn lock:** DB-backed per-conversation lock with token + stale TTL wraps the
+  receptionist turn; overlapping SMS/web/voice turns serialize; busy → `409 conversation_busy`.
+- **SQLite tuning:** WAL, 5000 ms busy timeout and `synchronous=NORMAL` at boot; `/api/health/detail`
+  now returns live `database` tuning plus `workers` statuses.
+- **PABX routing:** new pure helpers (`normalizeAgentLines`, `buildLineCandidates`,
+  `pickLeastBusy`, `pickRoundRobin`, `pickRedirect`, `normalizeCallStatus`) and shared no-input
+  state. Incoming/status/gather routes route by least-busy/round-robin/redirect, honor
+  disabled/paused lines, count real active calls, record `TelephonyCall` for every call, and
+  prefer Twilio `DialCallStatus`.
+- **Rate limiting/auth:** per-IP login limit (30/min) beside per-email (10/min); configurable
+  `withPublic` limits; telephony webhooks raised to 300–600/min; exported `clientIp`.
+- **Docker:** `DATABASE_PROVIDER` build arg (`sqlite|postgresql`), standalone `.next/static` and
+  `public/` copies, OpenSSL; compose sets Postgres. Build-time placeholders keep `next build`
+  independent of runtime secrets.
+- **Next config:** `typescript.ignoreBuildErrors: false`, `reactStrictMode: true`.
+- **UI:** favicon fixed (`/logo.svg`), Radix dialog description IDs removed from six sections,
+  integrations credentials dialog wrapped in a real form. Remaining low-priority DOM warning for
+  password fields outside forms in AI Providers/Security is tracked.
+- **Provider truthfulness:** server STT no longer advertises an Ollama kind it cannot serve (browser
+  or OpenAI-compatible only).
+- **Tests:** `tests/unit/telephony-routing.test.mts` added; suite is now 27/27.
+- **Docs:** README, implementation plan, feature/provider matrices, audits, security, architecture,
+  API, data model, integrations, self-hosting, test plan and infra README refreshed for 30 models,
+  97 route files / 122 handlers, 18 sections and the current gaps.
+
+### Verification
+- `npx tsc --noEmit` → clean; `npm run lint` → clean; `npm run test:unit` → 27/27 pass.
+- Live dev server: SQLite WAL/busy timeout confirmed; health detail shows DB + workers; manual
+  automation/outbox 200 when idle; manual automation 409 `worker_busy` while the lease is held.
+- Browser CDP pass: sections render, favicon 404 gone, dialog description warning gone; expected
+  console noise limited to password-form semantics (non-integration inputs) and an honest SMTP
+  test failure.
+- Docker images: both PostgreSQL and SQLite profiles rebuilt and smoke-tested on 2026-10-22.
+
+### Remaining honest gaps
+SSO (SAML/OIDC), inbound email, rerank/vision, streaming/native tool calling, hardware/model
+catalog, shared-store rate limiting, committed browser/role-matrix suites, live gateway/provider
+credential tests. Docker rebuild verification completed 2026-10-22.
+
+### Blocked (external)
+Real Ollama/OpenAI-compatible endpoints, pg/mysql servers, SIP/PSTN and SMS hardware, Docker daemon —
+not available here; behavior is documented, not faked.

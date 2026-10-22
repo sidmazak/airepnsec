@@ -757,10 +757,10 @@ export function InboxSection() {
 
       {/* new conversation dialog */}
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
-        <DialogContent className="sm:max-w-md" aria-describedby="new-conv-desc">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>New conversation</DialogTitle>
-            <DialogDescription id="new-conv-desc">
+            <DialogDescription>
               Start a thread. Optionally link an existing customer so the AI knows who it is talking to.
             </DialogDescription>
           </DialogHeader>

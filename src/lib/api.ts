@@ -27,8 +27,16 @@ export function json(data: unknown, status = 200): NextResponse {
   })
 }
 
-export function fail(status: number, message: string, extra?: Record<string, unknown>): NextResponse {
-  return NextResponse.json({ error: message, ...(extra ?? {}) }, { status, headers: { 'cache-control': 'no-store' } })
+export function fail(
+  status: number,
+  message: string,
+  extra?: Record<string, unknown>,
+  headers?: Record<string, string>
+): NextResponse {
+  return NextResponse.json(
+    { error: message, ...(extra ?? {}) },
+    { status, headers: { 'cache-control': 'no-store', ...(headers ?? {}) } }
+  )
 }
 
 export class ApiError extends Error {
@@ -117,13 +125,21 @@ export function rateLimit(key: string, limit: number, windowMs: number): boolean
   b.hits.push(now)
   buckets.set(key, b)
   if (buckets.size > 5000) {
-    // opportunistic cleanup
-    for (const [k, v] of buckets) if (v.hits.length === 0) buckets.delete(k)
+    // opportunistic cleanup: drop buckets with no hits in the last 10 minutes
+    const cutoff = now - 10 * 60_000
+    for (const [k, v] of buckets) {
+      if (v.hits.length === 0 || v.hits[v.hits.length - 1] < cutoff) buckets.delete(k)
+    }
   }
   return true
 }
 
-function clientIp(req: NextRequest): string {
+/**
+ * Client IP for rate limiting. Trusts the first `x-forwarded-for` hop — correct
+ * behind a reverse proxy that overwrites the header, spoofable if the app is
+ * exposed directly. Documented in docs/SECURITY.md.
+ */
+export function clientIp(req: NextRequest): string {
   return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local'
 }
 
@@ -158,7 +174,7 @@ export function withAuth(handler: Handler, options: AuthOptions = {}) {
     try {
       const url = new URL(req.url)
       const rlKey = `${clientIp(req)}:${url.pathname}`
-      if (!rateLimit(rlKey, 120, 60_000)) return fail(429, 'Too many requests. Please slow down.')
+      if (!rateLimit(rlKey, 120, 60_000)) return fail(429, 'Too many requests. Please slow down.', undefined, { 'retry-after': '60' })
 
       const mutating = req.method !== 'GET' && req.method !== 'HEAD'
       if (mutating && (options.csrf ?? true) && !csrfOk(req)) {
@@ -179,11 +195,23 @@ export function withAuth(handler: Handler, options: AuthOptions = {}) {
   }
 }
 
-export function withPublic(handler: (req: NextRequest, params: Record<string, string>) => Promise<Response>) {
+export type PublicOptions = {
+  /** Override the default 60 requests / minute / IP / path limit (e.g. telephony webhooks). */
+  rateLimit?: { limit: number; windowMs?: number }
+}
+
+export function withPublic(
+  handler: (req: NextRequest, params: Record<string, string>) => Promise<Response>,
+  options: PublicOptions = {}
+) {
+  const limit = options.rateLimit?.limit ?? 60
+  const windowMs = options.rateLimit?.windowMs ?? 60_000
   return async (req: NextRequest, route: { params: Promise<Record<string, string>> } | undefined): Promise<Response> => {
     try {
       const url = new URL(req.url)
-      if (!rateLimit(`${clientIp(req)}:${url.pathname}`, 60, 60_000)) return fail(429, 'Too many requests.')
+      if (!rateLimit(`${clientIp(req)}:${url.pathname}`, limit, windowMs)) {
+        return fail(429, 'Too many requests.', undefined, { 'retry-after': String(Math.ceil(windowMs / 1000)) })
+      }
       const params = route?.params ? await route.params : {}
       return await handler(req, params)
     } catch (err) {
@@ -194,6 +222,9 @@ export function withPublic(handler: (req: NextRequest, params: Record<string, st
 
 export function handleError(err: unknown): NextResponse {
   if (err instanceof ApiError) return fail(err.status, err.message, { code: err.code, ...(err.extra ?? {}) })
+  if (err instanceof Error && (err as { code?: string }).code === 'conversation_busy') {
+    return fail(409, err.message, { code: 'conversation_busy' })
+  }
   const message = err instanceof Error ? err.message : 'Unexpected error'
   // Never leak internals to the client; log server-side only.
   console.error('[api]', message)

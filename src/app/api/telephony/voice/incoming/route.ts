@@ -8,6 +8,13 @@ import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams,
   matchCustomerByPhone, logWebhook, plainResponse, twiml, gatherSpeech, say,
 } from '@/lib/telephony/twiml'
+import {
+  buildLineCandidates,
+  normalizeAgentLines,
+  pickLeastBusy,
+  pickRedirect,
+  pickRoundRobin,
+} from '@/lib/telephony/routing'
 
 export const pathname = '/api/telephony/voice/incoming'
 
@@ -74,71 +81,129 @@ export const POST = withPublic(async (req: NextRequest) => {
 
   // ---- PABX / multi-agent line routing ----
   const strategy = (typeof config.routingStrategy === 'string' && config.routingStrategy) || 'receptionist'
-  const agentLines = Array.isArray(config.agentLines) ? (config.agentLines as Array<Record<string, unknown>>) : []
-  const enabledLines = agentLines.filter((l) => l && l.enabled !== false && typeof l.number === 'string' && String(l.number).trim())
-  if (strategy !== 'receptionist' && enabledLines.length > 0) {
-    let chosen: Record<string, unknown> | null = null
-    if (strategy === 'least_busy') {
-      const recent = await db.telephonyCall.findMany({ where: { orgId: org.id, startedAt: { gte: new Date(Date.now() - 4 * 3600_000) }, status: { in: ['started', 'answered'] } }, select: { lineId: true } })
-      const load = new Map<string, number>()
-      for (const r of recent) load.set(r.lineId, (load.get(r.lineId) ?? 0) + 1)
-      // load is keyed by line id; agent numbers aren't line ids yet, approximate by index position via counts array
-      const counts = enabledLines.map(() => 0)
-      recent.forEach(() => {})
-      let bestIdx = 0
-      let bestLoad = Infinity
-      enabledLines.forEach((l, i) => {
-        // approximate load by counting calls whose meta targeted this number (best-effort)
-        const c = counts[i]
-        if (c < bestLoad) { bestLoad = c; bestIdx = i }
-      })
-      // proper load by matching telephony line phone numbers
-      const lines = await db.telephonyLine.findMany({ where: { orgId: org.id, phoneNumber: { in: enabledLines.map((l) => String(l.number)) } } })
-      const loadByNumber = new Map<string, number>()
-      for (const ln of lines) {
-        const cnt = recent.filter(() => true).length
-        loadByNumber.set(ln.phoneNumber, 0)
+  const configuredLines = normalizeAgentLines(config.agentLines)
+  let routedLine: { id: string; number: string; label: string } | null = null
+
+  if (strategy !== 'receptionist' && configuredLines.length > 0) {
+    const numbers = configuredLines.map((l) => l.number)
+    const activeSince = new Date(Date.now() - 4 * 3600_000)
+    const [lineStates, activeCalls] = await Promise.all([
+      db.telephonyLine.findMany({
+        where: { orgId: org.id, phoneNumber: { in: numbers } },
+        select: { id: true, phoneNumber: true, enabled: true, acceptingCalls: true, priority: true },
+      }),
+      db.telephonyCall.findMany({
+        where: {
+          orgId: org.id,
+          callSid: { not: callSid },
+          status: { in: ['started', 'answered'] },
+          startedAt: { gte: activeSince },
+        },
+        select: { lineId: true },
+      }),
+    ])
+
+    const candidates = buildLineCandidates(configuredLines, lineStates, activeCalls)
+    let chosen =
+      strategy === 'least_busy' ? pickLeastBusy(candidates) : strategy === 'redirect' ? pickRedirect(candidates) : null
+
+    if (!chosen && strategy !== 'redirect') {
+      // round_robin: compare-and-swap the stored cursor so two instances handling
+      // simultaneous calls never hand both calls to the same agent.
+      for (let attempt = 0; attempt < 5 && !chosen; attempt++) {
+        const fresh =
+          attempt === 0
+            ? route.integration
+            : await db.integration.findUnique({ where: { id: route.integration.id } })
+        if (!fresh) break
+        const freshCfg = (() => {
+          try {
+            return JSON.parse(fresh.configJson || '{}') as Record<string, unknown>
+          } catch {
+            return {}
+          }
+        })()
+        const freshCandidates = buildLineCandidates(
+          normalizeAgentLines(freshCfg.agentLines),
+          lineStates,
+          activeCalls
+        )
+        const pick = pickRoundRobin(freshCandidates, Number(freshCfg.lastRrIndex ?? -1))
+        if (!pick) break
+        const updated = await db.integration.updateMany({
+          where: { id: fresh.id, configJson: fresh.configJson },
+          data: { configJson: JSON.stringify({ ...freshCfg, lastRrIndex: pick.index }) },
+        })
+        if (updated.count === 1) chosen = pick
       }
-      // count agent calls by lineId mapping
-      const lineIdToNumber = new Map(lines.map((ln) => [ln.id, ln.phoneNumber]))
-      for (const r of recent) {
-        const num = lineIdToNumber.get(r.lineId)
-        if (num) loadByNumber.set(num, (loadByNumber.get(num) ?? 0) + 1)
-      }
-      bestIdx = 0; bestLoad = Infinity
-      enabledLines.forEach((l, i) => {
-        const num = String(l.number ?? '')
-        const lload = loadByNumber.get(num) ?? 0
-        if (lload < bestLoad) { bestLoad = lload; bestIdx = i }
-      })
-      chosen = enabledLines[bestIdx]
-    } else {
-      // round_robin / redirect
-      const lastIdx = typeof config.lastRrIndex === 'number' ? config.lastRrIndex : -1
-      const idx = (lastIdx + 1) % enabledLines.length
-      config.lastRrIndex = idx
-      await db.integration.update({ where: { id: route.integration.id }, data: { configJson: JSON.stringify(config) } }).catch(() => {})
-      chosen = enabledLines[idx]
     }
-    const targetNumber = String(chosen?.number ?? '').trim()
-    const targetLabel = String(chosen?.label ?? targetNumber)
-    if (targetNumber) {
+
+    if (chosen) {
+      const targetNumber = chosen.number
+      const targetLabel = chosen.label
       let line = await db.telephonyLine.findFirst({ where: { orgId: org.id, phoneNumber: targetNumber } })
       if (!line) {
-        line = await db.telephonyLine.create({ data: { orgId: org.id, integrationId: route.integration.id, label: targetLabel, phoneNumber: targetNumber, destinationKind: 'phone', destinationValue: targetNumber, priority: 100, enabled: true, acceptingCalls: true } })
+        line = await db.telephonyLine.create({
+          data: {
+            orgId: org.id,
+            integrationId: route.integration.id,
+            label: targetLabel,
+            phoneNumber: targetNumber,
+            destinationKind: 'phone',
+            destinationValue: targetNumber,
+            priority: 100,
+            enabled: true,
+            acceptingCalls: true,
+          },
+        })
       }
-      await db.telephonyCall.create({ data: { orgId: org.id, callSid, from, to, lineId: line.id, status: 'started', meta: JSON.stringify({ routedTo: targetNumber, strategy }) } })
-      await audit({ orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice', action: 'telephony.call_routed', entity: 'telephony_call', entityId: line.id, meta: { callSid, to: targetNumber, strategy, label: targetLabel } })
-      const safeNum = targetNumber.replace(/[&<>"']/g, '')
-      return twiml(
-        say(`One moment, connecting you to ${targetLabel}.`, { voice: voiceName, language }) +
+      routedLine = { id: line.id, number: targetNumber, label: targetLabel }
+    }
+  }
+
+  // Record every call (routed or AI-handled) for concurrency/least-busy accuracy.
+  const existingCall = await db.telephonyCall.findFirst({ where: { orgId: org.id, callSid }, select: { id: true } })
+  const callMeta = JSON.stringify(
+    routedLine
+      ? { strategy, routedTo: routedLine.number, label: routedLine.label }
+      : { strategy: 'receptionist', ai: true }
+  )
+  if (existingCall) {
+    await db.telephonyCall
+      .update({ where: { id: existingCall.id }, data: { lineId: routedLine?.id ?? '', status: 'started', meta: callMeta } })
+      .catch(() => undefined)
+  } else {
+    await db.telephonyCall
+      .create({ data: { orgId: org.id, callSid, from, to, lineId: routedLine?.id ?? '', status: 'started', meta: callMeta } })
+      .catch(() => undefined)
+  }
+
+  if (routedLine) {
+    await audit({
+      orgId: org.id,
+      actorType: 'webhook',
+      actorId: 'twilio_voice',
+      action: 'telephony.call_routed',
+      entity: 'telephony_call',
+      entityId: routedLine.id,
+      meta: { callSid, to: routedLine.number, strategy, label: routedLine.label },
+    })
+    const safeNum = routedLine.number.replace(/[&<>"']/g, '')
+    return twiml(
+      say(`One moment, connecting you to ${routedLine.label}.`, { voice: voiceName, language }) +
         `<Dial timeout="25" action="/api/telephony/voice/status?routed=1">${safeNum}</Dial>` +
         say('Our team is unavailable right now. Please leave a brief message after the tone.', { voice: voiceName, language }) +
         '<Record maxLength="60" playBeep="true"/>' +
         '<Hangup/>'
-      )
-    }
+    )
   }
 
-  return twiml(gatherSpeech('/api/telephony/voice/gather', { sayText: greeting, language, voiceName, hints: 'book, reschedule, cancel, hours, price, parking' }))
-})
+  return twiml(
+    gatherSpeech('/api/telephony/voice/gather', {
+      sayText: greeting,
+      language,
+      voiceName,
+      hints: 'book, reschedule, cancel, hours, price, parking',
+    })
+  )
+}, { rateLimit: { limit: 300 } })

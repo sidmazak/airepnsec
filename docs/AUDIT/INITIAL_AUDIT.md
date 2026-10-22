@@ -1,5 +1,9 @@
 # Initial Audit — AI Secretary
 
+> **Historical document (iteration 1, 2026-10-15).** Kept as the baseline record. Findings marked
+> OPEN there may have been fixed in iteration 2; the current security state is in
+> [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) and [ITERATION_LOG.md](./ITERATION_LOG.md).
+
 Generated: 2026-10-15 · Iteration: 1 · Scope: full repo (`src/`, `prisma/`, `docs/`, `infra/`)
 
 ## 1. What this system is

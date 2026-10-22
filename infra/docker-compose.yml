@@ -3,26 +3,42 @@
 # Postgres+pgvector is the production target; set DATABASE_URL accordingly.
 # The SQLite dev database is used when DATABASE_URL=file:… (the Dockerfile's default).
 #
-# NOTE (honest): delivered but not verified inside the build sandbox (no Docker
-# daemon). See infra/README.md for the host-side smoke test.
+# This profile is built and smoke-tested (2026-10-22). Rebuild and re-run the
+# smoke test in infra/README.md when upgrading.
 
 services:
   app:
     build:
       context: ..
       dockerfile: infra/Dockerfile
+      args:
+        # Prisma's provider is baked into the generated client at build time.
+        DATABASE_PROVIDER: postgresql
+    init: true
+    stop_grace_period: 30s
     environment:
       # Production target: Postgres. Built from the POSTGRES_* vars below unless
       # DATABASE_URL is set explicitly in infra/.env.
+      # POSTGRES_PASSWORD is required by the db service below; this default only
+      # ensures the URL expands consistently when that check passes.
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ais}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-ais}?schema=public}
-      # Leave empty to generate/persist a key file in the app-data volume instead.
+      # Generate with: openssl rand -hex 32. If empty, a key file is generated in
+      # the app_data volume; back it up or stored credentials become unreadable.
       APP_SECRET: ${APP_SECRET:-}
       NODE_ENV: production
+      # Set to "1" on web-only replicas; run one dedicated instance with workers.
+      # AIS_DISABLE_WORKERS: "1"
     ports:
-      - "3000:3000"
+      # Host port is configurable so a local dev server can keep 3000.
+      - "${APP_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       # .data/ holds secret.key when APP_SECRET is unset — persist it.
       - app_data:/app/.data
@@ -34,10 +50,16 @@ services:
 
   db:
     image: pgvector/pgvector:pg16
+    stop_grace_period: 1m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ais}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in infra/.env}
       POSTGRES_DB: ${POSTGRES_DB:-ais}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

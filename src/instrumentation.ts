@@ -1,6 +1,15 @@
 /**
- * Background worker (in-process). Runs the automation tick every 60 seconds.
- * Registered once per Next.js server via instrumentation hook.
+ * Background workers (in-process). Registered once per Next.js server via the
+ * instrumentation hook.
+ *
+ * Production topology:
+ * - Every worker is single-flight across app instances via a database lease, so
+ *   scaling the web tier never double-sends an outbox message or double-fires an
+ *   automation.
+ * - Set `AIS_DISABLE_WORKERS=1` on a web-only instance and run a dedicated worker
+ *   instance instead. Individual workers can be toggled with
+ *   `AIS_WORKER_AUTOMATION`, `AIS_WORKER_OUTBOX`, `AIS_WORKER_DATASOURCES`.
+ * - Lease state and last-run/error are surfaced by GET /api/health/detail.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
@@ -9,48 +18,77 @@ export async function register() {
   if (globalKey.__aisWorkerStarted) return
   globalKey.__aisWorkerStarted = true
 
-  const { tick } = await import('@/lib/automation/engine')
+  const { runWithWorkerLease, isWorkerEnabled } = await import('@/lib/concurrency')
 
-  const run = async () => {
-    try {
-      await tick()
-    } catch (err) {
-      console.error('[worker] automation tick failed:', err instanceof Error ? err.message : err)
+  // SQLite tuning must happen before concurrent requests hit the database.
+  try {
+    const { tuneDatabase } = await import('@/lib/db-tuning')
+    const tuning = await tuneDatabase()
+    if (tuning.kind === 'sqlite') {
+      console.log(`[db] sqlite journal_mode=${tuning.journalMode} busy_timeout=${tuning.busyTimeoutMs ?? 0}ms`)
     }
+  } catch (err) {
+    console.error('[db] tuning failed:', err instanceof Error ? err.message : err)
   }
 
-  // initial tick shortly after boot, then every 60s
-  setTimeout(run, 5_000)
-  setInterval(run, 60_000)
-  console.log('[worker] automation worker started (60s interval)')
+  // Schedule a worker without permitting overlapping invocations inside this
+  // process. The DB lease still protects across instances; this guard avoids
+  // piling up lease attempts when a slow tick exceeds its interval.
+  const schedule = (label: string, initialDelayMs: number, intervalMs: number, task: () => Promise<void>) => {
+    let inFlight = false
+    const run = async () => {
+      if (inFlight) return
+      inFlight = true
+      try {
+        await task()
+      } catch (err) {
+        console.error(`[worker] ${label} failed:`, err instanceof Error ? err.message : err)
+      } finally {
+        inFlight = false
+      }
+    }
+    setTimeout(run, initialDelayMs)
+    setInterval(run, intervalMs)
+  }
+
+  // Automation engine: an initial tick shortly after boot, then every 60s.
+  if (isWorkerEnabled('automation')) {
+    const { tick } = await import('@/lib/automation/engine')
+    schedule('automation tick', 5_000, 60_000, async () => {
+      const outcome = await runWithWorkerLease('automation', () => tick())
+      if (!outcome.ran) return
+    })
+    console.log('[worker] automation worker started (60s interval, lease-protected)')
+  } else {
+    console.log('[worker] automation worker disabled by environment')
+  }
 
   // Outbox dispatcher: delivers queued messages through configured integrations
-  // (SMTP / Twilio / outbound webhooks). 10s after boot, then every 30s.
-  const { dispatchOutbox } = await import('@/lib/integrations/dispatcher')
-  const dispatch = async () => {
-    try {
-      await dispatchOutbox()
-    } catch (err) {
-      console.error('[worker] outbox dispatch failed:', err instanceof Error ? err.message : err)
-    }
+  // (SMTP / Twilio / SMS gateways / outbound webhooks). 10s after boot, then 30s.
+  if (isWorkerEnabled('outbox')) {
+    const { dispatchOutbox } = await import('@/lib/integrations/dispatcher')
+    schedule('outbox dispatch', 10_000, 30_000, async () => {
+      await runWithWorkerLease('outbox', () => dispatchOutbox())
+    })
+    console.log('[worker] outbox dispatcher started (30s interval, lease-protected)')
+  } else {
+    console.log('[worker] outbox dispatcher disabled by environment')
   }
-  setTimeout(dispatch, 10_000)
-  setInterval(dispatch, 30_000)
-  console.log('[worker] outbox dispatcher started (30s interval)')
 
   // External data-source auto-sync: re-pulls enabled sources whose interval is due.
-  // 90s after boot, then every 5 minutes (per-source interval is honored inside).
-  const { runDueDataSourceSyncs } = await import('@/lib/datasources/sync')
-  const dataSync = async () => {
-    try {
-      const { ran, failed } = await runDueDataSourceSyncs()
+  // Checked every 5 minutes (per-source interval is honored inside).
+  if (isWorkerEnabled('datasources')) {
+    const { runDueDataSourceSyncs } = await import('@/lib/datasources/sync')
+    schedule('data-source auto-sync', 90_000, 5 * 60_000, async () => {
+      const outcome = await runWithWorkerLease('datasources', () => runDueDataSourceSyncs())
+      if (!outcome.ran) return
+      const { ran, failed } = outcome.result
       if (ran || failed) console.log(`[worker] data-source auto-sync: ${ran} synced, ${failed} failed`)
-    } catch (err) {
-      console.error('[worker] data-source auto-sync failed:', err instanceof Error ? err.message : err)
-    }
+    })
+    console.log('[worker] data-source sync started (5m interval, lease-protected)')
+  } else {
+    console.log('[worker] data-source sync disabled by environment')
   }
-  setTimeout(dataSync, 90_000)
-  setInterval(dataSync, 5 * 60_000)
 
   // Pre-load the local embedding model so the first knowledge search / AI answer is fast.
   // Fire-and-forget: a failed load is logged and search degrades to lexical scoring.

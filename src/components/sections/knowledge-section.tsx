@@ -443,10 +443,10 @@ export function KnowledgeSection() {
 
       {/* new / edit dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-xl" aria-describedby="doc-form-desc">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{form.id ? 'Edit document' : 'New knowledge document'}</DialogTitle>
-            <DialogDescription id="doc-form-desc">
+            <DialogDescription>
               Write it the way you would tell a new receptionist. Only approved documents are used by the AI.
             </DialogDescription>
           </DialogHeader>

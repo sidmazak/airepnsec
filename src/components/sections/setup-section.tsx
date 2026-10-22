@@ -690,10 +690,10 @@ function ServicesStep({ org, markStepDone }: StepProps) {
 
       {/* service dialog */}
       <Dialog open={svcOpen} onOpenChange={setSvcOpen}>
-        <DialogContent className="sm:max-w-md" aria-describedby="svc-form-desc">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{svcForm.id ? 'Edit service' : 'New service'}</DialogTitle>
-            <DialogDescription id="svc-form-desc">Price is in {org.currency}.</DialogDescription>
+            <DialogDescription>Price is in {org.currency}.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
@@ -734,10 +734,10 @@ function ServicesStep({ org, markStepDone }: StepProps) {
 
       {/* staff dialog */}
       <Dialog open={staffOpen} onOpenChange={setStaffOpen}>
-        <DialogContent className="sm:max-w-md" aria-describedby="staff-form-desc">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{staffForm.id ? 'Edit staff member' : 'New staff member'}</DialogTitle>
-            <DialogDescription id="staff-form-desc">Link services afterwards so bookings can be assigned.</DialogDescription>
+            <DialogDescription>Link services afterwards so bookings can be assigned.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
@@ -770,10 +770,10 @@ function ServicesStep({ org, markStepDone }: StepProps) {
 
       {/* service links dialog */}
       <Dialog open={Boolean(linksFor)} onOpenChange={(o) => !o && setLinksFor(null)}>
-        <DialogContent className="sm:max-w-md" aria-describedby="links-form-desc">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Services for {linksFor?.name}</DialogTitle>
-            <DialogDescription id="links-form-desc">Only linked services can be booked with this person.</DialogDescription>
+            <DialogDescription>Only linked services can be booked with this person.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 max-h-72 overflow-y-auto">
             {services.map((s) => (
@@ -800,10 +800,10 @@ function ServicesStep({ org, markStepDone }: StepProps) {
 
       {/* delete service confirm */}
       <Dialog open={Boolean(deleteSvc)} onOpenChange={(o) => !o && setDeleteSvc(null)}>
-        <DialogContent className="sm:max-w-sm" aria-describedby="del-svc-desc">
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Delete “{deleteSvc?.name}”?</DialogTitle>
-            <DialogDescription id="del-svc-desc">
+            <DialogDescription>
               Services with existing bookings cannot be deleted — the server will tell you if so.
             </DialogDescription>
           </DialogHeader>
