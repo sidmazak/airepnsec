@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { api, formatDateTime, type ProviderConfigPublic } from '@/lib/client/api'
+import { api, formatDateTime, type ProviderConfigPublic, type ModelRecommendation } from '@/lib/client/api'
 import { useAppStore } from '@/lib/client/store'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -18,7 +18,7 @@ import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  Bot, CheckCircle2, Database, Globe, KeyRound, Loader2, PlugZap, RefreshCw,
+  Bot, CheckCircle2, Database, Globe, KeyRound, Loader2, Monitor, PlugZap, RefreshCw,
   ShieldAlert, ShieldCheck, XCircle,
 } from 'lucide-react'
 
@@ -51,6 +51,82 @@ type AiLog = {
 }
 type Draft = { provider: string; baseUrl: string; model: string; apiKey: string | null; enabled: boolean }
 
+export type HardwareInfoResponse = {
+  hardware: {
+    platform: string
+    nodeVersion: string
+    cpuModel: string
+    cpuCores: number
+    ramTotalGb: number
+    ramFreeGb: number
+    gpu: { vendor: string; name: string; vramGb: number | null; count: number }
+    diskFreeGb: number | null
+    tier: string
+  }
+  recommendations: ModelRecommendation[]
+  recommendedChatModel: ModelRecommendation | null
+  configured: Array<{ capability: string; provider: string; model: string; enabled: boolean }>
+}
+
+function HardwareRow({ info }: { info: HardwareInfoResponse['hardware'] }) {
+  const rows: Array<[string, string]> = [
+    ['Platform', `${info.platform} · Node ${info.nodeVersion}`],
+    ['CPU', `${info.cpuModel} · ${info.cpuCores} cores`],
+    ['Memory', `${info.ramTotalGb} GB total · ${info.ramFreeGb} GB free`],
+    ['GPU', info.gpu.vendor === 'none' ? 'none detected' : `${info.gpu.name}${info.gpu.vramGb ? ` · ${info.gpu.vramGb} GB VRAM` : ''}`],
+    ['Disk free', info.diskFreeGb === null ? 'unknown' : `${info.diskFreeGb} GB`],
+    ['Tier', info.tier],
+  ]
+  return (
+    <div className="rounded-lg border p-3 space-y-1.5">
+      {rows.map(([k, v]) => (
+        <div key={k} className="flex items-baseline justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">{k}</span>
+          <span className="text-right font-medium">{v}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function HardwareRecommendations({ info }: { info: HardwareInfoResponse }) {
+  const best = info.recommendedChatModel
+  const configuredChat = info.configured.find((c) => c.capability === 'llm' && c.enabled)
+  return (
+    <div className="rounded-lg border p-3 space-y-2">
+      <p className="text-sm">
+        {best ? (
+          <>
+            Recommended chat model: <span className="font-medium">{best.model}</span>{' '}
+            <span className="text-muted-foreground">({best.sizeGb} GB, {best.note})</span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">No catalog model fits this machine — use an external endpoint.</span>
+        )}
+      </p>
+      {configuredChat && (
+        <p className="text-xs text-muted-foreground">
+          Currently configured: {configuredChat.provider} · {configuredChat.model || 'no model set'}
+        </p>
+      )}
+      <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+        {info.recommendations.map((r) => (
+          <div key={`${r.capability}-${r.model}`} className="flex items-start justify-between gap-2 text-xs">
+            <div className="min-w-0">
+              <span className="font-medium">{r.model}</span>{' '}
+              <span className="text-muted-foreground">({r.capability} · {r.sizeGb} GB)</span>
+              <p className="text-muted-foreground">{r.note}</p>
+            </div>
+            <Badge variant={r.fits ? 'outline' : 'secondary'} className="shrink-0">
+              {r.fits ? 'fits' : 'too big'}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /* ------------------------------ section ------------------------------ */
 
 export function AiSection() {
@@ -72,6 +148,8 @@ export function AiSection() {
   const [tab, setTab] = useState('providers')
   const [logs, setLogs] = useState<AiLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
+  const [hwLoading, setHwLoading] = useState(false)
+  const [hardwareInfo, setHardwareInfo] = useState<HardwareInfoResponse | null>(null)
   const [logsError, setLogsError] = useState('')
 
   const [channels, setChannels] = useState<{ email: boolean; sms: boolean } | null>(null)
@@ -110,6 +188,18 @@ export function AiSection() {
     }
   }, [])
 
+  const loadHardware = useCallback(async () => {
+    setHwLoading(true)
+    try {
+      const d = await api.get<HardwareInfoResponse>('/api/system/hardware')
+      setHardwareInfo(d)
+    } catch {
+      setHardwareInfo(null)
+    } finally {
+      setHwLoading(false)
+    }
+  }, [])
+
   const loadChannels = useCallback(async () => {
     try {
       const d = await api.get<{ email: boolean; sms: boolean }>('/api/settings/channels')
@@ -120,6 +210,7 @@ export function AiSection() {
   useEffect(() => { void load() }, [load])
   useEffect(() => { void loadChannels() }, [loadChannels])
   useEffect(() => { if (tab === 'logs') void loadLogs() }, [tab, loadLogs])
+  useEffect(() => { if (tab === 'hardware') void loadHardware() }, [tab, loadHardware])
 
   const setDataModeValue = async (mode: string) => {
     if (!canManage) return
@@ -232,10 +323,31 @@ export function AiSection() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label="AI settings tabs">
           <TabsTrigger value="providers" className="min-h-[44px]"><Bot className="h-4 w-4 mr-1.5" aria-hidden /> Providers</TabsTrigger>
+          <TabsTrigger value="hardware" className="min-h-[44px]"><Monitor className="h-4 w-4 mr-1.5" aria-hidden /> Hardware</TabsTrigger>
           <TabsTrigger value="logs" className="min-h-[44px]"><RefreshCw className="h-4 w-4 mr-1.5" aria-hidden /> AI activity log</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="providers" className="space-y-4 mt-4">
+        <TabsContent value="hardware" className="space-y-4 mt-4">
+          {/* hardware */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2"><Monitor className="h-4 w-4" aria-hidden /> Host capabilities</CardTitle>
+              <CardDescription>What this machine can run — read locally, no data leaves it.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {hwLoading ? (
+                <Skeleton className="h-60 w-full" />
+              ) : hardwareInfo ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <HardwareRow info={hardwareInfo.hardware} />
+                  <HardwareRecommendations info={hardwareInfo} />
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Loading the hardware probe…</p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* data mode */}
           <Card>
             <CardHeader>
@@ -277,7 +389,9 @@ export function AiSection() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
 
+        <TabsContent value="providers" className="space-y-4 mt-4">
           {/* capability cards */}
           <div className="grid gap-4 lg:grid-cols-2">
             {caps.map(([cap, cfg]) => {

@@ -13,8 +13,8 @@ export const CAPABILITY_INFO: Record<Capability, { label: string; description: s
   stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The browser mic path works out of the box.', kinds: ['browser', 'openai_compatible'] },
   tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The browser synth path works out of the box.', kinds: ['browser', 'openai_compatible'] },
   realtime: { label: 'Realtime voice (optional)', description: 'Low-latency WebRTC voice with an OpenAI-compatible realtime endpoint. Falls back to the conversation model when not set.', kinds: ['none', 'openai_compatible'] },
-  rerank: { label: 'Reranking (optional)', description: 'Improves ordering of retrieved knowledge. Optional.', kinds: ['none', 'openai_compatible'] },
-  vision: { label: 'Vision (optional)', description: 'Understands images. Optional.', kinds: ['none', 'openai_compatible'] },
+  rerank: { label: 'Reranking (optional)', description: 'Second-stage ranking of retrieved knowledge. Optional — retrieval works without it.', kinds: ['none', 'openai_compatible'] },
+  vision: { label: 'Vision (optional)', description: 'Reads images (a photo of an invoice, a damage report). Optional.', kinds: ['none', 'openai_compatible'] },
 }
 
 export type PublicProviderConfig = {
@@ -153,13 +153,54 @@ export async function testProvider(
   const started = Date.now()
   const key = getApiKey(row)
   try {
-    // Reranking and vision are NOT yet implemented in the assistant's LLM layer.
-    // Report that honestly instead of implying a working capability.
-    if ((capability === 'rerank' || capability === 'vision') && row.provider !== 'none') {
+    // Vision gets a real connection test: a 1x1 PNG is sent to the configured
+    // multimodal endpoint and the answer (or the failure) is reported as-is.
+    if (capability === 'vision' && row.provider !== 'none') {
+      if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. https://api.example.com/v1)', latencyMs: 0 }
+      const { TINY_PNG_BASE64 } = await import('@/lib/ai/vision')
+      const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+        body: JSON.stringify({
+          model: row.model,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Reply with the single word: ok' },
+                { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_BASE64}` } },
+              ],
+            },
+          ],
+          max_tokens: 16,
+        }),
+        timeoutMs: 20_000,
+      })
+      if (!res.ok) return { ok: false, message: `Vision endpoint returned HTTP ${res.status}`, latencyMs: Date.now() - started }
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string | null } }> }
+      const text = (data.choices?.[0]?.message?.content ?? '').trim()
       return {
-        ok: false,
-        message: `${CAPABILITY_INFO[capability].label.replace(/ \(optional\)$/, '')} is not implemented yet — no request was made. Set it to "None" to disable it, or leave it off.`,
-        latencyMs: 0,
+        ok: Boolean(text),
+        message: text ? `The vision model answered (${text.slice(0, 40)}).` : 'The vision endpoint returned an empty answer.',
+        latencyMs: Date.now() - started,
+      }
+    }
+    // Reranking gets a real connection test against the /rerank endpoint.
+    if (capability === 'rerank' && row.provider !== 'none') {
+      if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. https://api.example.com/v1)', latencyMs: 0 }
+      const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/rerank`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+        body: JSON.stringify({ model: row.model || 'rerank-english-v3.0', query: 'opening hours', documents: ['We are open 9 to 5.', 'We sell haircuts.'], top_n: 2 }),
+      })
+      if (!res.ok) return { ok: false, message: `Rerank endpoint returned HTTP ${res.status}`, latencyMs: Date.now() - started }
+      const data = (await res.json()) as { results?: Array<{ index?: number; relevance_score?: number }> }
+      const n = Array.isArray(data.results) ? data.results.length : 0
+      return {
+        ok: n > 0,
+        message: n > 0 ? `Reranker scored ${n} document(s) — retrieval will use it.` : 'The rerank endpoint returned no scores.',
+        latencyMs: Date.now() - started,
+        details: { results: n },
       }
     }
     // Embedding capability gets provider-specific live tests against the actual embed call.

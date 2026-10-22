@@ -58,6 +58,83 @@ export const api = {
   delete: <T>(path: string) => apiSend<T>(path, 'DELETE'),
 }
 
+/* ---------------- streaming (SSE over POST) ---------------- */
+
+export type StreamEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'tool'; tool: string; ok: boolean; summary: string }
+  | { type: 'done'; conversationId: string; reply: string; toolCalls: Array<{ tool: string; ok: boolean; summary: string }>; aiUsed: boolean; nativeTools: boolean; error: string | null; skipped: string | null }
+  | { type: 'error'; message: string }
+
+export type StreamHandlers = {
+  onDelta?: (text: string) => void
+  onTool?: (info: { tool: string; ok: boolean; summary: string }) => void
+  onDone?: (event: Extract<StreamEvent, { type: 'done' }>) => void
+  onError?: (message: string) => void
+}
+
+/**
+ * Consume a Server-Sent Events response from a POST endpoint.
+ *
+ * `EventSource` cannot POST, so the SSE frames are parsed off the fetch body
+ * here. The server sends `data: {json}` frames; anything that is not valid JSON
+ * is ignored rather than crashing the UI.
+ */
+export async function streamPost(path: string, body: unknown, handlers: StreamHandlers = {}): Promise<void> {
+  const res = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', 'x-requested-with': 'ais' },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`
+    try {
+      const data = (await res.json()) as { error?: string }
+      if (data?.error) message = data.error
+    } catch {
+      /* not JSON */
+    }
+    handlers.onError?.(message)
+    throw new ApiClientError(res.status, message)
+  }
+  if (!res.body) {
+    handlers.onError?.('The server did not return a stream')
+    return
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data:')) continue
+        const raw = line.slice(5).trim()
+        if (!raw) continue
+        let event: StreamEvent
+        try {
+          event = JSON.parse(raw) as StreamEvent
+        } catch {
+          continue
+        }
+        if (event.type === 'delta') handlers.onDelta?.(event.text)
+        else if (event.type === 'tool') handlers.onTool?.({ tool: event.tool, ok: event.ok, summary: event.summary })
+        else if (event.type === 'done') handlers.onDone?.(event)
+        else if (event.type === 'error') handlers.onError?.(event.message)
+      }
+    }
+  }
+}
+
 /* ---------------- shared API types (mirror docs/API.md) ---------------- */
 
 export type SessionInfo = {
@@ -76,6 +153,17 @@ export type SessionInfo = {
 export type Customer = {
   id: string; name: string; email: string; phone: string; notes: string
   tags: string[]; optOut: boolean; consentContact: boolean; createdAt: string
+}
+
+/** A catalog entry from the hardware/model probe. */
+export type ModelRecommendation = {
+  capability: 'llm' | 'embedding' | 'stt' | 'tts' | 'vision'
+  model: string
+  sizeGb: number
+  minRamGb: number
+  note: string
+  fits: boolean
+  reason: string
 }
 
 export type TeamMember = {

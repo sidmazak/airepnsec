@@ -2,10 +2,29 @@ import { db } from '@/lib/db'
 import { ApiError } from '@/lib/api'
 import { getActiveProvider, getApiKey, assertAiPolicy } from '@/lib/ai/providers'
 
-export type LlmMessage = { role: 'system' | 'user' | 'assistant'; content: string }
+export type {
+  LlmMessage,
+  LlmToolCall,
+  LlmToolCallPayload,
+  LlmToolSpec,
+} from '@/lib/ai/llm-protocol'
+
+import {
+  mergeToolCallFrames,
+  type ToolCallFrame,
+  parseToolArgs,
+  toOllamaMessages,
+  toOpenAiMessages,
+  type LlmMessage,
+  type LlmToolCall,
+  type LlmToolSpec,
+} from '@/lib/ai/llm-protocol'
+
 
 export type LlmResult = {
   content: string
+  /** Provider-native tool calls (empty when the provider has no tool support). */
+  toolCalls: LlmToolCall[]
   provider: string
   model: string
   latencyMs: number
@@ -46,12 +65,16 @@ async function fetchWithTimeout(url: string, init: RequestInit & { timeoutMs?: n
   }
 }
 
-/** One-shot completion with timeout + a single retry on transient failures. */
-export async function chatComplete(
-  orgId: string,
-  messages: LlmMessage[],
-  opts: { temperature?: number; maxTokens?: number; conversationId?: string; timeoutMs?: number } = {}
-): Promise<LlmResult> {
+
+type ProviderRow = {
+  provider: string
+  baseUrl: string
+  model: string
+  apiKeyEnc: string
+  configJson?: string
+}
+
+async function resolveProvider(orgId: string): Promise<ProviderRow> {
   const row = await getActiveProvider(orgId, 'llm')
   if (!row) {
     throw new AiUnavailableError(
@@ -60,6 +83,46 @@ export async function chatComplete(
     )
   }
   await assertAiPolicy(orgId, row.provider, row.baseUrl) // hard-blocks cloud calls in local-only mode; self-hosted endpoints stay allowed
+  return row
+}
+
+/**
+ * Provider capability flags. `nativeTools` is opt-out via the provider config
+ * (`nativeTools: false`) because some OpenAI-compatible servers reject the
+ * `tools` parameter; `streaming` can be disabled the same way.
+ */
+export function providerFlags(row: { configJson?: string }): { nativeTools: boolean; streaming: boolean } {
+  let config: Record<string, unknown> = {}
+  try {
+    config = JSON.parse(row.configJson || '{}')
+  } catch {
+    config = {}
+  }
+  return {
+    nativeTools: config.nativeTools !== false,
+    streaming: config.streaming !== false,
+  }
+}
+
+
+type CallOpts = {
+  temperature?: number
+  maxTokens?: number
+  timeoutMs?: number
+  tools?: LlmToolSpec[]
+}
+
+/**
+ * One-shot completion with timeout + a single retry on transient failures.
+ * When `opts.tools` is set the provider is asked for native tool calls; the
+ * normalized calls come back in `result.toolCalls`.
+ */
+export async function chatComplete(
+  orgId: string,
+  messages: LlmMessage[],
+  opts: { temperature?: number; maxTokens?: number; conversationId?: string; timeoutMs?: number; tools?: LlmToolSpec[] } = {}
+): Promise<LlmResult> {
+  const row = await resolveProvider(orgId)
 
   const started = Date.now()
   const attempts = 2
@@ -90,53 +153,284 @@ export async function chatComplete(
   throw new AiUnavailableError(`The AI model could not be reached: ${sanitized}`)
 }
 
-async function callOllama(row: { baseUrl: string; model: string }, messages: LlmMessage[], opts: { temperature?: number; maxTokens?: number; timeoutMs?: number }): Promise<LlmResult> {
+async function callOllama(row: ProviderRow, messages: LlmMessage[], opts: CallOpts): Promise<LlmResult> {
   if (!row.baseUrl) throw new AiUnavailableError('Ollama base URL is not configured')
+  const body: Record<string, unknown> = {
+    model: row.model || 'llama3.2',
+    messages: toOllamaMessages(messages),
+    stream: false,
+    options: { temperature: opts.temperature ?? 0.4, ...(opts.maxTokens ? { num_predict: opts.maxTokens } : {}) },
+  }
+  // Ollama only accepts the JSON schema mode when no native tools are used.
+  if (opts.tools?.length) body.tools = opts.tools
+  else body.format = 'json'
+
   const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: row.model || 'llama3.2',
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      stream: false,
-      format: 'json',
-      options: { temperature: opts.temperature ?? 0.4, ...(opts.maxTokens ? { num_predict: opts.maxTokens } : {}) },
-    }),
+    body: JSON.stringify(body),
     timeoutMs: opts.timeoutMs ?? 60_000, // local models can be slower
   })
   if (!res.ok) throw new AiUnavailableError(`Ollama returned HTTP ${res.status}. Is the server running at ${row.baseUrl}?`)
-  const data = (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number }
+  const data = (await res.json()) as {
+    message?: { content?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: unknown } }> }
+    prompt_eval_count?: number
+    eval_count?: number
+  }
   const content = data.message?.content ?? ''
-  if (!content) throw new AiUnavailableError('Ollama returned an empty response')
-  return { content, provider: 'ollama', model: row.model, latencyMs: 0, tokensIn: data.prompt_eval_count ?? 0, tokensOut: data.eval_count ?? 0 }
+  const toolCalls: LlmToolCall[] = (data.message?.tool_calls ?? [])
+    .filter((tc) => tc?.function?.name)
+    .map((tc, i) => ({
+      id: `call_${i}`,
+      name: String(tc.function?.name),
+      args: parseToolArgs(tc.function?.arguments),
+    }))
+  if (!content && toolCalls.length === 0) throw new AiUnavailableError('Ollama returned an empty response')
+  return { content, toolCalls, provider: 'ollama', model: row.model, latencyMs: 0, tokensIn: data.prompt_eval_count ?? 0, tokensOut: data.eval_count ?? 0 }
 }
 
-async function callOpenAiCompatible(row: { baseUrl: string; model: string; apiKeyEnc: string }, messages: LlmMessage[], opts: { temperature?: number; maxTokens?: number; timeoutMs?: number }): Promise<LlmResult> {
+async function callOpenAiCompatible(row: ProviderRow, messages: LlmMessage[], opts: CallOpts): Promise<LlmResult> {
   if (!row.baseUrl) throw new AiUnavailableError('Endpoint base URL is not configured')
   const key = getApiKey(row)
+  const body: Record<string, unknown> = {
+    model: row.model,
+    messages: toOpenAiMessages(messages),
+    temperature: opts.temperature ?? 0.4,
+  }
+  if (opts.maxTokens) body.max_tokens = opts.maxTokens
+  if (opts.tools?.length) {
+    body.tools = opts.tools
+    body.tool_choice = 'auto'
+  }
+
   const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
-    body: JSON.stringify({
-      model: row.model,
-      messages,
-      temperature: opts.temperature ?? 0.4,
-      ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
-    }),
+    body: JSON.stringify(body),
+    timeoutMs: opts.timeoutMs,
   })
   if (!res.ok) throw new AiUnavailableError(`Endpoint returned HTTP ${res.status}`)
   const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
+    choices?: Array<{
+      message?: {
+        content?: string | null
+        tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: unknown } }>
+      }
+    }>
     usage?: { prompt_tokens?: number; completion_tokens?: number }
   }
-  const content = data.choices?.[0]?.message?.content ?? ''
-  if (!content) throw new AiUnavailableError('The endpoint returned an empty response')
+  const message = data.choices?.[0]?.message
+  const content = message?.content ?? ''
+  const toolCalls: LlmToolCall[] = (message?.tool_calls ?? [])
+    .filter((tc) => tc?.function?.name)
+    .map((tc, i) => ({
+      id: tc.id || `call_${i}`,
+      name: String(tc.function?.name),
+      args: parseToolArgs(tc.function?.arguments),
+    }))
+  if (!content && toolCalls.length === 0) throw new AiUnavailableError('The endpoint returned an empty response')
   return {
     content,
+    toolCalls,
     provider: 'openai_compatible',
     model: row.model,
     latencyMs: 0,
     tokensIn: data.usage?.prompt_tokens ?? 0,
     tokensOut: data.usage?.completion_tokens ?? 0,
+  }
+}
+
+/* ---------------- streaming ---------------- */
+
+export type StreamHandlers = {
+  /** Called for every text fragment the model produced. */
+  onDelta: (delta: string) => void
+  /** Called once when the provider finished. */
+  onDone?: (info: { tokensIn?: number; tokensOut?: number; toolCalls?: LlmToolCall[] }) => void
+}
+
+async function readSse(res: Response, onEvent: (data: string) => void): Promise<void> {
+  const reader = res.body?.getReader()
+  if (!reader) return
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, idx).trim()
+      buffer = buffer.slice(idx + 1)
+      if (!line) continue
+      if (line.startsWith('data:')) onEvent(line.slice(5).trim())
+    }
+  }
+  const tail = buffer.trim()
+  if (tail.startsWith('data:')) onEvent(tail.slice(5).trim())
+}
+
+/**
+ * Stream a completion.
+ *
+ * OpenAI-compatible endpoints speak SSE (`data: {"choices":[{"delta":{"content":"…"}}]}`),
+ * Ollama speaks newline-delimited JSON. When the provider refuses to stream
+ * (or streaming is disabled in the provider config) the call degrades to the
+ * regular one-shot completion and the whole text arrives as a single delta —
+ * the caller never has to special-case it.
+ */
+export async function streamChat(
+  orgId: string,
+  messages: LlmMessage[],
+  opts: { temperature?: number; maxTokens?: number; conversationId?: string; timeoutMs?: number; tools?: LlmToolSpec[] } & StreamHandlers
+): Promise<LlmResult> {
+  const row = await resolveProvider(orgId)
+  const flags = providerFlags(row)
+  const { onDelta, onDone, ...rest } = opts
+
+  if (!flags.streaming) {
+    const result = await chatComplete(orgId, messages, { ...rest })
+    if (result.content) onDelta(result.content)
+    onDone?.({ tokensIn: result.tokensIn, tokensOut: result.tokensOut, toolCalls: result.toolCalls })
+    return result
+  }
+
+  const started = Date.now()
+  let emitted = 0
+  const emit = (delta: string) => {
+    if (!delta) return
+    emitted += delta.length
+    onDelta(delta)
+  }
+  try {
+    if (row.provider === 'ollama') {
+      const body: Record<string, unknown> = {
+        model: row.model || 'llama3.2',
+        messages: toOllamaMessages(messages),
+        stream: true,
+        options: { temperature: rest.temperature ?? 0.4, ...(rest.maxTokens ? { num_predict: rest.maxTokens } : {}) },
+      }
+      if (rest.tools?.length) body.tools = rest.tools
+      else body.format = 'json'
+
+      const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/api/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        timeoutMs: rest.timeoutMs ?? 120_000,
+      })
+      if (!res.ok) throw new AiUnavailableError(`Ollama returned HTTP ${res.status}. Is the server running at ${row.baseUrl}?`)
+
+      let content = ''
+      let tokensIn: number | undefined
+      let tokensOut: number | undefined
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = (await reader?.read()) ?? { done: true, value: undefined }
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let idx: number
+        while ((idx = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, idx).trim()
+          buffer = buffer.slice(idx + 1)
+          if (!line) continue
+          try {
+            const chunk = JSON.parse(line) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; done?: boolean }
+            const delta = chunk.message?.content ?? ''
+            if (delta) {
+              content += delta
+              emit(delta)
+            }
+            if (typeof chunk.prompt_eval_count === 'number') tokensIn = chunk.prompt_eval_count
+            if (typeof chunk.eval_count === 'number') tokensOut = chunk.eval_count
+          } catch {
+            /* ignore partial/invalid lines */
+          }
+        }
+      }
+
+      const latencyMs = Date.now() - started
+      await logAi(orgId, { capability: 'llm', provider: row.provider, model: row.model, latencyMs, tokensIn: tokensIn ?? 0, tokensOut: tokensOut ?? 0, ok: true, conversationId: rest.conversationId })
+      onDone?.({ tokensIn, tokensOut })
+      return { content, toolCalls: [], provider: row.provider, model: row.model, latencyMs, tokensIn: tokensIn ?? 0, tokensOut: tokensOut ?? 0 }
+    }
+
+    if (row.provider === 'openai_compatible') {
+      const key = getApiKey(row)
+      const body: Record<string, unknown> = {
+        model: row.model,
+        messages: toOpenAiMessages(messages),
+        temperature: rest.temperature ?? 0.4,
+        stream: true,
+      }
+      if (rest.maxTokens) body.max_tokens = rest.maxTokens
+      if (rest.tools?.length) {
+        body.tools = rest.tools
+        body.tool_choice = 'auto'
+      }
+
+      const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+        body: JSON.stringify(body),
+        timeoutMs: rest.timeoutMs ?? 120_000,
+      })
+      if (!res.ok) throw new AiUnavailableError(`Endpoint returned HTTP ${res.status}`)
+
+      let content = ''
+      let tokensIn: number | undefined
+      let tokensOut: number | undefined
+      // Tool calls arrive in fragments: the name in the first frame, the JSON
+      // arguments split across the following ones.
+      const frames: ToolCallFrame[] = []
+      await readSse(res, (raw) => {
+        if (!raw || raw === '[DONE]') return
+        try {
+          const chunk = JSON.parse(raw) as {
+            choices?: Array<{
+              delta?: {
+                content?: string | null
+                tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>
+              }
+              message?: { content?: string | null }
+            }>
+            usage?: { prompt_tokens?: number; completion_tokens?: number }
+          }
+          const delta = chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.message?.content ?? ''
+          if (delta) {
+            content += delta
+            emit(delta)
+          }
+          for (const tc of chunk.choices?.[0]?.delta?.tool_calls ?? []) {
+            frames.push({ index: tc.index, id: tc.id, name: tc.function?.name, argsText: tc.function?.arguments })
+          }
+          if (typeof chunk.usage?.prompt_tokens === 'number') tokensIn = chunk.usage.prompt_tokens
+          if (typeof chunk.usage?.completion_tokens === 'number') tokensOut = chunk.usage.completion_tokens
+        } catch {
+          /* ignore partial frames */
+        }
+      })
+
+      const toolCalls: LlmToolCall[] = mergeToolCallFrames(frames)
+
+      const latencyMs = Date.now() - started
+      await logAi(orgId, { capability: 'llm', provider: row.provider, model: row.model, latencyMs, tokensIn: tokensIn ?? 0, tokensOut: tokensOut ?? 0, ok: true, conversationId: rest.conversationId })
+      onDone?.({ tokensIn, tokensOut, toolCalls })
+      return { content, toolCalls, provider: row.provider, model: row.model, latencyMs, tokensIn: tokensIn ?? 0, tokensOut: tokensOut ?? 0 }
+    }
+
+    throw new AiUnavailableError(`Provider kind "${row.provider}" cannot serve conversations`)
+  } catch (err) {
+    // A provider that refuses to stream must not break the answer: fall back to
+    // the one-shot path and deliver the whole text as a single delta.
+    if (err instanceof AiUnavailableError && err.status === 503 && !rest.tools?.length && emitted === 0) {
+      const result = await chatComplete(orgId, messages, { ...rest })
+      if (result.content) onDelta(result.content)
+      onDone?.({ tokensIn: result.tokensIn, tokensOut: result.tokensOut, toolCalls: result.toolCalls })
+      return result
+    }
+    throw err
   }
 }

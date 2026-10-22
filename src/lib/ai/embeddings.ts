@@ -463,10 +463,21 @@ export async function searchKnowledge(orgId: string, query: string, k = 5): Prom
     }
   })
 
-  return scored
+  const candidates = scored
     .filter((s) => s.score > 0.02)
     .sort((a, b) => b.score - a.score)
     .slice(0, k)
+
+  if (!candidates.length) return candidates
+
+  // Optional second stage: a real reranker re-orders the candidates. When no
+  // reranker is configured (or it fails) the hybrid order is kept.
+  const { rerankDocuments } = await import('@/lib/ai/rerank')
+  const outcome = await rerankDocuments(orgId, query, candidates.map((c) => c.text))
+  if (!outcome.applied || !outcome.results.length) return candidates
+
+  const { applyRerank } = await import('@/lib/ai/rerank-protocol')
+  return applyRerank(candidates, outcome.results).slice(0, k)
 }
 
 /* ------------------------------------------------------------------ */

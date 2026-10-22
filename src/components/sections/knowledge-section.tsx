@@ -22,7 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import {
   BookMarked, CheckCircle2, ChevronDown, ChevronUp, Database, FileQuestion, Loader2,
-  Pencil, Plus, RefreshCw, Search, ShieldAlert, Trash2,
+  Pencil, Plus, RefreshCw, ScanEye, Search, ShieldAlert, Trash2,
 } from 'lucide-react'
 
 type DocForm = {
@@ -98,6 +98,60 @@ export function KnowledgeSection() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  /* ---------- vision (read an image with the configured vision model) ---------- */
+  const [visionFile, setVisionFile] = useState<File | null>(null)
+  const [visionPrompt, setVisionPrompt] = useState('Transcribe all text in this image exactly as it appears.')
+  const [visionBusy, setVisionBusy] = useState(false)
+  const [visionText, setVisionText] = useState('')
+  const [visionError, setVisionError] = useState('')
+
+  const readWithVision = async () => {
+    if (!visionFile) return
+    setVisionBusy(true)
+    setVisionError('')
+    setVisionText('')
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = () => reject(new Error('The file could not be read'))
+        reader.onload = () => {
+          const result = String(reader.result ?? '')
+          const comma = result.indexOf(',')
+          resolve(comma >= 0 ? result.slice(comma + 1) : result)
+        }
+        reader.readAsDataURL(visionFile)
+      })
+      const d = await api.post<{ text: string; model: string; latencyMs: number }>('/api/ai/vision', {
+        imageBase64: base64,
+        mimeType: visionFile.type || 'image/png',
+        prompt: visionPrompt.trim() || 'Describe this image.',
+      })
+      setVisionText(d.text)
+    } catch (err) {
+      setVisionError(err instanceof Error ? err.message : 'The image could not be read')
+    } finally {
+      setVisionBusy(false)
+    }
+  }
+
+  const saveVisionAsDoc = async () => {
+    if (!visionText.trim()) return
+    try {
+      await api.post('/api/knowledge', {
+        title: `Image read ${new Date().toLocaleDateString()}`,
+        content: visionText.trim(),
+        approved: true,
+        tags: ['vision'],
+      })
+      toast({ title: 'Saved as a knowledge document', description: 'The text is now available to the AI receptionist.' })
+      setVisionText('')
+      setVisionFile(null)
+      await load()
+    } catch (err) {
+      toast({ title: 'Save failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+    }
+  }
 
   const openNew = () => { setForm(EMPTY_FORM); setFormOpen(true) }
 
@@ -360,6 +414,61 @@ export function KnowledgeSection() {
             </ul>
           )}
         </div>
+
+        {/* vision: read an image with the configured vision model */}
+        <Card className="self-start">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2"><ScanEye className="h-4 w-4" aria-hidden /> Read an image</CardTitle>
+            <CardDescription>
+              Send a photo (receipt, price list, damage report) to the vision model configured in AI Providers.
+              The image is not stored — only the text you keep.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="vision-file">Image</Label>
+              <Input
+                id="vision-file"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={(e) => { setVisionFile(e.target.files?.[0] ?? null); setVisionText('') }}
+                className="min-h-[44px]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="vision-prompt">What should the model look for?</Label>
+              <Textarea
+                id="vision-prompt"
+                rows={2}
+                value={visionPrompt}
+                onChange={(e) => setVisionPrompt(e.target.value)}
+                placeholder="Transcribe all text in this image."
+              />
+            </div>
+            <Button
+              onClick={() => void readWithVision()}
+              disabled={!visionFile || visionBusy}
+              className="min-h-[44px] w-full"
+            >
+              {visionBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <ScanEye className="h-4 w-4" aria-hidden />}
+              Read the image
+            </Button>
+            {visionError && (
+              <Alert variant="destructive" role="alert">
+                <ShieldAlert className="h-4 w-4" aria-hidden />
+                <AlertDescription>{visionError}</AlertDescription>
+              </Alert>
+            )}
+            {visionText && (
+              <>
+                <Textarea readOnly rows={6} value={visionText} aria-label="Text read from the image" />
+                <Button onClick={() => void saveVisionAsDoc()} variant="outline" className="min-h-[44px] w-full">
+                  <Plus className="h-4 w-4" aria-hidden /> Save as a knowledge document
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
 
         {/* retrieval tester */}
         <Card className="self-start">

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type ConversationRow, type Customer, type MessageRow } from '@/lib/client/api'
+import { api, streamPost, type ConversationRow, type Customer, type MessageRow, type StreamHandlers } from '@/lib/client/api'
 import { useAppStore } from '@/lib/client/store'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -288,6 +288,10 @@ export function InboxSection() {
   const [sending, setSending] = useState(false)
   const [aiError, setAiError] = useState('')
   const [aiOffNote, setAiOffNote] = useState(false)
+  /** Partial assistant reply that arrived over the SSE stream. */
+  const [streamedText, setStreamedText] = useState('')
+  /** Tool the assistant is calling right now (streamed turns). */
+  const [streamedTool, setStreamedTool] = useState('')
   const [newOpen, setNewOpen] = useState(false)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [contactName, setContactName] = useState('')
@@ -408,12 +412,39 @@ export function InboxSection() {
       messages: [...d.messages, { id: tempId, role: 'customer', content, meta: '', createdAt: new Date().toISOString() }],
     } : d)
     try {
-      const r = await api.post<{ reply: string; assistantReply?: string; toolCalls?: Array<{ tool: string; ok: boolean }>; aiUsed: boolean; error?: string }>(
-        `/api/conversations/${convId}/messages`, { content },
-      )
-      const reply = r.reply || r.assistantReply || ''
-      if (r.error) setAiError(r.error)
-      if (!r.aiUsed && !r.error) setAiOffNote(true)
+      // Streamed turn: the reply arrives token by token. If the stream cannot be
+      // used (proxy without streaming, offline) the request falls back to the
+      // regular endpoint so the message is never lost.
+      let reply = ''
+      let sawDone = false
+      const handlers: StreamHandlers = {
+        onDelta: (text) => setStreamedText((prev) => prev + text),
+        onTool: (info) => {
+          setStreamedText('')
+          setStreamedTool(info.tool)
+        },
+        onDone: (event) => {
+          sawDone = true
+          reply = event.reply || ''
+          if (event.error) setAiError(event.error)
+          if (!event.aiUsed && !event.error) setAiOffNote(true)
+        },
+        onError: (message) => setAiError(message),
+      }
+
+      try {
+        await streamPost('/api/ai/stream', { conversationId: convId, message: content, channel: 'dashboard' }, handlers)
+      } catch {
+        if (!sawDone) {
+          const r = await api.post<{ reply: string; assistantReply?: string; toolCalls?: Array<{ tool: string; ok: boolean }>; aiUsed: boolean; error?: string }>(
+            `/api/conversations/${convId}/messages`, { content },
+          )
+          reply = r.reply || r.assistantReply || ''
+          if (r.error) setAiError(r.error)
+          if (!r.aiUsed && !r.error) setAiOffNote(true)
+        }
+      }
+
       await loadDetail(convId, true)
       void loadList(true)
       return reply || null
@@ -422,6 +453,8 @@ export function InboxSection() {
       await loadDetail(convId, true)
       return null
     } finally {
+      setStreamedText('')
+      setStreamedTool('')
       setSending(false)
     }
   }
@@ -688,7 +721,24 @@ export function InboxSection() {
                       </div>
                     )
                   })}
-                  {sending && !staffMode && (
+                  {(streamedText || streamedTool) && (
+                    <div className="flex justify-end">
+                      <div className="max-w-[85%] sm:max-w-[70%]">
+                        <p className="text-[10px] text-muted-foreground text-right mb-0.5 flex items-center justify-end gap-1">
+                          <Bot className="h-3 w-3" aria-hidden /> AI receptionist
+                        </p>
+                        <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-3.5 py-2.5 text-sm whitespace-pre-wrap break-words">
+                          {streamedText || (
+                            <span className="inline-flex items-center gap-2">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                              {streamedTool ? `Calling ${streamedTool}…` : 'Assistant is thinking…'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {sending && !staffMode && !streamedText && !streamedTool && (
                     <div className="flex justify-end">
                       <div className="rounded-2xl bg-primary/70 text-primary-foreground px-3.5 py-2.5 text-sm flex items-center gap-2">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
