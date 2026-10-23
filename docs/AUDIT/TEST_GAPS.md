@@ -1,16 +1,18 @@
 # Test Gaps — AI Secretary
 
-## Current state (2026-10-22)
-- **Unit suite:** `tests/unit/*.mts` via `npm run test:unit` (Node's built-in `node:test` + `--experimental-strip-types`) — **32 passing cases**:
+## Current state (2026-10-23)
+- **Unit suite:** `tests/unit/*.mts` via `npm run test:unit` (Node's built-in `node:test` + `--experimental-strip-types`) — **161 passing cases**:
   - SMS gateway adapters: phone normalization, provider ids, request building (TextBee/httpSMS/generic HTTP), message-id extraction, delivery-state honesty, test probes.
   - TTS chunking (sentence boundaries, hard splits).
   - Read-only SQL guard (benign SELECT/WITH accepted; mutations rejected).
   - TOTP (base32 round-trip, RFC 6238 vectors, ±1 step, URI).
   - Telephony routing (line normalization, disabled/paused exclusion, load by line id, least-busy, round-robin, redirect, Twilio status mapping).
   - Outbound URL/SSRF guard (private IPv4/IPv6 ranges, protocol rejection, explicit private opt-in, public literal IPs).
+  - Invoice lifecycle math (draft/paid/partial/refund reopening, derived overdue, outstanding clamp).
+  - AI provider adapters (Anthropic, Gemini, Azure), knowledge extraction/crawl policy, email APIs, Square/accounting/commerce payloads, SSO/SCIM helpers, local speech/WAV.
 - **Static gates:** `npx tsc --noEmit -p tsconfig.json` and `npm run lint` (ESLint) — clean.
 - **CI:** `.github/workflows/ci.yml` runs Prisma generate → tsc → lint → unit tests → `next build` on push/PR.
-- **Runtime verification:** manual/browser + curl against the dev server; Diagnostics exposes DB tuning, workers, providers and counts. Docker Postgres and SQLite profiles built and smoke-tested on 2026-10-22 (health, schema, seed, login, export, backup, SSRF block, ONNX). No committed browser automation suite.
+- **Runtime verification:** manual/browser + curl against the dev server; Diagnostics exposes DB tuning, workers, providers and counts. `node scripts/smoke.mjs` covers 44 checks. Docker Postgres and SQLite profiles built and smoke-tested on 2026-10-22 (health, schema, seed, login, export, backup, SSRF block, ONNX). No committed browser automation suite.
 
 ## Covered in iteration 2 (live/structural)
 - Dev boot: SQLite WAL + 5000 ms busy timeout; automation/outbox/data-source workers start lease-protected.
