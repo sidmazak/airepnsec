@@ -312,7 +312,7 @@ Read [docs/SECURITY.md](docs/SECURITY.md) for the threat model, RBAC matrix and 
 ```bash
 npx tsc --noEmit -p tsconfig.json
 npm run lint
-npm run test:unit        # Node built-in node:test, 155 cases
+npm run test:unit        # Node built-in node:test, 161 cases
 node scripts/smoke.mjs   # 44 end-to-end checks against the running dev server (scripts/smoke.mjs)
 ```
 

@@ -48,7 +48,7 @@ export type QueueReminderInput = {
 export async function queueInvoiceReminder(orgId: string, input: QueueReminderInput): Promise<{ queued: boolean; reason: string; outboxId?: string }> {
   const invoice = await db.invoice.findFirst({ where: { id: input.invoiceId, orgId } })
   if (!invoice) return { queued: false, reason: 'invoice not found' }
-  if (['paid', 'void'].includes(invoice.status)) return { queued: false, reason: `invoice is ${invoice.status}` }
+  if (['draft', 'paid', 'void', 'uncollectible'].includes(invoice.status)) return { queued: false, reason: `invoice is ${invoice.status}` }
 
   const customer = await db.customer.findFirst({ where: { id: invoice.customerId, orgId } })
   if (!customer) return { queued: false, reason: 'customer not found' }

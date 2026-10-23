@@ -23,11 +23,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
   BadgeCheck, Ban, BookOpen, CheckCircle2, Copy, ExternalLink, FlaskConical, Link2, Loader2, Mail, Plus, RefreshCw,
-  Receipt, ShieldAlert, Trash2, Wallet,
+  Receipt, ShieldAlert, Trash2, Undo2, Wallet,
 } from 'lucide-react'
 
 /* ---------------- badges ---------------- */
@@ -46,6 +47,7 @@ const PAYMENT_STATUS_CLASS: Record<string, string> = {
   verified: 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-900',
   pending_verification: 'bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-900',
   rejected: 'bg-muted text-muted-foreground border-border',
+  refunded: 'bg-muted text-muted-foreground border-border',
 }
 
 function InvoiceStatusBadge({ status }: { status: string }) {
@@ -196,6 +198,81 @@ function RecordPaymentDialog({
   )
 }
 
+function RefundDialog({
+  payment, invoiceNumber, onClose, onChanged,
+}: { payment: Payment | null; invoiceNumber: string; onClose: () => void; onChanged: () => void }) {
+  const { toast } = useToast()
+  const [amount, setAmount] = useState('')
+  const [reason, setReason] = useState('')
+  const [idempotencyKey, setIdempotencyKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (payment) {
+      setAmount((payment.amountCents / 100).toFixed(2))
+      setReason('')
+      setError('')
+      setIdempotencyKey(typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `refund-${Date.now()}`)
+    }
+  }, [payment])
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!payment) return
+    const cents = dollarsToCents(amount)
+    if (cents <= 0) { setError('Enter a positive refund amount in dollars, e.g. 42.50'); return }
+    setBusy(true)
+    setError('')
+    try {
+      await api.post(`/api/payments/${payment.id}/refund`, {
+        amountCents: cents,
+        reason: reason.trim() || undefined,
+        idempotencyKey,
+      })
+      toast({ title: 'Refund recorded', description: `${formatMoney(cents)} refunded against ${invoiceNumber}.` })
+      onChanged()
+      onClose()
+    } catch (err) {
+      setError(friendlyError(err, 'Could not record refund'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={!!payment} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Refund payment</DialogTitle>
+          <DialogDescription>
+            {payment ? `Refund the verified ${formatMoney(payment.amountCents)} payment on ${invoiceNumber}. The original payment stays in history; a linked refund reopens the balance.` : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-3" aria-label="Refund payment form">
+          {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+          <div className="space-y-1.5">
+            <Label htmlFor="rf-amount">Refund amount (USD)</Label>
+            <Input id="rf-amount" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} className="min-h-[44px]" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="rf-reason">Reason (optional)</Label>
+            <Input id="rf-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Customer cancellation, duplicate charge…" className="min-h-[44px]" />
+          </div>
+          <p className="text-xs text-muted-foreground">A retry with this idempotency key cannot refund twice.</p>
+          <DialogFooter>
+            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose}>Cancel</Button>
+            <Button type="submit" variant="destructive" className="min-h-[44px]" disabled={busy}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Undo2 className="h-4 w-4" aria-hidden />}
+              Record refund
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function SimulateWebhookDialog({
   invoice, onClose, onChanged,
 }: { invoice: Invoice | null; onClose: () => void; onChanged: () => void }) {
@@ -297,7 +374,9 @@ function InvoiceDetailDialog({
   const [recordOpen, setRecordOpen] = useState(false)
   const [simulateOpen, setSimulateOpen] = useState(false)
   const [voidOpen, setVoidOpen] = useState(false)
+  const [refundTarget, setRefundTarget] = useState<Payment | null>(null)
   const [busy, setBusy] = useState(false)
+  const [issueBusy, setIssueBusy] = useState(false)
   const [sendBusy, setSendBusy] = useState(false)
   const [sendLink, setSendLink] = useState('')
   const [sendLinkError, setSendLinkError] = useState('')
@@ -324,7 +403,7 @@ function InvoiceDetailDialog({
 
   useEffect(() => {
     if (invoiceId) {
-      setInvoice(null); setRecordOpen(false); setSimulateOpen(false); setVoidOpen(false); void load(invoiceId)
+      setInvoice(null); setRecordOpen(false); setSimulateOpen(false); setVoidOpen(false); setRefundTarget(null); void load(invoiceId)
       setSendLink(''); setSendLinkError(''); setLinkOpen(false); setLinkResult(null)
       setPushOpen(false); setPushResult(null)
     }
@@ -333,6 +412,20 @@ function InvoiceDetailDialog({
   const refreshDetail = () => {
     if (invoiceId) void load(invoiceId)
     onChanged()
+  }
+
+  const doIssue = async () => {
+    if (!invoice) return
+    setIssueBusy(true)
+    try {
+      await api.patch(`/api/invoices/${invoice.id}`, { action: 'issue' })
+      toast({ title: 'Invoice issued', description: `${invoice.number} is now collectible and posted to the ledger.` })
+      refreshDetail()
+    } catch (err) {
+      toast({ title: 'Could not issue invoice', description: friendlyError(err, 'Issue failed'), variant: 'destructive' })
+    } finally {
+      setIssueBusy(false)
+    }
   }
 
   const doVoid = async () => {
@@ -459,7 +552,7 @@ function InvoiceDetailDialog({
                 ) : (
                   <div className="rounded-md border max-h-40 overflow-y-auto">
                     <Table>
-                      <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
+                      <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Method</TableHead><TableHead>Reference</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Amount</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
                       <TableBody>
                         {(invoice.payments ?? []).map((p) => (
                           <TableRow key={p.id}>
@@ -468,6 +561,13 @@ function InvoiceDetailDialog({
                             <TableCell className="max-w-[140px] truncate" title={p.reference}>{p.reference || '—'}</TableCell>
                             <TableCell><span className="flex flex-col gap-1"><PaymentStatusBadge status={p.status} /><SourceTag source={p.source} /></span></TableCell>
                             <TableCell className="text-right">{formatMoney(p.amountCents)}</TableCell>
+                            <TableCell className="text-right">
+                              {isAdmin && p.status === 'verified' && p.source !== 'refund' && invoice.status !== 'void' && invoice.status !== 'draft' && (
+                                <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setRefundTarget(p)} aria-label={`Refund payment of ${formatMoney(p.amountCents)}`}>
+                                  <Undo2 className="h-4 w-4" aria-hidden /> Refund
+                                </Button>
+                              )}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -510,9 +610,19 @@ function InvoiceDetailDialog({
 
               <Separator />
               <div className="flex flex-wrap gap-2">
+                {invoice.status === 'draft' && (
+                  <Button
+                    className="min-h-[44px]"
+                    disabled={!isAdmin || issueBusy}
+                    onClick={() => void doIssue()}
+                    title={isAdmin ? 'Post the ledger charge and make this invoice collectible' : 'Owner or admin only'}
+                  >
+                    {issueBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />} Issue invoice
+                  </Button>
+                )}
                 <Button
                   className="min-h-[44px]"
-                  disabled={!isAdmin || invoice.status === 'void'}
+                  disabled={!isAdmin || invoice.status === 'void' || invoice.status === 'draft'}
                   onClick={() => setRecordOpen(true)}
                   title={isAdmin ? undefined : 'Owner or admin only'}
                 >
@@ -521,7 +631,7 @@ function InvoiceDetailDialog({
                 <Button
                   variant="outline"
                   className="min-h-[44px]"
-                  disabled={!isAdmin || invoice.status === 'void'}
+                  disabled={!isAdmin || invoice.status === 'void' || invoice.status === 'draft'}
                   onClick={() => setSimulateOpen(true)}
                   title={isAdmin ? 'Test harness' : 'Owner or admin only'}
                 >
@@ -539,7 +649,7 @@ function InvoiceDetailDialog({
                 <Button
                   variant="outline"
                   className="min-h-[44px]"
-                  disabled={!isAdmin || sendBusy || invoice.status === 'void'}
+                  disabled={!isAdmin || sendBusy || invoice.status === 'void' || invoice.status === 'draft'}
                   onClick={() => void doSend()}
                   title={isAdmin ? 'Queue the invoice email — the dispatcher owns real delivery' : 'Owner or admin only'}
                 >
@@ -548,7 +658,7 @@ function InvoiceDetailDialog({
                 <Button
                   variant="outline"
                   className="min-h-[44px]"
-                  disabled={!isAdmin || linkBusy || invoice.status === 'void'}
+                  disabled={!isAdmin || linkBusy || invoice.status === 'void' || invoice.status === 'draft'}
                   onClick={() => void createLink()}
                   title={isAdmin ? 'Create a Stripe or Square payment link for the outstanding balance' : 'Owner or admin only'}
                 >
@@ -576,6 +686,7 @@ function InvoiceDetailDialog({
         <>
           <RecordPaymentDialog invoice={recordOpen ? invoice : null} onClose={() => setRecordOpen(false)} onChanged={refreshDetail} />
           <SimulateWebhookDialog invoice={simulateOpen ? invoice : null} onClose={() => setSimulateOpen(false)} onChanged={refreshDetail} />
+          <RefundDialog payment={refundTarget} invoiceNumber={invoice.number} onClose={() => setRefundTarget(null)} onChanged={refreshDetail} />
 
           <Dialog open={pushOpen} onOpenChange={(open) => { setPushOpen(open); if (!open) setPushResult(null) }}>
             <DialogContent className="sm:max-w-md">
@@ -863,6 +974,8 @@ function NewInvoiceForm({
   const [items, setItems] = useState<ItemDraft[]>([{ description: '', qty: '1', unitPrice: '' }])
   const [tax, setTax] = useState('')
   const [dueInDays, setDueInDays] = useState('14')
+  const [issueDate, setIssueDate] = useState('')
+  const [draft, setDraft] = useState(false)
   const [notes, setNotes] = useState('')
   const [rentalStart, setRentalStart] = useState('')
   const [rentalEnd, setRentalEnd] = useState('')
@@ -898,13 +1011,15 @@ function NewInvoiceForm({
         items: validItems.map((it) => ({ description: it.description, qty: it.qty, unitPriceCents: it.unitPriceCents })),
         taxCents: taxCents >= 0 ? taxCents : 0,
         dueInDays: Number.isFinite(Number.parseInt(dueInDays, 10)) ? Number.parseInt(dueInDays, 10) : undefined,
+        issueDate: issueDate || undefined,
+        draft: draft || undefined,
         notes: notes.trim() || undefined,
       }
       if (rentalStart && rentalEnd) body.rentalPeriod = { start: rentalStart, end: rentalEnd }
       const created = await api.post<Invoice>('/api/invoices', body)
-      toast({ title: `Invoice ${created.number} created`, description: `${formatMoney(created.totalCents)} for ${created.customer?.name ?? 'customer'}` })
+      toast({ title: draft ? `Draft ${created.number} saved` : `Invoice ${created.number} issued`, description: draft ? `${formatMoney(created.totalCents)} — no ledger charge until you issue it.` : `${formatMoney(created.totalCents)} for ${created.customer?.name ?? 'customer'}` })
       setCustomerId(''); setItems([{ description: '', qty: '1', unitPrice: '' }]); setTax('')
-      setDueInDays('14'); setNotes(''); setRentalStart(''); setRentalEnd('')
+      setDueInDays('14'); setIssueDate(''); setDraft(false); setNotes(''); setRentalStart(''); setRentalEnd('')
       onCreated()
     } catch (err) {
       setError(friendlyError(err, 'Could not create invoice'))
@@ -917,13 +1032,13 @@ function NewInvoiceForm({
     <Card>
       <CardHeader>
         <CardTitle>New invoice</CardTitle>
-        <CardDescription>Line items post a real ledger charge (receivables → revenue) the moment the invoice is issued.</CardDescription>
+        <CardDescription>Issuing posts a real ledger charge (receivables → revenue). A draft keeps the invoice out of the ledger until you issue it.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={submit} className="space-y-4 max-w-3xl" aria-label="New invoice form">
           {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="ni-customer">Customer</Label>
               <Select value={customerId} onValueChange={setCustomerId} required>
@@ -934,6 +1049,10 @@ function NewInvoiceForm({
                   {customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}{c.email ? ` · ${c.email}` : ''}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ni-issue">Issue date (optional)</Label>
+              <Input id="ni-issue" type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className="min-h-[44px]" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ni-due">Due in (days)</Label>
@@ -1005,9 +1124,17 @@ function NewInvoiceForm({
             <Textarea id="ni-notes" value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[44px]" />
           </div>
 
+          <div className="flex items-start gap-3 rounded-lg border p-3">
+            <Checkbox id="ni-draft" checked={draft} onCheckedChange={(v) => setDraft(v === true)} className="mt-0.5" />
+            <div className="space-y-1">
+              <Label htmlFor="ni-draft">Save as draft</Label>
+              <p className="text-xs text-muted-foreground">No ledger charge, no email and no payment link until you issue it.</p>
+            </div>
+          </div>
+
           <Button type="submit" className="min-h-[44px]" disabled={!canSubmit || busy}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Receipt className="h-4 w-4" aria-hidden />}
-            Create invoice
+            {draft ? 'Save draft' : 'Create invoice'}
           </Button>
         </form>
       </CardContent>

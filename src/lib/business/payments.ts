@@ -4,6 +4,7 @@ import { audit } from '@/lib/audit'
 import { postEntry } from '@/lib/business/ledger'
 import { recalcInvoiceStatus, invoiceOutstanding } from '@/lib/business/invoice'
 import { hmacVerify } from '@/lib/crypto'
+import { randomUUID } from 'node:crypto'
 
 export type VerifiedPaymentInput = {
   invoiceId: string
@@ -44,6 +45,7 @@ export async function recordVerifiedPayment(orgId: string, input: VerifiedPaymen
   const invoice = await db.invoice.findFirst({ where: { id: input.invoiceId, orgId } })
   if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
   if (invoice.status === 'void') throw new ApiError(409, 'Cannot pay a voided invoice', 'invoice_void')
+  if (invoice.status === 'draft') throw new ApiError(409, 'Issue the invoice before recording payments', 'invoice_draft')
 
   const outstanding = invoiceOutstanding(invoice.totalCents, invoice.paidCents)
   if (input.amountCents > outstanding) {
@@ -107,6 +109,7 @@ export async function recordPaymentClaim(
   const invoice = await db.invoice.findFirst({ where: { id: input.invoiceId, orgId } })
   if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
   if (invoice.status === 'void') throw new ApiError(409, 'Invoice is void', 'invoice_void')
+  if (invoice.status === 'draft') throw new ApiError(409, 'Issue the invoice before recording claims', 'invoice_draft')
 
   const outstanding = invoiceOutstanding(invoice.totalCents, invoice.paidCents)
   if (outstanding <= 0) throw new ApiError(409, 'Invoice is already fully paid', 'already_paid')
@@ -149,6 +152,7 @@ export async function verifyPayment(orgId: string, paymentId: string, userId: st
   const invoice = await db.invoice.findFirst({ where: { id: payment.invoiceId, orgId } })
   if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
   if (invoice.status === 'void') throw new ApiError(409, 'Cannot verify payment on a voided invoice', 'invoice_void')
+  if (invoice.status === 'draft') throw new ApiError(409, 'Issue the invoice before verifying payments', 'invoice_draft')
 
   const outstanding = invoiceOutstanding(invoice.totalCents, invoice.paidCents)
   if (payment.amountCents > outstanding) {
@@ -180,9 +184,98 @@ export async function rejectPayment(orgId: string, paymentId: string, userId: st
   const payment = await db.payment.findFirst({ where: { id: paymentId, orgId } })
   if (!payment) throw new ApiError(404, 'Payment not found', 'not_found')
   if (payment.status === 'verified') throw new ApiError(409, 'Payment already verified — record a refund instead', 'already_verified')
+  if (payment.status === 'refunded' || payment.source === 'refund') throw new ApiError(409, 'This is a refund record and cannot be rejected', 'is_refund')
   const updated = await db.payment.update({ where: { id: paymentId }, data: { status: 'failed', note: reason } })
   await audit({ orgId, actorType: 'user', actorId: userId, action: 'invoice.payment_rejected', entity: 'payment', entityId: paymentId, meta: { reason } })
   return updated
+}
+
+/**
+ * Refund a verified payment. The original payment stays verified; a linked
+ * refund row (source='refund', status='refunded') plus a refund ledger entry
+ * reduce paidCents. The unique idempotencyKey prevents a retried request from
+ * refunding twice.
+ */
+export async function refundPayment(
+  orgId: string,
+  paymentId: string,
+  input: { amountCents: number; reason?: string; idempotencyKey?: string },
+  userId: string
+) {
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
+    throw new ApiError(422, 'Refund amount must be a positive integer (cents)', 'amount')
+  }
+  const payment = await db.payment.findFirst({
+    where: { id: paymentId, orgId },
+    include: { invoice: { select: { number: true } } },
+  })
+  if (!payment) throw new ApiError(404, 'Payment not found', 'not_found')
+  if (payment.source === 'refund' || payment.status === 'refunded') {
+    throw new ApiError(409, 'A refund cannot be refunded', 'is_refund')
+  }
+  if (payment.status !== 'verified') throw new ApiError(409, 'Only verified payments can be refunded', 'not_verified')
+
+  const prefix = `refund:${payment.id}:`
+  if (input.idempotencyKey) {
+    const existing = await db.payment.findFirst({ where: { orgId, idempotencyKey: prefix + input.idempotencyKey } })
+    if (existing) return { refund: existing, duplicate: true }
+  }
+
+  const idempotencyKey = prefix + (input.idempotencyKey ?? randomUUID())
+  const refund = await db.$transaction(async (tx) => {
+    const prior = await tx.payment.aggregate({
+      where: { orgId, source: 'refund', status: 'refunded', idempotencyKey: { startsWith: prefix } },
+      _sum: { amountCents: true },
+    })
+    const refundable = payment.amountCents - (prior._sum.amountCents ?? 0)
+    if (refundable <= 0) throw new ApiError(409, 'This payment has already been fully refunded', 'already_refunded')
+    if (input.amountCents > refundable) {
+      throw new ApiError(409, `Refund of ${input.amountCents} cents exceeds the refundable balance of ${refundable} cents`, 'refund_overpay', {
+        refundableCents: refundable,
+      })
+    }
+    const row = await tx.payment.create({
+      data: {
+        orgId,
+        invoiceId: payment.invoiceId,
+        amountCents: input.amountCents,
+        method: 'refund',
+        reference: payment.reference,
+        status: 'refunded',
+        source: 'refund',
+        idempotencyKey,
+        note: input.reason ?? '',
+        verifiedAt: new Date(),
+        verifiedBy: userId,
+      },
+    })
+    await tx.ledgerEntry.create({
+      data: {
+        orgId,
+        type: 'refund',
+        debitAccount: 'accounts_receivable',
+        creditAccount: 'cash',
+        amountCents: input.amountCents,
+        invoiceId: payment.invoiceId,
+        paymentId: payment.id,
+        memo: `Refund for payment ${payment.id} on ${payment.invoice.number}${input.reason ? ` (${input.reason})` : ''}`,
+        createdBy: userId,
+      },
+    })
+    return row
+  })
+
+  const state = await recalcInvoiceStatus(orgId, payment.invoiceId)
+  await audit({
+    orgId,
+    actorType: 'user',
+    actorId: userId,
+    action: 'invoice.payment_refunded',
+    entity: 'payment',
+    entityId: refund.id,
+    meta: { originalPaymentId: payment.id, invoiceId: payment.invoiceId, amountCents: input.amountCents, reason: input.reason ?? '', ...state },
+  })
+  return { refund, duplicate: false, ...state }
 }
 
 /* ---------------- webhook verification ---------------- */

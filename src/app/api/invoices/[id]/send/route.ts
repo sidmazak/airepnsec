@@ -28,6 +28,7 @@ export const POST = withAuth(
     })
     if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
     if (invoice.status === 'void') throw new ApiError(409, 'Invoice is void', 'invoice_void')
+    if (invoice.status === 'draft') throw new ApiError(409, 'Issue the invoice before sending it', 'invoice_draft')
 
     const customer = invoice.customer
     if (!customer.email) throw new ApiError(422, 'Customer has no email address on file', 'no_email')

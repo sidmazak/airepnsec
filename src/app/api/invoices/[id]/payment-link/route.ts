@@ -20,6 +20,7 @@ export const POST = withAuth(
     const invoice = await db.invoice.findFirst({ where: { id: params.id, orgId: ctx.org.id } })
     if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
     if (invoice.status === 'void') throw new ApiError(409, 'Invoice is void', 'invoice_void')
+    if (invoice.status === 'draft') throw new ApiError(409, 'Issue the invoice before creating a payment link', 'invoice_draft')
 
     const outstanding = invoiceOutstanding(invoice.totalCents, invoice.paidCents)
     if (outstanding <= 0) throw new ApiError(409, 'Invoice is already fully paid', 'already_paid')

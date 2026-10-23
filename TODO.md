@@ -53,6 +53,7 @@ flow end to end, but there is still no automated per-role sweep over every endpo
 
 ## Removed from this list
 
+- ~~Invoice drafts, issue dates, overdue state and refunds~~ — implemented (draft→issue with a single ledger charge, custom `issueDate`, derived `overdue` status/filter, partial/full idempotent refunds).
 - ~~File inputs across the SPA~~ — implemented (customer/service CSV uploads, knowledge document import, website crawl import, voice audio-file transcription, SAML certificate upload).
 - ~~AI provider breadth~~ — implemented (Anthropic, Google Gemini, Azure OpenAI, provider presets/model discovery alongside Ollama and OpenAI-compatible endpoints).
 - ~~Email provider APIs~~ — implemented (`email_api`: SendGrid, Mailgun, Postmark, Resend, Brevo; dispatcher prefers it over SMTP).

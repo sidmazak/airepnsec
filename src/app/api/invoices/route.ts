@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { withAuth, json, parseBody } from '@/lib/api'
 import { db } from '@/lib/db'
-import { createInvoice, invoiceOutstanding } from '@/lib/business/invoice'
+import { createInvoice, effectiveInvoiceStatus, invoiceOutstanding } from '@/lib/business/invoice'
 
 /**
  * GET /api/invoices?status&customerId
@@ -12,10 +12,19 @@ export const GET = withAuth(async (req, ctx) => {
   const status = url.searchParams.get('status') || undefined
   const customerId = url.searchParams.get('customerId') || undefined
 
+  const now = new Date()
+  const statusWhere =
+    status === 'overdue'
+      ? { status: { in: ['sent', 'partial'] }, dueDate: { lt: now } }
+      : status === 'sent' || status === 'partial'
+        ? { status, dueDate: { gte: now } }
+        : status
+          ? { status }
+          : {}
   const invoices = await db.invoice.findMany({
     where: {
       orgId: ctx.org.id,
-      ...(status ? { status } : {}),
+      ...statusWhere,
       ...(customerId ? { customerId } : {}),
     },
     orderBy: { issueDate: 'desc' },
@@ -24,10 +33,14 @@ export const GET = withAuth(async (req, ctx) => {
   })
 
   return json({
-    invoices: invoices.map((inv) => ({
-      ...inv,
-      outstandingCents: invoiceOutstanding(inv.totalCents, inv.paidCents),
-    })),
+    invoices: invoices.map((inv) => {
+      const outstandingCents = invoiceOutstanding(inv.totalCents, inv.paidCents)
+      return {
+        ...inv,
+        status: effectiveInvoiceStatus(inv.status, inv.dueDate, outstandingCents),
+        outstandingCents,
+      }
+    }),
   })
 })
 
@@ -48,6 +61,8 @@ const createSchema = z.object({
   items: z.array(itemSchema).min(1, 'An invoice needs at least one line item').max(100),
   taxCents: z.number().int().min(0).optional(),
   dueInDays: z.number().int().min(0).max(365).optional(),
+  issueDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
+  draft: z.boolean().optional(),
   rentalPeriod: rentalPeriodSchema.nullable().optional(),
   notes: z.string().max(4000).optional(),
 })
@@ -64,6 +79,8 @@ export const POST = withAuth(
         items: body.items,
         taxCents: body.taxCents,
         dueInDays: body.dueInDays,
+        issueDate: body.issueDate,
+        draft: body.draft,
         rentalPeriod: body.rentalPeriod ?? null,
         notes: body.notes,
       },
@@ -78,7 +95,8 @@ export const POST = withAuth(
       },
     })
 
-    return json({ ...full, outstandingCents: invoiceOutstanding(full.totalCents, full.paidCents) }, 201)
+    const outstandingCents = invoiceOutstanding(full.totalCents, full.paidCents)
+    return json({ ...full, status: effectiveInvoiceStatus(full.status, full.dueDate, outstandingCents), outstandingCents }, 201)
   },
   { roles: ['owner', 'admin'] }
 )

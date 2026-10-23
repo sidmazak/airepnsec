@@ -1,7 +1,7 @@
 # Test Plan — AI Secretary
 
 > **Verification model.** This repo uses Node's built-in `node:test` for pure/unit logic
-> (`tests/unit/*.mts`, 155 cases), plus `npx tsc --noEmit`, `npm run lint`, CI (`next build`), and
+> (`tests/unit/*.mts`, 161 cases), plus `npx tsc --noEmit`, `npm run lint`, CI (`next build`), and
 > manual browser/curl E2E against the dev server. There is no committed Vitest/Jest/Playwright suite;
 > browser checks are run with a local CDP script. Status: ✅ verified · 📋 specified/future.
 
@@ -25,6 +25,9 @@
 | F1 | Invoices | Issue invoice with lines | Line sums = total; status/ledger correct | P0 | ✅ |
 | F2 | Invoices | Partial then full payment | `partial` → `paid`; balance = total − verified | P0 | ✅ curl |
 | F3 | Invoices | Void with balance | Voided; further payments rejected; reversal entry | P1 | ✅ |
+| F4 | Invoices | Draft → issue | Draft posts no ledger charge and rejects payments; issue posts one charge and becomes collectible | P0 | ✅ unit + curl |
+| F5 | Invoices | Custom issue date + overdue | Effective `overdue` appears for past-due sent/partial rows and disappears when settled | P1 | ✅ unit + curl |
+| F6 | Payments | Partial/full refund | Paid balance drops; invoice reopens; duplicate idempotency key does not refund twice; over-refund 409 | P0 | ✅ unit + curl |
 | G1 | Payments | Idempotency key replay | Same result; single ledger entry | P0 | ✅ curl |
 | G2 | Payments | Duplicate webhook event id | Second result duplicate; balance unchanged | P0 | ✅ curl |
 | G3 | Payments | Bad webhook signature | Rejected; no state change | P0 | ✅ curl |

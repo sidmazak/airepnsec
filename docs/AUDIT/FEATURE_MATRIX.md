@@ -12,7 +12,7 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Realtime Voice | `/api/ai/realtime/*` | DONE | OpenAI-compatible WebRTC session + validated tools; falls back to the conversation model. |
 | Bookings | `/api/bookings*`, `/api/availability` | DONE | Transactional overlap checks; reschedule/cancel/remind. |
 | Customers | `/api/customers*` | DONE | CRUD, import, statement, consent/opt-out. |
-| Invoices & Payments | `/api/invoices*`, `/api/payments/*` | DONE | Claims stay pending; verification guards; Stripe/Square links + signed webhooks; QuickBooks/Xero/MYB push. |
+| Invoices & Payments | `/api/invoices*`, `/api/payments/*` | DONE | Drafts + issue, custom issue dates, derived overdue, claims stay pending, idempotent verified payments + partial/full refunds; Stripe/Square links + signed webhooks; QuickBooks/Xero/MYB push. |
 | Ledger | `/api/ledger*` | DONE | Append-only; reversals only. |
 | Usage & Billing | `/api/usage` | DONE | Token/latency/cost estimates from `AiLog`; unknown model pricing flagged. |
 | Knowledge & FAQs | `/api/knowledge*` | DONE | Approve/reindex/search; neural + lexical hybrid; file import (PDF/DOCX/HTML/MD/CSV/JSON); website crawl with AI-configured gate. |

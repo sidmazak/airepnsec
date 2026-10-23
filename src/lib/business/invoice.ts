@@ -2,6 +2,9 @@ import { db } from '@/lib/db'
 import { ApiError } from '@/lib/api'
 import { audit } from '@/lib/audit'
 import { postEntry } from '@/lib/business/ledger'
+import { effectiveInvoiceStatus, invoiceOutstanding, nextInvoiceState } from '@/lib/business/invoice-protocol'
+
+export { effectiveInvoiceStatus, invoiceOutstanding }
 
 export type InvoiceItemInput = { description: string; qty: number; unitPriceCents: number }
 
@@ -13,6 +16,7 @@ export type CreateInvoiceInput = {
   issueDate?: string
   rentalPeriod?: { start: string; end: string; recurrence?: string } | null
   notes?: string
+  draft?: boolean
   autoSend?: boolean
 }
 
@@ -26,10 +30,6 @@ async function nextInvoiceNumber(orgId: string): Promise<string> {
   })
   const lastSeq = last ? parseInt(last.number.slice(prefix.length), 10) || 0 : 0
   return `${prefix}${String(lastSeq + 1).padStart(4, '0')}`
-}
-
-export function invoiceOutstanding(totalCents: number, paidCents: number): number {
-  return Math.max(0, totalCents - paidCents)
 }
 
 export async function createInvoice(orgId: string, input: CreateInvoiceInput, actor: { type: 'user' | 'ai' | 'system'; id: string }) {
@@ -48,7 +48,9 @@ export async function createInvoice(orgId: string, input: CreateInvoiceInput, ac
   if (!Number.isInteger(tax) || tax < 0) throw new ApiError(422, 'Tax must be a non-negative integer (cents)', 'tax')
   const total = subtotal + tax
   const issueDate = input.issueDate ? new Date(input.issueDate) : new Date()
+  if (Number.isNaN(issueDate.getTime())) throw new ApiError(422, 'Issue date must be a valid date', 'issue_date')
   const dueDate = new Date(issueDate.getTime() + (input.dueInDays ?? 14) * 24 * 60 * 60 * 1000)
+  const isDraft = Boolean(input.draft)
   // The invoice number is a per-org sequence guarded by a unique index. Two
   // parallel issuances can pick the same number, so retry on the unique
   // violation instead of failing the invoice.
@@ -63,7 +65,7 @@ export async function createInvoice(orgId: string, input: CreateInvoiceInput, ac
             orgId,
             customerId: input.customerId,
             number,
-            status: 'sent',
+            status: isDraft ? 'draft' : 'sent',
             currency: customer ? (await db.organization.findUnique({ where: { id: orgId }, select: { currency: true } }))?.currency ?? 'USD' : 'USD',
             subtotalCents: subtotal,
             taxCents: tax,
@@ -86,15 +88,17 @@ export async function createInvoice(orgId: string, input: CreateInvoiceInput, ac
             },
           })
         }
-        await postEntry(orgId, {
-          type: 'charge',
-          debitAccount: 'accounts_receivable',
-          creditAccount: 'revenue',
-          amountCents: total,
-          invoiceId: inv.id,
-          memo: `Invoice ${number} issued to ${customer.name}`,
-          createdBy: actor.id,
-        }, tx)
+        if (!isDraft) {
+          await postEntry(orgId, {
+            type: 'charge',
+            debitAccount: 'accounts_receivable',
+            creditAccount: 'revenue',
+            amountCents: total,
+            invoiceId: inv.id,
+            memo: `Invoice ${number} issued to ${customer.name}`,
+            createdBy: actor.id,
+          }, tx)
+        }
         return inv
       })
       allocatedNumber = number
@@ -109,9 +113,38 @@ export async function createInvoice(orgId: string, input: CreateInvoiceInput, ac
 
   await audit({
     orgId, actorType: actor.type, actorId: actor.id, action: 'invoice.created', entity: 'invoice', entityId: invoice.id,
-    meta: { number: allocatedNumber, totalCents: total, dueDate: dueDate.toISOString() },
+    meta: { number: allocatedNumber, totalCents: total, dueDate: dueDate.toISOString(), draft: isDraft },
   })
   return invoice
+}
+
+/** Issue a draft: post the ledger charge once and move it to sent. Idempotent. */
+export async function issueInvoice(orgId: string, invoiceId: string, actor: { type: 'user' | 'system'; id: string }) {
+  const invoice = await db.invoice.findFirst({
+    where: { id: invoiceId, orgId },
+    include: { customer: { select: { name: true } } },
+  })
+  if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
+  if (invoice.status !== 'draft') return invoice
+
+  await db.$transaction(async (tx) => {
+    const charge = await tx.ledgerEntry.findFirst({ where: { orgId, invoiceId, type: 'charge' } })
+    if (!charge) {
+      await postEntry(orgId, {
+        type: 'charge',
+        debitAccount: 'accounts_receivable',
+        creditAccount: 'revenue',
+        amountCents: invoice.totalCents,
+        invoiceId,
+        memo: `Invoice ${invoice.number} issued to ${invoice.customer.name}`,
+        createdBy: actor.id,
+      }, tx)
+    }
+    await tx.invoice.update({ where: { id: invoiceId }, data: { status: 'sent' } })
+  })
+
+  await audit({ orgId, actorType: actor.type, actorId: actor.id, action: 'invoice.issued', entity: 'invoice', entityId: invoiceId, meta: { number: invoice.number, totalCents: invoice.totalCents } })
+  return db.invoice.findUnique({ where: { id: invoiceId } })
 }
 
 export async function voidInvoice(orgId: string, invoiceId: string, actor: { type: 'user' | 'system'; id: string }) {
@@ -147,17 +180,16 @@ export async function voidInvoice(orgId: string, invoiceId: string, actor: { typ
 export async function recalcInvoiceStatus(orgId: string, invoiceId: string): Promise<{ paidCents: number; status: string }> {
   const invoice = await db.invoice.findFirst({ where: { id: invoiceId, orgId } })
   if (!invoice) throw new ApiError(404, 'Invoice not found', 'not_found')
-  const verified = await db.payment.aggregate({
-    where: { invoiceId, orgId, status: 'verified' },
-    _sum: { amountCents: true },
+  const [verified, refunded] = await Promise.all([
+    db.payment.aggregate({ where: { invoiceId, orgId, status: 'verified' }, _sum: { amountCents: true } }),
+    db.payment.aggregate({ where: { invoiceId, orgId, source: 'refund', status: 'refunded' }, _sum: { amountCents: true } }),
+  ])
+  const state = nextInvoiceState({
+    totalCents: invoice.totalCents,
+    verifiedCents: verified._sum.amountCents ?? 0,
+    refundedCents: refunded._sum.amountCents ?? 0,
+    currentStatus: invoice.status,
   })
-  const paidCents = verified._sum.amountCents ?? 0
-  let status = invoice.status
-  if (status !== 'void' && status !== 'uncollectible') {
-    if (paidCents >= invoice.totalCents && invoice.totalCents > 0) status = 'paid'
-    else if (paidCents > 0) status = 'partial'
-    else status = 'sent'
-  }
-  await db.invoice.update({ where: { id: invoiceId }, data: { paidCents, status } })
-  return { paidCents, status }
+  await db.invoice.update({ where: { id: invoiceId }, data: state })
+  return state
 }

@@ -126,3 +126,10 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Commerce/CRM sync** (`shopify`, `woocommerce`, `wix`, `mailchimp`): one-page contact pull into org-scoped Customers (`POST /api/integrations/[id]/sync`), matched by external ref/email/phone, tags unioned, SSRF guard for self-hosted WooCommerce.
 ✅ **UI**: new integration cards with config/credential forms, row summaries, "Sync customers" and "Push to accounting" actions, and a Square webhook URL helper.
 ✅ **Verification**: tsc clean, lint clean, 155/155 unit tests, 44/44 smoke checks; new routes compile against the running dev server.
+
+## Phase 20 — Invoice lifecycle and refunds (2026-10-23)
+✅ **Drafts**: `POST /api/invoices {draft:true}` saves without a ledger charge; `PATCH {action:'issue'}` posts the charge exactly once and makes the invoice collectible. Payments, claims, sends, payment links and accounting pushes refuse drafts.
+✅ **Issue dates and overdue**: the API accepts `issueDate`; `overdue` is derived from `dueDate` + outstanding (never stored), so it cannot go stale. The list filter and badges use the same derived state.
+✅ **Refunds**: `POST /api/payments/[id]/refund` refunds a verified payment partially or fully. The original payment stays verified, a linked `source:'refund'` row + append-only `refund` ledger entry reduce `paidCents`, and the invoice reopens. Idempotent by `refund:<paymentId>:<key>`; over-refunds are rejected.
+✅ **UI**: draft checkbox, issue-date input, "Issue invoice" and per-payment "Refund" actions with honest toasts.
+✅ **Verification**: tsc clean, lint clean, 161/161 unit tests, 18/18 invoice lifecycle E2E checks, 44/44 smoke checks.

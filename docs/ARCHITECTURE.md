@@ -242,6 +242,10 @@ makes the action SKIPPED with reason OPTED_OUT (see [SECURITY.md](./SECURITY.md)
   [DATA_MODEL.md](./DATA_MODEL.md) invariants).
 - Money: `Int` cents; balances are computed from verified payments only.
 - Ledger is append-only; corrections are adjustment/reversal entries that reference the original.
+- Invoice lifecycle: drafts post nothing; issuing posts the charge once. `paidCents` is always
+  `verified payments − refunds`. Refunds create a linked refund payment row and a `refund` ledger
+  entry, so the original payment remains auditable and the invoice reopens honestly. `overdue` is
+  derived from `dueDate` + outstanding at read time, never stored.
 - Multi-step writes (booking insert + conflict check; payment + invoice status; ledger entries) run
   inside Prisma interactive transactions.
 
