@@ -68,7 +68,7 @@ Boundary rules:
 
 | Concern | This build (sandbox) | Self-hosted production target |
 |---|---|---|
-| Runtime | Next.js dev server (`npm run dev`, port 3000; Node.js + npm — no Bun) | Docker Compose in `infra/` (app + Postgres/pgvector or single-container SQLite); both profiles built and smoke-tested on 2026-10-22 |
+| Runtime | Next.js dev server (`npm run dev`, port 3000; Node.js + npm — no Bun) | Docker Compose in `infra/` (app + Postgres/pgvector or single-container SQLite) plus a root single-container SQLite profile; root profile rebuilt and smoke-tested on 2026-10-23, both `infra/` profiles on 2026-10-22 |
 | Database | **SQLite** via Prisma (`file:.../db/custom.db`), WAL + 5s busy timeout | **PostgreSQL** selected by the `DATABASE_PROVIDER` build arg |
 | Migrations | `prisma db push` | `prisma db push` at container start (committed migrations are future work) |
 | Embeddings | JSON vectors, hybrid cosine + BM25 in-process | pgvector index is an optimization, not required to run |

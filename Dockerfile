@@ -24,7 +24,10 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
-RUN mkdir -p /app/db /app/.data
+RUN mkdir -p /app/db /app/.data /app/backups /app/.models
 EXPOSE 3000
-# Apply the schema (idempotent) then serve. Set APP_SECRET and PUBLIC_BASE_URL in the environment.
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss --skip-generate && npm start"]
+# Apply additive schema changes, then serve. Destructive changes fail the boot
+# instead of silently dropping data (back up and migrate deliberately).
+CMD ["sh", "-c", "npx prisma db push --skip-generate && npm start"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

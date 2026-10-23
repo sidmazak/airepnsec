@@ -3,8 +3,10 @@
 Run the app on infrastructure you control. One Node.js runtime, one database, no telemetry, no
 required third-party accounts. AI and messaging providers are optional and BYOK.
 
-> **Verification status:** the application and business flows are verified locally. Both Docker
-> profiles (PostgreSQL and SQLite) were built and smoke-tested on 2026-10-22: healthy services,
+> **Verification status:** the application and business flows are verified locally. The root
+> SQLite Compose profile was rebuilt and smoke-tested on 2026-10-23 (healthy container, readiness,
+> demo seed, 44 smoke checks, 18 invoice lifecycle checks, persisted volumes). The `infra/`
+> PostgreSQL and SQLite profiles were built and smoke-tested on 2026-10-22: healthy services,
 > schema boot, demo seed, login, readiness and local ONNX embeddings. External providers
 > (Twilio/Stripe/SMTP/CalDAV/pg/mysql) still require your own credentials. See
 > [TEST_PLAN.md](./TEST_PLAN.md).

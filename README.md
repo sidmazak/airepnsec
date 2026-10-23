@@ -12,8 +12,9 @@ car rentals, and similar appointment/rental businesses.
 [Security](#security) · [Docs](#documentation-map)
 
 > **Production honesty.** The business core, auth, ledger, outbox, workers and unit suite are
-> verified in this environment. Both Docker profiles (PostgreSQL and SQLite) were built and
-> smoke-tested on 2026-10-22 (health/readiness, schema boot, demo seed, login, ONNX embeddings).
+> verified in this environment. Docker packaging was rebuilt and smoke-tested on 2026-10-23:
+> the root SQLite Compose profile booted healthy and passed 44 smoke + 18 invoice lifecycle
+> checks; the `infra/` PostgreSQL and SQLite profiles were built and smoke-tested on 2026-10-22.
 > External services (Twilio/Stripe/SMTP/CalDAV/pg/mysql) still require your own credentials. See
 > [Known limitations](#known-limitations) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md). This is not a
 > multi-tenant SaaS: one organization per install, but it has team roles, invitations and
@@ -193,6 +194,17 @@ services as the UI.
 ## Self-hosting (production)
 
 Full guide: **[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)** and **[infra/README.md](infra/README.md)**.
+
+### Quick Docker Compose with SQLite (repo root)
+
+```bash
+cp .env.example .env              # set APP_SECRET
+APP_PORT=3001 docker compose up -d --build
+docker compose ps                 # app becomes healthy via /api/health/ready
+```
+
+This single-container profile persists the database, `.data/` secrets, backups and the local
+model cache in named volumes. Use the `infra/` stack below for PostgreSQL or production TLS.
 
 ### Docker Compose with PostgreSQL (recommended)
 
