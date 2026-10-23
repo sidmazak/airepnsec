@@ -93,6 +93,11 @@ HSTS/CSP but must not weaken these.
 - **Payment (generic):** `x-signature` = hex HMAC-SHA256 of the raw body with the org webhook secret;
   invalid signatures are stored as rejected and change nothing; events deduped by unique `eventId`.
 - **Stripe:** `Stripe-Signature: t=…,v1=…` HMAC-SHA256 over `"<t>.<rawBody>"`, timing-safe; event-id dedupe.
+- **Square:** `x-square-hmacsha256-signature` = base64 HMAC-SHA256 over
+  `notificationUrl + rawBody`, timing-safe; the notification URL is `config.notificationUrl`
+  or `PUBLIC_BASE_URL/api/square/webhook` and must match Square's dashboard exactly.
+  Only `payment.created`/`payment.updated` events with `COMPLETED` status are recorded;
+  the order is re-fetched to read invoice metadata before any payment is posted.
 - **Twilio Voice/SMS/WhatsApp:** `X-Twilio-Signature` HMAC-SHA1 over the full URL + sorted params;
   candidate URL list handles proxies; every attempt persisted in `WebhookEvent` with `signatureValid`.
 - **Outbound webhooks:** hex HMAC-SHA256 (`x-signature`) when a secret is configured; literal `none`
@@ -157,4 +162,4 @@ services/routes after the mutation and are not part of the same DB transaction f
   pinning). Data-source and outbound-webhook URLs are SSRF-guarded at request/test time; private
   webhook targets require an explicit owner/admin `allowPrivate` opt-in.
 - No automated role-matrix/concurrency test yet; see TEST_GAPS.
-- No SSO, inbound email, vision or reranking.
+- No inbound email (IMAP/webhook ingest); vision/reranking are optional BYOK features, not defaults.

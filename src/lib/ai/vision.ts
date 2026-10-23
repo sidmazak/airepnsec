@@ -50,18 +50,80 @@ export async function analyzeImage(
     throw new Error('No vision model is configured. Enable one in Settings → AI Providers (Vision) and try again.')
   }
   if (!row.baseUrl) throw new Error('The vision provider has no base URL configured.')
-  if (row.provider !== 'openai_compatible') {
-    throw new Error(`Provider kind "${row.provider}" cannot read images.`)
-  }
   await assertAiPolicy(orgId, row.provider, row.baseUrl)
-
   const key = getApiKey(row)
   const started = Date.now()
   const dataUri = `data:${input.mimeType};base64,${input.imageBase64}`
 
-  const res = await fetch(`${row.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+  if (row.provider === 'anthropic') {
+    if (!key) throw new Error('The Anthropic vision provider has no API key configured.')
+    const { anthropicHeaders, normalizeAnthropicBase, parseAnthropicResponse } = await import('@/lib/ai/anthropic')
+    const res = await fetch(`${normalizeAnthropicBase(row.baseUrl)}/messages`, {
+      method: 'POST',
+      headers: anthropicHeaders(key),
+      body: JSON.stringify({
+        model: row.model,
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: input.mimeType, data: input.imageBase64 } },
+            { type: 'text', text: input.prompt },
+          ],
+        }],
+      }),
+      signal: AbortSignal.timeout(90_000),
+    })
+    if (!res.ok) throw new Error(`Anthropic returned HTTP ${res.status}`)
+    const text = parseAnthropicResponse(await res.json()).content.trim()
+    if (!text) throw new Error('The vision model returned an empty answer.')
+    return { text, provider: 'anthropic', model: row.model, latencyMs: Date.now() - started }
+  }
+
+  if (row.provider === 'google') {
+    if (!key) throw new Error('The Gemini vision provider has no API key configured.')
+    const { googleHeaders, normalizeGoogleBase, parseGoogleResponse } = await import('@/lib/ai/google')
+    const res = await fetch(`${normalizeGoogleBase(row.baseUrl)}/models/${encodeURIComponent(row.model)}:generateContent`, {
+      method: 'POST',
+      headers: googleHeaders(key),
+      body: JSON.stringify({
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: input.prompt },
+            { inline_data: { mime_type: input.mimeType, data: input.imageBase64 } },
+          ],
+        }],
+      }),
+      signal: AbortSignal.timeout(90_000),
+    })
+    if (!res.ok) throw new Error(`Gemini returned HTTP ${res.status}`)
+    const text = parseGoogleResponse(await res.json()).content.trim()
+    if (!text) throw new Error('The vision model returned an empty answer.')
+    return { text, provider: 'google', model: row.model, latencyMs: Date.now() - started }
+  }
+
+  if (row.provider !== 'openai_compatible' && row.provider !== 'azure_openai') {
+    throw new Error(`Provider kind "${row.provider}" cannot read images.`)
+  }
+
+  const isAzure = row.provider === 'azure_openai'
+  let endpoint = `${row.baseUrl.replace(/\/$/, '')}/chat/completions`
+  let headers: Record<string, string> = { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) }
+  if (isAzure) {
+    const { azureHeaders, azureUrl } = await import('@/lib/ai/azure')
+    let apiVersion = '2024-10-21'
+    try {
+      const config = JSON.parse(row.configJson || '{}') as { apiVersion?: unknown }
+      if (typeof config.apiVersion === 'string' && config.apiVersion) apiVersion = config.apiVersion
+    } catch { /* keep default */ }
+    endpoint = azureUrl(row.baseUrl, row.model, 'chat/completions', apiVersion)
+    headers = azureHeaders(key)
+  }
+
+  const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+    headers,
     body: JSON.stringify({
       model: row.model,
       messages: [
@@ -75,7 +137,7 @@ export async function analyzeImage(
       ],
       temperature: 0.2,
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(90_000),
   })
 
   if (!res.ok) {

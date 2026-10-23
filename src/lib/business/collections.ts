@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { invoiceOutstanding } from '@/lib/business/invoice'
-import { getEnabledStripe, createStripePaymentLink } from '@/lib/integrations/stripe'
+import { getEnabledPaymentLinkProvider, createInvoicePaymentLink } from '@/lib/integrations/paymentLinks'
 
 export type ReminderTemplateVars = {
   customerName: string
@@ -68,15 +68,15 @@ export async function queueInvoiceReminder(orgId: string, input: QueueReminderIn
 
   const channel = input.channel ?? 'email'
 
-  // Real Stripe payment link when the integration is enabled; a plain-language
-  // fallback keeps the reminder honest (never a fake URL) when Stripe is off or fails.
+  // Real payment link when a processor is enabled; a plain-language fallback
+  // keeps the reminder honest (never a fake URL) when none is on or it fails.
   let paymentLink = '(payment instructions from business profile)'
-  if (await getEnabledStripe(orgId)) {
+  if (await getEnabledPaymentLinkProvider(orgId)) {
     try {
-      const link = await createStripePaymentLink(orgId, { id: invoice.id, number: invoice.number, currency: invoice.currency }, outstanding)
+      const link = await createInvoicePaymentLink(orgId, { id: invoice.id, number: invoice.number, currency: invoice.currency }, outstanding)
       paymentLink = link.url
     } catch (err) {
-      paymentLink = `(payment link unavailable: ${err instanceof Error ? err.message : 'Stripe error'})`
+      paymentLink = `(payment link unavailable: ${err instanceof Error ? err.message : 'payment error'})`
     }
   }
 

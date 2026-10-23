@@ -5,6 +5,7 @@ import { api, formatMoney, type Service, type Staff, type SessionInfo } from '@/
 import { useAppStore } from '@/lib/client/store'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { formatFileSize, readFileAsBase64, readFileAsText } from '@/lib/client/files'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,7 +24,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   ArrowLeft, ArrowRight, Bot, CalendarCheck, CheckCircle2, CircleDashed, Download,
   FileSpreadsheet, FlaskConical, Loader2, Mail, MinusCircle, PartyPopper, Pencil, PlayCircle,
-  Plus, Receipt, Save, ShieldAlert, Sparkles, Trash2, UserRound, Users, XCircle,
+  Plus, Receipt, Save, ShieldAlert, Sparkles, Trash2, Upload, UserRound, Users, XCircle,
 } from 'lucide-react'
 
 /* ============================== shared bits ============================== */
@@ -831,6 +832,24 @@ function ImportsStep({ markStepDone }: StepProps) {
   const [svcCsv, setSvcCsv] = useState('')
   const [svcBusy, setSvcBusy] = useState(false)
   const [svcResults, setSvcResults] = useState<ImportResult[] | null>(null)
+  const [fileError, setFileError] = useState('')
+
+  const pickCsv = async (file: File | null, target: 'customers' | 'services') => {
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setFileError('The CSV file is larger than 5 MB. Split it into smaller files.')
+      return
+    }
+    try {
+      const text = await readFileAsText(file)
+      if (target === 'customers') { setCustCsv(text); setCustResults(null) }
+      else { setSvcCsv(text); setSvcResults(null) }
+      setFileError('')
+      toast({ title: `${file.name} loaded`, description: `${formatFileSize(file.size)} — review the rows, then import.` })
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : 'The CSV file could not be read')
+    }
+  }
 
   const importCustomers = async () => {
     if (!custCsv.trim()) return
@@ -883,10 +902,16 @@ function ImportsStep({ markStepDone }: StepProps) {
 
   return (
     <div className="space-y-4">
+      {fileError && (
+        <Alert variant="destructive" role="alert">
+          <ShieldAlert className="h-4 w-4" aria-hidden />
+          <AlertDescription>{fileError}</AlertDescription>
+        </Alert>
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2"><FileSpreadsheet className="h-4 w-4" aria-hidden /> CSV templates</CardTitle>
-          <CardDescription>Download a template, fill it in your spreadsheet tool, paste the rows below.</CardDescription>
+          <CardDescription>Download a template, fill it in your spreadsheet tool, then upload the file or paste the rows below.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           <Button
@@ -912,6 +937,18 @@ function ImportsStep({ markStepDone }: StepProps) {
           <CardDescription>Header: <code className="text-xs">name,email,phone,notes,tags</code> (tags separated by <code className="text-xs">|</code> or comma).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="setup-customers-file">Upload customers CSV</Label>
+            <Input
+              id="setup-customers-file"
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              onChange={(e) => void pickCsv(e.target.files?.[0] ?? null, 'customers')}
+              disabled={custBusy}
+              className="min-h-[44px]"
+            />
+            <p className="text-xs text-muted-foreground">Maximum 5 MB. You can review and edit the rows before importing.</p>
+          </div>
           <Textarea rows={6} value={custCsv} onChange={(e) => setCustCsv(e.target.value)} placeholder={'name,email,phone,notes,tags\nJane Doe,jane@example.com,+1 555 010 1,,retail'} aria-label="Customer CSV paste area" />
           <Button onClick={() => void importCustomers()} disabled={custBusy || !custCsv.trim()} className="min-h-[44px]" aria-label="Import customers">
             {custBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Users className="h-4 w-4" aria-hidden />} Import customers
@@ -935,6 +972,18 @@ function ImportsStep({ markStepDone }: StepProps) {
           <CardDescription>Header: <code className="text-xs">name,category,durationMin,priceCents</code> — imported row by row, honestly.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="setup-services-file">Upload services CSV</Label>
+            <Input
+              id="setup-services-file"
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              onChange={(e) => void pickCsv(e.target.files?.[0] ?? null, 'services')}
+              disabled={svcBusy}
+              className="min-h-[44px]"
+            />
+            <p className="text-xs text-muted-foreground">Maximum 5 MB. You can review and edit the rows before importing.</p>
+          </div>
           <Textarea rows={6} value={svcCsv} onChange={(e) => setSvcCsv(e.target.value)} placeholder={'name,category,durationMin,priceCents\nConsultation,general,30,5000'} aria-label="Services CSV paste area" />
           <Button onClick={() => void importServices()} disabled={svcBusy || !svcCsv.trim()} className="min-h-[44px]" aria-label="Import services">
             {svcBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />} Import services
@@ -964,6 +1013,38 @@ function KnowledgeStep({ canManage, markStepDone }: StepProps) {
   const [content, setContent] = useState('')
   const [approved, setApproved] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState('')
+
+  const importDocument = async (file: File | null) => {
+    if (!file) return
+    if (file.size > 25 * 1024 * 1024) {
+      setImportError('The file is larger than the 25 MB upload limit.')
+      return
+    }
+    setImporting(true)
+    setImportError('')
+    try {
+      const base64 = await readFileAsBase64(file)
+      const extracted = await api.post<{ document: { title: string; text: string } }>('/api/knowledge/extract', {
+        filename: file.name,
+        mimeType: file.type || undefined,
+        base64,
+      })
+      await api.post('/api/knowledge', {
+        title: extracted.document.title,
+        content: extracted.document.text,
+        approved,
+        source: 'file',
+      })
+      toast({ title: 'Document imported', description: `${file.name} — ${approved ? 'approved and indexed.' : 'saved as a draft.'}` })
+      await markStepDone('knowledge')
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'The document could not be imported')
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const addDoc = async () => {
     setSaving(true)
@@ -1006,6 +1087,29 @@ function KnowledgeStep({ canManage, markStepDone }: StepProps) {
           <Button variant="outline" onClick={() => setActiveSection('knowledge')} className="min-h-[44px]" aria-label="Open the full knowledge section">
             Open full Knowledge section →
           </Button>
+        </div>
+        <Separator />
+        <div className="space-y-1.5">
+          <Label htmlFor="setup-knowledge-file">Or import a document (PDF, DOCX, HTML, text — up to 25 MB)</Label>
+          <Input
+            id="setup-knowledge-file"
+            type="file"
+            accept=".pdf,.docx,.html,.htm,.txt,.md,.markdown,.csv,.json,.xml,.yaml,.yml,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*,application/json"
+            onChange={(e) => void importDocument(e.target.files?.[0] ?? null)}
+            disabled={importing || !canManage}
+            className="min-h-[44px]"
+          />
+          {importing && (
+            <p className="text-sm text-muted-foreground flex items-center gap-2" role="status">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Extracting and indexing…
+            </p>
+          )}
+          {importError && (
+            <Alert variant="destructive" role="alert">
+              <ShieldAlert className="h-4 w-4" aria-hidden />
+              <AlertDescription>{importError}</AlertDescription>
+            </Alert>
+          )}
         </div>
       </CardContent>
     </Card>

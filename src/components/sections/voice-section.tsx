@@ -597,6 +597,26 @@ export function VoiceSection() {
               </div>
             </div>
 
+            {/* transcribe an existing audio file (server STT providers) */}
+            {!sttIsBrowser && (
+              <div className="space-y-1.5 rounded-lg border p-3">
+                <label htmlFor="voice-audio-file" className="text-xs font-medium text-muted-foreground">Transcribe an audio file</label>
+                <Input
+                  id="voice-audio-file"
+                  type="file"
+                  accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm,.flac"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    e.currentTarget.value = ''
+                    if (file) void transcribeAndReply(file)
+                  }}
+                  className="min-h-[44px]"
+                />
+                <p className="text-xs text-muted-foreground">Uses your configured speech-to-text provider. Keep clips under ~90 seconds (12 MB).</p>
+              </div>
+            )}
+
             {/* text fallback */}
             <form onSubmit={submitText} className="flex gap-2" aria-label="Type to the receptionist instead of speaking">
               <Input

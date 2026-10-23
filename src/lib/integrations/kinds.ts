@@ -28,7 +28,7 @@ export const twilioVoiceConfigSchema = z.object({
 
 export const smsGatewayConfigSchema = z
   .object({
-    provider: z.enum(['textbee', 'httpsms', 'android_sms_gateway', 'generic_http']),
+    provider: z.enum(['textbee', 'httpsms', 'android_sms_gateway', 'telnyx', 'vonage', 'messagebird', 'plivo', 'generic_http']),
     baseUrl: z.string().url('baseUrl must be a valid http(s) URL').optional(),
     from: z.string().max(40).optional(),
     deviceId: z.string().max(200).optional(),
@@ -47,6 +47,24 @@ export const smsGatewayConfigSchema = z
     }
     if (val.provider === 'generic_http' && !val.url) {
       ctx.addIssue({ code: 'custom', path: ['url'], message: 'generic_http requires the destination "url"' })
+    }
+    if (['telnyx', 'vonage', 'messagebird', 'plivo'].includes(val.provider) && !val.from) {
+      ctx.addIssue({ code: 'custom', path: ['from'], message: `${val.provider} requires the sending number or sender id in "from"` })
+    }
+  })
+
+export const emailApiConfigSchema = z
+  .object({
+    provider: z.enum(['sendgrid', 'mailgun', 'postmark', 'resend', 'brevo']),
+    from: z.string().email('from must be the sender email address'),
+    fromName: z.string().max(120).optional(),
+    domain: z.string().max(200).optional(), // Mailgun sending domain
+    region: z.enum(['us', 'eu']).optional(), // Mailgun region
+    messageStream: z.string().max(80).optional(), // Postmark stream, defaults to "outbound"
+  })
+  .superRefine((val, ctx) => {
+    if (val.provider === 'mailgun' && !val.domain) {
+      ctx.addIssue({ code: 'custom', path: ['domain'], message: 'Mailgun requires the sending domain (e.g. mg.example.com)' })
     }
   })
 
@@ -75,6 +93,37 @@ export const microsoftCalendarConfigSchema = z.object({
 
 export const stripeConfigSchema = z.object({}).partial()
 
+export const squareConfigSchema = z.object({
+  locationId: z.string().min(1, 'locationId is required (Square location to bill)'),
+  environment: z.enum(['production', 'sandbox']).optional(),
+  notificationUrl: z.string().url('notificationUrl must be the exact webhook URL configured in Square').optional(),
+})
+
+export const accountingConfigSchema = z.object({
+  realmId: z.string().max(200).optional(), // QuickBooks company (realm) id
+  tenantId: z.string().max(200).optional(), // Xero tenant id
+  companyFileId: z.string().max(200).optional(), // MYOB company file id
+  salesAccountCode: z.string().max(40).optional(), // Xero line-item account code
+})
+
+export const shopifyConfigSchema = z.object({
+  shopDomain: z.string().min(4, 'shopDomain is required (e.g. my-store.myshopify.com)'),
+})
+
+export const wooCommerceConfigSchema = z.object({
+  storeUrl: z.string().url('storeUrl must be the WordPress site URL'),
+  allowPrivate: z.boolean().optional(), // self-hosted WooCommerce on the LAN
+})
+
+export const wixConfigSchema = z.object({
+  siteId: z.string().min(1, 'siteId is required (the Wix site id)'),
+})
+
+export const mailchimpConfigSchema = z.object({
+  serverPrefix: z.string().min(2, 'serverPrefix is required (e.g. us21)'),
+  listId: z.string().min(1, 'listId is required (the Mailchimp audience id)'),
+})
+
 export const webhookOutConfigSchema = z.object({
   url: z.string().url('url must be a valid http(s) URL'),
   // Admin opt-in for LAN/self-hosted receivers; otherwise private IPs are SSRF-blocked.
@@ -93,7 +142,10 @@ export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
     password: z.string().optional(),
     token: z.string().optional(), // android-sms-gateway (bearer)
     authValue: z.string().optional(), // generic_http custom auth header value
+    apiSecret: z.string().optional(), // vonage (API secret), plivo (auth token fallback)
+    accountId: z.string().optional(), // plivo Auth ID
   }),
+  email_api: z.object({ apiKey: z.string().min(1, 'apiKey is required') }),
   caldav: z.object({ password: z.string().optional() }),
   google_calendar: z.object({
     clientId: z.string().min(1, 'clientId is required'),
@@ -112,6 +164,35 @@ export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
     accessTokenExpiresAt: z.string().optional(),
   }),
   stripe: z.object({ secretKey: z.string().min(1, 'secretKey is required'), webhookSecret: z.string().optional() }),
+  square: z.object({ accessToken: z.string().min(1, 'accessToken is required'), webhookSignatureKey: z.string().optional() }),
+  quickbooks: z.object({
+    clientId: z.string().min(1, 'clientId is required'),
+    clientSecret: z.string().min(1, 'clientSecret is required'),
+    refreshToken: z.string().min(1, 'refreshToken is required'),
+    accessToken: z.string().optional(),
+    accessTokenExpiresAt: z.string().optional(),
+  }),
+  xero: z.object({
+    clientId: z.string().min(1, 'clientId is required'),
+    clientSecret: z.string().min(1, 'clientSecret is required'),
+    refreshToken: z.string().min(1, 'refreshToken is required'),
+    accessToken: z.string().optional(),
+    accessTokenExpiresAt: z.string().optional(),
+  }),
+  myob: z.object({
+    clientId: z.string().min(1, 'clientId is required'),
+    clientSecret: z.string().min(1, 'clientSecret is required'),
+    refreshToken: z.string().min(1, 'refreshToken is required'),
+    accessToken: z.string().optional(),
+    accessTokenExpiresAt: z.string().optional(),
+  }),
+  shopify: z.object({ accessToken: z.string().min(1, 'accessToken is required') }),
+  woocommerce: z.object({
+    consumerKey: z.string().min(1, 'consumerKey is required'),
+    consumerSecret: z.string().min(1, 'consumerSecret is required'),
+  }),
+  wix: z.object({ apiKey: z.string().min(1, 'apiKey is required') }),
+  mailchimp: z.object({ apiKey: z.string().min(1, 'apiKey is required') }),
   webhook_out: z.object({ secret: z.string().optional() }),
 }
 
@@ -121,10 +202,19 @@ export const configSchemaFor: Record<string, z.ZodTypeAny> = {
   twilio_whatsapp: twilioConfigSchema,
   twilio_voice: twilioVoiceConfigSchema,
   sms_gateway: smsGatewayConfigSchema,
+  email_api: emailApiConfigSchema,
   caldav: caldavConfigSchema,
   google_calendar: googleCalendarConfigSchema,
   microsoft_calendar: microsoftCalendarConfigSchema,
   stripe: stripeConfigSchema,
+  square: squareConfigSchema,
+  quickbooks: accountingConfigSchema,
+  xero: accountingConfigSchema,
+  myob: accountingConfigSchema,
+  shopify: shopifyConfigSchema,
+  woocommerce: wooCommerceConfigSchema,
+  wix: wixConfigSchema,
+  mailchimp: mailchimpConfigSchema,
   webhook_out: webhookOutConfigSchema,
 }
 
@@ -142,6 +232,8 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
       // (android-sms-gateway local mode, an unauthenticated LAN/iOS bridge).
       // The real connection test and each send report honest failures instead.
       return true
+    case 'email_api':
+      return Boolean(secrets.apiKey)
     case 'caldav':
       return true // password optional (some local servers allow anonymous writes); PUT/PROPFIND will fail honestly otherwise
     case 'google_calendar':
@@ -152,6 +244,20 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
       return Boolean(secrets.clientId && secrets.clientSecret)
     case 'stripe':
       return Boolean(secrets.secretKey)
+    case 'square':
+      return Boolean(secrets.accessToken)
+    case 'quickbooks':
+    case 'xero':
+    case 'myob':
+      return Boolean(secrets.clientId && secrets.clientSecret && secrets.refreshToken)
+    case 'shopify':
+      return Boolean(secrets.accessToken)
+    case 'woocommerce':
+      return Boolean(secrets.consumerKey && secrets.consumerSecret)
+    case 'wix':
+      return Boolean(secrets.apiKey)
+    case 'mailchimp':
+      return Boolean(secrets.apiKey)
     case 'webhook_out':
       return true // signing secret is optional by design
     default:
@@ -166,6 +272,9 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
 const PRESERVED_SECRET_KEYS: Record<string, string[]> = {
   google_calendar: ['refreshToken', 'accessToken', 'accessTokenExpiresAt'],
   microsoft_calendar: ['refreshToken', 'accessToken', 'accessTokenExpiresAt'],
+  quickbooks: ['refreshToken', 'accessToken', 'accessTokenExpiresAt'],
+  xero: ['refreshToken', 'accessToken', 'accessTokenExpiresAt'],
+  myob: ['refreshToken', 'accessToken', 'accessTokenExpiresAt'],
 }
 
 /** Merge incoming secrets over the stored ones, keeping provider-owned tokens. */

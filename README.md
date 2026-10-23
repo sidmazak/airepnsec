@@ -16,7 +16,8 @@ car rentals, and similar appointment/rental businesses.
 > smoke-tested on 2026-10-22 (health/readiness, schema boot, demo seed, login, ONNX embeddings).
 > External services (Twilio/Stripe/SMTP/CalDAV/pg/mysql) still require your own credentials. See
 > [Known limitations](#known-limitations) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md). This is not a
-> multi-tenant SaaS: there is no user/team management API or SSO in this build.
+> multi-tenant SaaS: one organization per install, but it has team roles, invitations and
+> SAML/OIDC SSO + SCIM in this build.
 
 ## What it does
 
@@ -25,22 +26,24 @@ car rentals, and similar appointment/rental businesses.
 | Receptionist | Text chat, public web chat, browser voice console, inbound SMS, WhatsApp, Twilio Voice; one validated tool loop for all channels |
 | Bookings | Real availability engine (hours, staff, buffers, capacity, holidays), transactional conflict detection, reschedule/cancel/status |
 | Money | Invoices with line items, verified payments vs. customer claims, idempotent webhooks, append-only ledger, reversals, statements |
-| Knowledge | Approved FAQ/docs, hybrid semantic + BM25 retrieval, built-in local ONNX embeddings, BYO databases/JSON as knowledge sources |
+| Knowledge | Approved FAQ/docs, hybrid semantic + BM25 retrieval, built-in local ONNX embeddings, BYO databases/JSON, PDF/DOCX/HTML/Markdown import, and a robots/SSRF-aware website crawler |
 | Automations | Triggers, conditions, delays, quiet hours, dedupe, retries, caps, test mode, run history, leased worker |
-| Integrations | SMTP, Twilio SMS/WhatsApp/Voice, SMS gateways (TextBee/httpSMS/android-sms-gateway/generic), Stripe Payment Links/webhooks, signed outbound webhooks, CalDAV two-way sync, Google Calendar and Microsoft 365 Graph OAuth two-way sync |
+| Integrations | SMTP or 5 email APIs, Twilio SMS/WhatsApp/Voice, 8 SMS gateways, Stripe/Square Payment Links + signed webhooks, QuickBooks/Xero/MYB accounting push, Shopify/WooCommerce/Wix/Mailchimp contact sync, signed outbound webhooks, CalDAV + Google Calendar + Microsoft 365 two-way sync |
 | Operations | Dashboard, audit trail, outbox status, AI usage/cost estimates, diagnostics, encrypted secrets, 2FA, scheduled backups with retention |
 
 ### AI providers (no proprietary SDK)
 
-- **LLM:** local Ollama or any OpenAI-compatible endpoint (OpenAI, Groq, Together, vLLM, LM Studio,
-  llama.cpp server, …). Credentials are configured in the UI and encrypted at rest.
+- **LLM:** local Ollama, any OpenAI-compatible endpoint (OpenAI, Groq, Together, vLLM, LM Studio,
+  llama.cpp server, …), Anthropic, Google Gemini, or Azure OpenAI. Credentials are configured in
+  the UI, encrypted at rest, and model discovery is per capability.
 - **Embeddings:** built-in local neural model (`all-MiniLM-L6-v2`, 384-d ONNX) by default; optional
   Ollama or OpenAI-compatible embeddings.
 - **Speech:** browser Web Speech fallback, OpenAI-compatible `/audio/transcriptions` and
   `/audio/speech` for server STT/TTS, or fully local ONNX models (Whisper / MMS-TTS) that are
   downloaded on demand into `.models/` and never send audio off the machine.
 - **Also:** server-side streaming (SSE), provider-native tool calling with a JSON-protocol
-  fallback, optional reranking and vision, a hardware probe with a model catalog.
+  fallback, optional reranking and vision, a hardware probe with a model catalog, and provider
+  presets for the common cloud endpoints.
 - **Policy:** `local_only` blocks cloud endpoints; `hybrid` and `cloud_first` permit configured
   endpoints. There is no bundled cloud account and no silent deterministic fallback.
 
@@ -63,13 +66,13 @@ flowchart LR
     AUTH[Session · RBAC · CSRF<br/>rate limits · zod]
     SVC[Business services<br/>bookings · invoices · payments · ledger]
     AI[Receptionist tool loop<br/>validated tools only]
-    INT[Integration adapters<br/>SMTP · Twilio · SMS · Stripe · CalDAV · webhooks]
+    INT[Integration adapters<br/>SMTP/email APIs · Twilio/SMS · Stripe/Square · accounting · commerce · CalDAV · webhooks]
     WK[Workers<br/>automation · outbox · datasource sync]
   end
 
   DB[(Prisma<br/>SQLite or PostgreSQL)]
-  LLM[Ollama / OpenAI-compatible]
-  EXT[SMTP · Twilio · Stripe<br/>CalDAV · webhook targets]
+  LLM[Ollama / OpenAI-compatible / Anthropic / Gemini / Azure]
+  EXT[SMTP/email APIs · Twilio/SMS<br/>Stripe/Square · accounting · commerce<br/>CalDAV · webhook targets]
 
   B --> API
   C --> API
@@ -295,8 +298,8 @@ health endpoints and ship container logs through your normal collector.
 - Optional TOTP 2FA; per-email and per-IP login throttles.
 - CSRF: custom `x-requested-with: ais` header on authenticated mutations plus SameSite cookies.
 - Secrets: provider keys and integration credentials are AES-256-GCM encrypted and never returned.
-- Webhooks: Twilio, Stripe and generic HMAC signatures are verified timing-safely; events are
-  deduplicated.
+- Webhooks: Twilio, Stripe, Square and generic HMAC signatures are verified timing-safely; events
+  are deduplicated.
 - Org scoping on business queries; role checks on every guarded route.
 - Security headers in `next.config.ts` (nosniff, frame denial, referrer policy, permissions policy,
   COOP, HSTS + CSP in production).
@@ -309,8 +312,8 @@ Read [docs/SECURITY.md](docs/SECURITY.md) for the threat model, RBAC matrix and 
 ```bash
 npx tsc --noEmit -p tsconfig.json
 npm run lint
-npm run test:unit        # Node built-in node:test, 43 cases
-node scripts/smoke.mjs   # 24 end-to-end checks against the running dev server (scripts/smoke.mjs)
+npm run test:unit        # Node built-in node:test, 155 cases
+node scripts/smoke.mjs   # 44 end-to-end checks against the running dev server (scripts/smoke.mjs)
 ```
 
 CI (`.github/workflows/ci.yml`) runs Prisma generate → typecheck → lint → unit tests → production
@@ -320,16 +323,17 @@ build check.
 
 ## Known limitations
 
-- **Single-org / one owner account.** Roles are enforced, but there is no user-management or invite
-  UI/API, no SSO/SAML/OIDC, and no password-reset email flow.
-- **No payment custody** and no proprietary AI SDK; Stripe/PayPal/provider onboarding is BYOK.
+- **Single-org.** One organization per install; team roles/invitations and SAML/OIDC SSO + SCIM are
+  implemented, but there is no multi-tenant SaaS control plane.
+- **No payment custody** and no proprietary AI SDK; Stripe/Square/accounting/provider onboarding is BYOK.
 - **No inbound email** (IMAP/webhook) and no outbound PSTN dialing/voice broadcast.
-- **No token streaming, native provider tool-calling, reranking, or vision.** The receptionist uses a
-  strict JSON tool loop.
+- **Token streaming, native provider tool-calling, reranking and vision are implemented** for
+  providers that support them; others fall back to the strict JSON tool loop.
 - **No automated SQLite→Postgres data migration.** Schema is portable; export/import
   (or a custom script) is required.
-- **In-memory rate limiting** is per process; with multiple replicas use a proxy-level limiter if you
-  need a global limit. The app trusts the first `x-forwarded-for` hop.
+- **Rate limiting** is in-memory per process except the DB-backed login limiter; with multiple
+  replicas use a proxy-level limiter if you need a global limit. The app trusts the first
+  `x-forwarded-for` hop.
 - **No bundled TLS/monitoring.** Put a reverse proxy and your monitoring stack in front.
 - **External connector tests require real credentials.** Docker packaging was built and smoke-tested
   for both profiles on 2026-10-22; rerun the documented smoke test after upgrading.

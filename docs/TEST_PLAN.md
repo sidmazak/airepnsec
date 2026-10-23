@@ -1,7 +1,7 @@
 # Test Plan — AI Secretary
 
 > **Verification model.** This repo uses Node's built-in `node:test` for pure/unit logic
-> (`tests/unit/*.mts`, 32 cases), plus `npx tsc --noEmit`, `npm run lint`, CI (`next build`), and
+> (`tests/unit/*.mts`, 155 cases), plus `npx tsc --noEmit`, `npm run lint`, CI (`next build`), and
 > manual browser/curl E2E against the dev server. There is no committed Vitest/Jest/Playwright suite;
 > browser checks are run with a local CDP script. Status: ✅ verified · 📋 specified/future.
 
@@ -53,6 +53,15 @@
 | V3 | SMS/WhatsApp | Opt-out + outbox honesty | Inbound stored, nothing sent; failure queued/skipped with reason | P0 | ✅ curl |
 | V4 | CalDAV | Push + pull against Radicale | PROPFIND 207; push idempotent; remote cancel/move applied; deletes reported | P1 | ✅ curl |
 | V5 | PABX routing | Unit: least-busy/round-robin/redirect/status | Correct selection and normalization | P1 | ✅ unit |
+| W1 | AI providers | Unit: Anthropic/Gemini/Azure request + response adapters | Native payloads, tool calls parsed, Azure deployment URLs | P0 | ✅ unit |
+| W2 | Knowledge import | Unit: PDF/DOCX/HTML/Markdown/CSV/JSON extraction | Text extracted; unsupported/binary rejected honestly | P0 | ✅ unit |
+| W3 | Website crawl | Unit: same-origin policy, robots/SSRF guard, page→doc | Only allowed URLs fetched; no AI configured → 409 | P0 | ✅ unit |
+| W4 | Email API | Unit: 5 provider payloads, read-only tests, message-id parsing | Correct endpoints/auth; errors sanitized; no double-send | P0 | ✅ unit |
+| W5 | SMS carriers | Unit: Telnyx/Vonage/MessageBird/Plivo send + probe payloads | Correct endpoints/auth; provider ids parsed | P0 | ✅ unit |
+| W6 | Square | Unit: payment-link body, signature verify, parser | Metadata present; bad signature rejected; amounts integer | P0 | ✅ unit |
+| W7 | Accounting | Unit: QBO/Xero/MYB token + invoice payloads, refresh rotation | Provider doc number = invoice number; draft refused | P0 | ✅ unit |
+| W8 | Commerce sync | Unit: Shopify/Woo/Wix/Mailchimp request/parse | Contacts normalized; one page; tags unioned | P1 | ✅ unit |
+| W9 | Smoke | `node scripts/smoke.mjs` | 44/44 checks pass against the running dev server | P0 | ✅ |
 
 ## 2. Browser verification protocol
 

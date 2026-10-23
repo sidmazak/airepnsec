@@ -237,6 +237,24 @@ export function SsoSettings() {
                 </div>
               ))}
               <div className="space-y-1.5 md:col-span-2">
+                <Label htmlFor="sso-saml-cert-file">Upload the identity provider certificate</Label>
+                <Input
+                  id="sso-saml-cert-file"
+                  type="file"
+                  accept=".pem,.crt,.cer,.txt,application/x-pem-file,text/plain"
+                  className="min-h-[44px]"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = () => setIdpCertificate(String(reader.result ?? ''))
+                    reader.onerror = () => toast({ title: 'Could not read the certificate file', variant: 'destructive' })
+                    reader.readAsText(file)
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">Accepts PEM, CRT or CER text. You can also paste it below.</p>
+              </div>
+              <div className="space-y-1.5 md:col-span-2">
                 <Label htmlFor="sso-saml-cert">Identity provider certificate (PEM)</Label>
                 <textarea
                   id="sso-saml-cert"

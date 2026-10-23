@@ -13,6 +13,8 @@ provider. What cannot be done in this environment is signing up for third-party 
 user's behalf (Twilio, Stripe, Google Cloud, an SMTP relay, a CalDAV server). Those tests are
 honest: they report the provider's real answer instead of a fake success.
 
+This now covers Twilio, Stripe, Square, SMTP, email provider APIs (SendGrid/Mailgun/Postmark/Resend/Brevo), SMS gateways (TextBee/httpSMS/Android/Telnyx/Vonage/MessageBird/Plivo), CalDAV, Google/Microsoft calendars, QuickBooks/Xero/MYOB, Shopify/WooCommerce/Wix/Mailchimp, and any OpenAI-compatible AI endpoint.
+
 To close this: run the app against real credentials and record the results in
 [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
@@ -50,6 +52,15 @@ The role matrix is enforced in code and covered by unit tests. The smoke script 
 flow end to end, but there is still no automated per-role sweep over every endpoint.
 
 ## Removed from this list
+
+- ~~File inputs across the SPA~~ — implemented (customer/service CSV uploads, knowledge document import, website crawl import, voice audio-file transcription, SAML certificate upload).
+- ~~AI provider breadth~~ — implemented (Anthropic, Google Gemini, Azure OpenAI, provider presets/model discovery alongside Ollama and OpenAI-compatible endpoints).
+- ~~Email provider APIs~~ — implemented (`email_api`: SendGrid, Mailgun, Postmark, Resend, Brevo; dispatcher prefers it over SMTP).
+- ~~Additional SMS carriers~~ — implemented (`sms_gateway`: Telnyx, Vonage, MessageBird, Plivo).
+- ~~Square payments~~ — implemented (payment links + signature-verified webhook recording verified payments).
+- ~~Accounting push~~ — implemented (QuickBooks Online, Xero, MYOB AccountRight invoice/customer push with refresh-token OAuth2).
+- ~~Commerce/CRM contact sync~~ — implemented (Shopify, WooCommerce, Wix, Mailchimp customer import).
+- ~~Website crawling into the knowledge base~~ — implemented (`/api/knowledge/crawl`, robots.txt + sitemap aware, SSRF-guarded, optional AI cleanup).
 
 - ~~Microsoft 365 / Graph calendar OAuth~~ — implemented (`microsoft_calendar` integration, OAuth
   2.0 against the Microsoft identity platform, Graph event + free/busy calls, two-way sync through

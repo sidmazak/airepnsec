@@ -5,10 +5,11 @@ import {
   saveProvider,
   toPublicConfig,
   CAPABILITIES,
+  CAPABILITY_INFO,
   type Capability,
 } from '@/lib/ai/providers'
 
-const PROVIDER_KINDS = ['ollama', 'openai_compatible', 'browser', 'local_neural', 'local_lexical', 'local_speech', 'none'] as const
+const PROVIDER_KINDS = ['ollama', 'openai_compatible', 'anthropic', 'google', 'azure_openai', 'browser', 'local_neural', 'local_lexical', 'local_speech', 'none'] as const
 
 const putSchema = z.object({
   provider: z.enum(PROVIDER_KINDS),
@@ -34,6 +35,10 @@ export const PUT = withAuth(
     const capability = raw as Capability
 
     const body = await parseBody(req, putSchema)
+
+    if (!CAPABILITY_INFO[capability].kinds.includes(body.provider)) {
+      return fail(422, `Provider "${body.provider}" cannot serve the ${capability} capability. Allowed: ${CAPABILITY_INFO[capability].kinds.join(', ')}`, { code: 'bad_provider' })
+    }
 
     // A local speech provider must name a model from the local catalog, and the
     // model must match the capability — no silent fallbacks to a remote service.

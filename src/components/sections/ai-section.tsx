@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { PROVIDER_KIND_LABELS, presetsFor, type AiPreset, type PresetCapability } from '@/lib/ai/presets'
 import {
   Bot, CheckCircle2, Database, Download, Globe, KeyRound, Loader2, Monitor, PlugZap, RefreshCw,
   ShieldAlert, ShieldCheck, Trash2, XCircle,
@@ -24,14 +25,17 @@ import {
 
 /* ------------------------------ helpers ------------------------------ */
 
-const PROVIDER_LABELS: Record<string, string> = {
-  ollama: 'Ollama (local)',
-  openai_compatible: 'OpenAI-compatible endpoint',
-  browser: 'In-browser',
-  local_neural: 'Built-in neural model (local)',
-  local_lexical: 'Legacy keyword index (local)',
-  local_speech: 'Local speech models (ONNX, offline)',
-  none: 'Disabled',
+const PROVIDER_LABELS: Record<string, string> = PROVIDER_KIND_LABELS
+
+const CLOUD_PROVIDERS = ['openai_compatible', 'anthropic', 'google', 'azure_openai']
+
+function presetDefaultModel(preset: AiPreset, capability: string): string {
+  if (capability === 'embedding') return preset.models.find((m) => /embed/i.test(m)) ?? preset.models[0] ?? ''
+  if (capability === 'stt') return preset.models.find((m) => /whisper|stt|transcribe/i.test(m)) ?? preset.models[0] ?? ''
+  if (capability === 'tts') return preset.models.find((m) => /tts|speech/i.test(m)) ?? preset.models[0] ?? ''
+  if (capability === 'rerank') return preset.models.find((m) => /rerank/i.test(m)) ?? preset.models[0] ?? ''
+  if (capability === 'vision') return preset.models.find((m) => /vision|pixtral|gemini/i.test(m)) ?? preset.models[0] ?? ''
+  return preset.models[0] ?? ''
 }
 
 const DATA_MODES: Array<{ id: string; title: string; description: string }> = [
@@ -41,7 +45,7 @@ const DATA_MODES: Array<{ id: string; title: string; description: string }> = [
 ]
 
 function isCloudProvider(p: string): boolean {
-  return p === 'openai_compatible'
+  return CLOUD_PROVIDERS.includes(p)
 }
 
 type CapabilityInfo = { label: string; description: string; kinds: string[] }
@@ -50,7 +54,7 @@ type AiLog = {
   id?: string; ts: string; capability: string; provider: string; model: string
   latencyMs: number; tokensIn: number; tokensOut: number; ok: boolean; errorSanitized: string
 }
-type Draft = { provider: string; baseUrl: string; model: string; apiKey: string | null; enabled: boolean }
+type Draft = { provider: string; baseUrl: string; model: string; apiKey: string | null; enabled: boolean; apiVersion: string }
 
 type LocalSpeechModelRow = {
   id: string
@@ -157,6 +161,10 @@ export function AiSection() {
   const [savingCap, setSavingCap] = useState<string | null>(null)
   const [testingCap, setTestingCap] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({})
+  const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({})
+  const [modelsLoading, setModelsLoading] = useState<string | null>(null)
+  const [modelNotice, setModelNotice] = useState<Record<string, string>>({})
+  const [modelCustom, setModelCustom] = useState<Record<string, boolean>>({})
 
   const [tab, setTab] = useState('providers')
   const [logs, setLogs] = useState<AiLog[]>([])
@@ -182,7 +190,14 @@ export function AiSection() {
       setDrafts(Object.fromEntries(
         Object.entries(d.capabilities).map(([cap, cfg]) => [cap, {
           provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: null, enabled: cfg.enabled,
+          apiVersion: typeof cfg.config?.apiVersion === 'string' ? cfg.config.apiVersion : '',
         }]),
+      ))
+      setModelOptions(Object.fromEntries(
+        Object.entries(d.capabilities).map(([cap, cfg]) => {
+          const preset = presetsFor(cap as PresetCapability).find((p) => p.provider === cfg.provider && p.baseUrl === cfg.baseUrl)
+          return [cap, preset?.models ?? []]
+        }),
       ))
       setError('')
     } catch (err) {
@@ -295,14 +310,56 @@ export function AiSection() {
         enabled: draft.enabled,
       }
       if (draft.apiKey !== null) body.apiKey = draft.apiKey // '' clears, non-empty replaces, null keeps
+      if (draft.provider === 'azure_openai') {
+        body.config = { ...capabilities[cap]?.config, ...(draft.apiVersion.trim() ? { apiVersion: draft.apiVersion.trim() } : {}) }
+      }
       const d = await api.put<{ config: ProviderConfigPublic }>(`/api/providers/${cap}`, body)
       setCapabilities((c) => ({ ...c, [cap]: d.config }))
-      setDrafts((dr) => ({ ...dr, [cap]: { ...dr[cap], provider: d.config.provider, baseUrl: d.config.baseUrl, model: d.config.model, apiKey: null, enabled: d.config.enabled } }))
+      setDrafts((dr) => ({ ...dr, [cap]: {
+        ...dr[cap], provider: d.config.provider, baseUrl: d.config.baseUrl, model: d.config.model,
+        apiKey: null, enabled: d.config.enabled, apiVersion: typeof d.config.config?.apiVersion === 'string' ? d.config.config.apiVersion : '',
+      } }))
       toast({ title: `${capabilityInfo[cap]?.label ?? cap} saved` })
     } catch (err) {
       toast({ title: 'Save failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
     } finally {
       setSavingCap(null)
+    }
+  }
+
+  const applyPreset = (cap: string, preset: AiPreset) => {
+    setDraft(cap, {
+      provider: preset.provider,
+      baseUrl: preset.baseUrl,
+      model: presetDefaultModel(preset, cap) || drafts[cap]?.model || '',
+      enabled: true,
+    })
+    setModelOptions((o) => ({ ...o, [cap]: preset.models }))
+    setModelCustom((c) => ({ ...c, [cap]: false }))
+    setModelNotice((n) => ({ ...n, [cap]: preset.note ?? '' }))
+  }
+
+  const loadModels = async (cap: string) => {
+    const draft = drafts[cap]
+    if (!draft) return
+    setModelsLoading(cap)
+    setModelNotice((n) => ({ ...n, [cap]: '' }))
+    try {
+      const r = await api.post<{ models: string[]; source: string; error?: string }>(`/api/providers/${cap}/models`, {
+        provider: draft.provider,
+        baseUrl: draft.baseUrl,
+        model: draft.model,
+        apiKey: draft.apiKey ?? undefined,
+      })
+      setModelOptions((o) => ({ ...o, [cap]: r.models }))
+      if (r.error) setModelNotice((n) => ({ ...n, [cap]: r.error ?? '' }))
+      else if (r.models.length === 0) setModelNotice((n) => ({ ...n, [cap]: 'The provider returned no models — type the model id manually.' }))
+      if (r.models.length > 0 && !draft.model) setDraft(cap, { model: r.models[0] })
+      setModelCustom((c) => ({ ...c, [cap]: false }))
+    } catch (err) {
+      setModelNotice((n) => ({ ...n, [cap]: err instanceof Error ? err.message : 'Could not load models' }))
+    } finally {
+      setModelsLoading(null)
     }
   }
 
@@ -512,11 +569,15 @@ export function AiSection() {
           <div className="grid gap-4 lg:grid-cols-2">
             {caps.map(([cap, cfg]) => {
               const info = capabilityInfo[cap]
-              const draft = drafts[cap] ?? { provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: null, enabled: cfg.enabled }
+              const draft = drafts[cap] ?? { provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: null, enabled: cfg.enabled, apiVersion: '' }
               const test = testResults[cap]
               const cloud = isCloudProvider(draft.provider)
-              const needsBaseUrl = draft.provider === 'ollama' || draft.provider === 'openai_compatible'
-              const needsKey = draft.provider === 'openai_compatible'
+              const needsBaseUrl = ['ollama', 'openai_compatible', 'anthropic', 'google', 'azure_openai'].includes(draft.provider)
+              const needsKey = CLOUD_PROVIDERS.includes(draft.provider)
+              const presets = presetsFor(cap as PresetCapability)
+              const activePreset = presets.find((p) => p.provider === draft.provider && p.baseUrl === draft.baseUrl)
+              const options = modelOptions[cap] ?? []
+              const showCustomModel = Boolean(modelCustom[cap]) || (options.length > 0 && draft.model !== '' && !options.includes(draft.model))
               return (
                 <Card key={cap}>
                   <CardHeader>
@@ -551,13 +612,49 @@ export function AiSection() {
                       </Select>
                     </div>
 
+                    {presets.length > 0 && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`preset-${cap}`}>Preset</Label>
+                        <Select
+                          value={activePreset?.id ?? ''}
+                          disabled={!canManage}
+                          onValueChange={(id) => {
+                            const preset = presets.find((p) => p.id === id)
+                            if (preset) applyPreset(cap, preset)
+                          }}
+                        >
+                          <SelectTrigger id={`preset-${cap}`} className="min-h-[44px]" aria-label={`Provider preset for ${info?.label ?? cap}`}>
+                            <SelectValue placeholder="Choose a provider preset (optional)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {presets.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {activePreset?.note && <p className="text-xs text-muted-foreground">{activePreset.note}</p>}
+                      </div>
+                    )}
+
                     {needsBaseUrl && (
                       <div className="space-y-1.5">
                         <Label htmlFor={`url-${cap}`}>Base URL</Label>
                         <Input
                           id={`url-${cap}`} value={draft.baseUrl} disabled={!canManage}
                           onChange={(e) => setDraft(cap, { baseUrl: e.target.value })}
-                          placeholder="http://localhost:11434"
+                          placeholder={draft.provider === 'azure_openai' ? 'https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT' : 'http://localhost:11434'}
+                          className="min-h-[44px]"
+                        />
+                      </div>
+                    )}
+
+                    {draft.provider === 'azure_openai' && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`apiver-${cap}`}>Azure API version</Label>
+                        <Input
+                          id={`apiver-${cap}`} value={draft.apiVersion} disabled={!canManage}
+                          onChange={(e) => setDraft(cap, { apiVersion: e.target.value })}
+                          placeholder="2024-10-21"
                           className="min-h-[44px]"
                         />
                       </div>
@@ -590,13 +687,62 @@ export function AiSection() {
 
                     {(needsBaseUrl) && (
                       <div className="space-y-1.5">
-                        <Label htmlFor={`model-${cap}`}>Model</Label>
-                        <Input
-                          id={`model-${cap}`} value={draft.model} disabled={!canManage}
-                          onChange={(e) => setDraft(cap, { model: e.target.value })}
-                          placeholder={cap === 'embedding' ? 'e.g. nomic-embed-text / text-embedding-3-small' : 'e.g. llama3.1:8b'}
-                          className="min-h-[44px]"
-                        />
+                        <div className="flex items-center justify-between gap-2">
+                          <Label htmlFor={`model-${cap}`}>Model</Label>
+                          <Button
+                            type="button" size="sm" variant="ghost" className="h-8 px-2 text-xs"
+                            disabled={!canManage || modelsLoading === cap}
+                            onClick={() => void loadModels(cap)}
+                            aria-label={`Load model list for ${info?.label ?? cap}`}
+                          >
+                            {modelsLoading === cap ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                            Load models
+                          </Button>
+                        </div>
+                        {options.length > 0 && !showCustomModel ? (
+                          <Select
+                            value={draft.model}
+                            disabled={!canManage}
+                            onValueChange={(v) => {
+                              if (v === '__custom__') {
+                                setModelCustom((c) => ({ ...c, [cap]: true }))
+                                setDraft(cap, { model: '' })
+                              } else {
+                                setDraft(cap, { model: v })
+                              }
+                            }}
+                          >
+                            <SelectTrigger id={`model-${cap}`} className="min-h-[44px]" aria-label={`Model for ${info?.label ?? cap}`}>
+                              <SelectValue placeholder="Pick a model" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {options.map((m) => (
+                                <SelectItem key={m} value={m}>{m}</SelectItem>
+                              ))}
+                              <SelectItem value="__custom__">Custom model id…</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            id={`model-${cap}`} value={draft.model} disabled={!canManage}
+                            onChange={(e) => setDraft(cap, { model: e.target.value })}
+                            placeholder={cap === 'embedding' ? 'e.g. nomic-embed-text / text-embedding-3-small' : 'e.g. llama3.1:8b / claude-sonnet-4-20250514 / gemini-2.5-flash'}
+                            className="min-h-[44px]"
+                          />
+                        )}
+                        {showCustomModel && options.length > 0 && (
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground underline underline-offset-2"
+                            onClick={() => {
+                              setModelCustom((c) => ({ ...c, [cap]: false }))
+                              setDraft(cap, { model: options[0] })
+                            }}
+                          >
+                            Back to the provider model list
+                          </button>
+                        )}
+                        {modelNotice[cap] && <p className="text-xs text-muted-foreground">{modelNotice[cap]}</p>}
                       </div>
                     )}
 
@@ -607,7 +753,7 @@ export function AiSection() {
                           id={`key-${cap}`} type="password" disabled={!canManage}
                           value={draft.apiKey ?? ''}
                           onChange={(e) => setDraft(cap, { apiKey: e.target.value })}
-                          placeholder={cfg.apiKeyPresent ? '•••••••• (saved — leave blank to keep)' : 'Paste key'}
+                          placeholder={cfg.apiKeyPresent ? '•••••••• (saved — leave blank to keep)' : (activePreset?.keyHint ? `${activePreset.keyHint}` : 'Paste key')}
                           autoComplete="off"
                           className="min-h-[44px]"
                         />

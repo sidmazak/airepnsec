@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { decryptSecrets, getEnabledIntegration, integrationConfig, sanitizeMessage, sendEmail, sendTwilio, signWebhookPayload, str } from '@/lib/integrations/connectors'
+import { decryptSecrets, getEnabledIntegration, integrationConfig, sanitizeMessage, sendEmail, sendEmailViaApi, sendTwilio, signWebhookPayload, str } from '@/lib/integrations/connectors'
 import { sendSmsGateway } from '@/lib/integrations/sms'
 import type { OutboxMessage } from '@prisma/client'
 import { assertOutboundUrl } from '@/lib/security/outbound'
@@ -72,6 +72,7 @@ export async function dispatchOutbox(orgId?: string): Promise<DispatchStats> {
 export async function nudgeChannel(orgId: string, kind: string): Promise<void> {
   const channelByKind: Record<string, string[]> = {
     smtp: ['email'],
+    email_api: ['email'],
     twilio_sms: ['sms'],
     sms_gateway: ['sms'],
     twilio_whatsapp: ['whatsapp'],
@@ -109,20 +110,26 @@ async function deliver(message: OutboxMessage): Promise<Outcome> {
 /* ---------------- channel adapters ---------------- */
 
 async function deliverEmail(message: OutboxMessage): Promise<Outcome> {
-  const smtp = await getEnabledIntegration(message.orgId, 'smtp')
-  if (!smtp) return await waitForIntegration(message, 'email')
+  // A native provider API (SendGrid/Mailgun/Postmark/Resend/Brevo) takes
+  // precedence; SMTP remains the fallback when only SMTP is configured.
+  const api = await getEnabledIntegration(message.orgId, 'email_api')
+  const smtp = api ? null : await getEnabledIntegration(message.orgId, 'smtp')
+  const integration = api ?? smtp
+  if (!integration) return await waitForIntegration(message, 'email')
 
   try {
-    await sendEmail(smtp, {
+    const input = {
       to: message.recipient,
       subject: message.subject || '(no subject)',
       text: message.body,
       ...(message.html ? { html: message.html } : {}),
-    })
+    }
+    if (api) await sendEmailViaApi(api, input)
+    else await sendEmail(integration, input)
     await markSent(message)
     return 'sent'
   } catch (err) {
-    return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), smtp))
+    return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), integration))
   }
 }
 

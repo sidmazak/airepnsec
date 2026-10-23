@@ -82,9 +82,9 @@ export async function resolveSafeGatewayUrl(raw: string, allowPrivate: boolean):
  * gateway's inbound webhooks, which are separate.
  */
 
-export type SmsProviderId = 'textbee' | 'httpsms' | 'android_sms_gateway' | 'generic_http'
+export type SmsProviderId = 'textbee' | 'httpsms' | 'android_sms_gateway' | 'telnyx' | 'vonage' | 'messagebird' | 'plivo' | 'generic_http'
 
-export const SMS_PROVIDER_IDS: SmsProviderId[] = ['textbee', 'httpsms', 'android_sms_gateway', 'generic_http']
+export const SMS_PROVIDER_IDS: SmsProviderId[] = ['textbee', 'httpsms', 'android_sms_gateway', 'telnyx', 'vonage', 'messagebird', 'plivo', 'generic_http']
 
 export function isSmsProviderId(value: unknown): value is SmsProviderId {
   return typeof value === 'string' && (SMS_PROVIDER_IDS as string[]).includes(value)
@@ -108,6 +108,10 @@ const DEFAULT_BASE: Record<SmsProviderId, string> = {
   textbee: 'https://api.textbee.dev/api/v1',
   httpsms: 'https://api.httpsms.com',
   android_sms_gateway: 'https://api.sms-gate.app',
+  telnyx: 'https://api.telnyx.com/v2',
+  vonage: 'https://rest.nexmo.com',
+  messagebird: 'https://rest.messagebird.com',
+  plivo: 'https://api.plivo.com/v1',
   generic_http: '',
 }
 
@@ -142,6 +146,24 @@ function authHeaders(provider: SmsProviderId, config: SmsGatewayConfig, secrets:
   if (provider === 'textbee' || provider === 'httpsms') {
     const apiKey = str(secrets, 'apiKey')
     return apiKey ? { 'x-api-key': apiKey } : {}
+  }
+  if (provider === 'telnyx') {
+    const apiKey = str(secrets, 'apiKey')
+    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+  }
+  if (provider === 'messagebird') {
+    const apiKey = str(secrets, 'apiKey')
+    return apiKey ? { Authorization: `AccessKey ${apiKey}` } : {}
+  }
+  if (provider === 'plivo') {
+    const authId = str(secrets, 'accountId') || str(secrets, 'username')
+    const authToken = str(secrets, 'apiSecret') || str(secrets, 'password')
+    if (!authId || !authToken) return {}
+    return { Authorization: `Basic ${Buffer.from(`${authId}:${authToken}`).toString('base64')}` }
+  }
+  if (provider === 'vonage') {
+    // Vonage's legacy SMS API authenticates with query parameters (added below).
+    return {}
   }
   if (provider === 'android_sms_gateway') {
     const token = str(secrets, 'token')
@@ -199,6 +221,52 @@ export function buildSendRequest(
         body: JSON.stringify({ phoneNumbers: [to], textMessage: { text: input.body } }),
       }
     }
+    case 'telnyx': {
+      const from = str(config, 'from')
+      if (!from) throw new Error('Telnyx SMS config needs a "from" number (E.164) or messaging profile id')
+      return {
+        url: `${baseUrl('telnyx', config)}/messages`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('telnyx', config, secrets) },
+        body: JSON.stringify({ from, to, text: input.body }),
+      }
+    }
+    case 'vonage': {
+      const from = str(config, 'from')
+      const apiKey = str(secrets, 'apiKey')
+      const apiSecret = str(secrets, 'apiSecret')
+      if (!from) throw new Error('Vonage SMS config needs a "from" sender')
+      if (!apiKey || !apiSecret) throw new Error('Vonage SMS secrets need apiKey and apiSecret')
+      const params = new URLSearchParams({ api_key: apiKey, api_secret: apiSecret, from, to, text: input.body })
+      return {
+        url: `${baseUrl('vonage', config)}/sms/json`,
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      }
+    }
+    case 'messagebird': {
+      const from = str(config, 'from')
+      if (!from) throw new Error('MessageBird SMS config needs a "from" sender (number or alphanumeric originator)')
+      return {
+        url: `${baseUrl('messagebird', config)}/messages`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('messagebird', config, secrets) },
+        body: JSON.stringify({ originator: from, recipients: [to.replace(/^\+/, '')], body: input.body }),
+      }
+    }
+    case 'plivo': {
+      const from = str(config, 'from')
+      const authId = str(secrets, 'accountId') || str(secrets, 'username')
+      if (!from) throw new Error('Plivo SMS config needs a "from" sender (number or sender id)')
+      if (!authId) throw new Error('Plivo SMS secrets need accountId (Auth ID)')
+      return {
+        url: `${baseUrl('plivo', config)}/Account/${encodeURIComponent(authId)}/Message/`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('plivo', config, secrets) },
+        body: JSON.stringify({ src: from, dst: to, text: input.body }),
+      }
+    }
     case 'generic_http': {
       const url = str(config, 'url')
       if (!url) throw new Error('generic_http gateway config needs a destination "url"')
@@ -227,6 +295,22 @@ export function buildTestRequest(provider: string, config: SmsGatewayConfig, sec
       return { url: `${baseUrl('httpsms', config)}/v1/messages?limit=1`, method: 'GET', headers: authHeaders('httpsms', config, secrets) }
     case 'android_sms_gateway':
       return { url: `${baseUrl('android_sms_gateway', config)}/3rdparty/v1/messages?limit=1`, method: 'GET', headers: authHeaders('android_sms_gateway', config, secrets) }
+    case 'telnyx':
+      return { url: `${baseUrl('telnyx', config)}/messages?page[size]=1`, method: 'GET', headers: authHeaders('telnyx', config, secrets) }
+    case 'vonage': {
+      const apiKey = str(secrets, 'apiKey')
+      const apiSecret = str(secrets, 'apiSecret')
+      if (!apiKey || !apiSecret) return null
+      const params = new URLSearchParams({ api_key: apiKey, api_secret: apiSecret })
+      return { url: `${baseUrl('vonage', config)}/account/get-balance?${params.toString()}`, method: 'GET', headers: {} }
+    }
+    case 'messagebird':
+      return { url: `${baseUrl('messagebird', config)}/messages?limit=1`, method: 'GET', headers: authHeaders('messagebird', config, secrets) }
+    case 'plivo': {
+      const authId = str(secrets, 'accountId') || str(secrets, 'username')
+      if (!authId) return null
+      return { url: `${baseUrl('plivo', config)}/Account/${encodeURIComponent(authId)}/`, method: 'GET', headers: authHeaders('plivo', config, secrets) }
+    }
     case 'generic_http':
       // No standardized read-only endpoint — the caller decides how to probe.
       return null
@@ -240,9 +324,16 @@ export function extractMessageId(provider: string, data: unknown): string {
   const d = data as Record<string, unknown> | null
   if (!d || typeof d !== 'object') return ''
   const inner = (d.data && typeof d.data === 'object' ? (d.data as Record<string, unknown>) : d)
-  for (const key of ['smsBatchId', 'id', 'messageId', 'sid']) {
+  for (const key of ['smsBatchId', 'id', 'messageId', 'sid', 'message_uuid', 'message-id']) {
     const v = inner[key] ?? d[key]
     if (typeof v === 'string' && v) return v
+  }
+  if (Array.isArray((d as { messages?: unknown }).messages)) {
+    const first = (d as { messages: Array<Record<string, unknown>> }).messages[0]
+    for (const key of ['message-id', 'id']) {
+      const v = first?.[key]
+      if (typeof v === 'string' && v) return v
+    }
   }
   return ''
 }
@@ -304,6 +395,12 @@ export async function sendSmsGateway(
       signal: AbortSignal.timeout(15_000),
     })
     const data = await res.json().catch(() => ({}))
+    if (res.ok && provider === 'vonage') {
+      const entry = (data as { messages?: Array<{ status?: string; 'error-text'?: string }> }).messages?.[0]
+      if (entry && entry.status !== '0') {
+        throw new Error(redact(`Gateway vonage rejected the send: ${entry['error-text'] ?? `status ${entry.status}`}`, secrets))
+      }
+    }
     if (!res.ok) {
       const message = (data as { message?: string; error?: string }).message ?? (data as { error?: string }).error
       throw new Error(redact(`Gateway ${provider} rejected the send (HTTP ${res.status}): ${message ?? res.statusText}`, secrets))

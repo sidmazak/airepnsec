@@ -25,6 +25,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { formatFileSize, readFileAsText } from '@/lib/client/files'
 import {
   Download, FileDown, Loader2, Plus, RefreshCw, Search, ShieldOff,
   Trash2, Upload, UserRound, Eye, Pencil, Users,
@@ -533,9 +534,27 @@ const CSV_TEMPLATE = [
 function ImportTab({ onImported }: { onImported: () => void }) {
   const { toast } = useToast()
   const [csv, setCsv] = useState('')
+  const [csvFile, setCsvFile] = useState<{ name: string; size: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [error, setError] = useState('')
+
+  const pickCsvFile = async (file: File | null) => {
+    if (!file) { setCsvFile(null); return }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('The CSV file is larger than 5 MB. Split it into smaller files.')
+      return
+    }
+    try {
+      const text = await readFileAsText(file)
+      setCsv(text)
+      setCsvFile({ name: file.name, size: file.size })
+      setResult(null)
+      setError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The CSV file could not be read')
+    }
+  }
 
   const downloadTemplate = () => {
     const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' })
@@ -586,6 +605,21 @@ function ImportTab({ onImported }: { onImported: () => void }) {
         <CardContent>
           <form onSubmit={submit} className="space-y-3" aria-label="CSV import form">
             {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+            <div className="space-y-1.5">
+              <Label htmlFor="csv-file">Upload a CSV file (optional)</Label>
+              <Input
+                id="csv-file"
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                onChange={(e) => void pickCsvFile(e.target.files?.[0] ?? null)}
+                disabled={busy}
+                className="min-h-[44px]"
+                aria-describedby="csv-file-help"
+              />
+              <p id="csv-file-help" className="text-xs text-muted-foreground">
+                {csvFile ? `${csvFile.name} · ${formatFileSize(csvFile.size)} loaded — review below, then import.` : 'Or paste the CSV directly. Files stay in this browser until you import.'}
+              </p>
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="csv-input">CSV content</Label>
               <Textarea

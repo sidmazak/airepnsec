@@ -2,15 +2,15 @@ import { withAuth, json, ApiError } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { invoiceOutstanding } from '@/lib/business/invoice'
-import { getEnabledStripe, createStripePaymentLink } from '@/lib/integrations/stripe'
+import { getEnabledPaymentLinkProvider, createInvoicePaymentLink } from '@/lib/integrations/paymentLinks'
 import { renderInvoiceEmail } from '@/lib/integrations/templates'
 
 /**
  * POST /api/invoices/[id]/send (owner/admin) — queues a REAL invoice email.
  *
  * Honesty rules:
- * - If a Stripe integration is enabled we try to attach a payment link; a
- *   failure is reported back as `paymentLinkError` and never faked.
+ * - If a payment integration (Stripe or Square) is enabled we try to attach a
+ *   payment link; a failure is reported back as `paymentLinkError` and never faked.
  * - The email is stored in the outbox (text + html). If no SMTP integration is
  *   enabled yet, the row is queued with the explicit reason "waiting for email
  *   integration (configure in Integrations)" — the dispatcher delivers it the
@@ -38,21 +38,21 @@ export const POST = withAuth(
     const org = await db.organization.findUnique({ where: { id: ctx.org.id }, select: { name: true, email: true, phone: true } })
     if (!org) throw new ApiError(404, 'Organization not found', 'not_found')
 
-    // 1) Best-effort payment link (only when Stripe is enabled).
+    // 1) Best-effort payment link (only when a processor is enabled).
     let paymentLink: string | undefined
     let paymentLinkError: string | undefined
-    const stripe = await getEnabledStripe(ctx.org.id)
-    if (stripe) {
+    const paymentProvider = await getEnabledPaymentLinkProvider(ctx.org.id)
+    if (paymentProvider) {
       try {
         const outstanding = invoiceOutstanding(invoice.totalCents, invoice.paidCents)
         if (outstanding <= 0) {
           paymentLinkError = 'Invoice is already fully paid — no payment link created'
         } else {
-          const link = await createStripePaymentLink(ctx.org.id, invoice, outstanding)
+          const link = await createInvoicePaymentLink(ctx.org.id, invoice, outstanding)
           paymentLink = link.url
         }
       } catch (err) {
-        paymentLinkError = err instanceof Error ? err.message : 'Stripe payment link failed'
+        paymentLinkError = err instanceof Error ? err.message : 'Payment link failed'
       }
     }
 
@@ -74,8 +74,11 @@ export const POST = withAuth(
       })
     }
 
-    const smtp = await db.integration.findFirst({ where: { orgId: ctx.org.id, kind: 'smtp', enabled: true } })
-    const smtpConfigured = Boolean(smtp?.secretsEnc)
+    const emailIntegration = await db.integration.findFirst({
+      where: { orgId: ctx.org.id, kind: { in: ['smtp', 'email_api'] }, enabled: true },
+      orderBy: { kind: 'asc' },
+    })
+    const emailConfigured = Boolean(emailIntegration?.secretsEnc)
 
     const outbox = await db.outboxMessage.create({
       data: {
@@ -86,7 +89,7 @@ export const POST = withAuth(
         body: rendered.text,
         html: rendered.html,
         status: 'queued',
-        statusReason: smtpConfigured ? '' : 'waiting for email integration (configure in Integrations)',
+        statusReason: emailConfigured ? '' : 'waiting for email integration (configure in Integrations)',
         relatedType: 'invoice',
         relatedId: invoice.id,
         dedupeKey,
@@ -106,6 +109,7 @@ export const POST = withAuth(
         recipient: customer.email,
         channel: 'email',
         hasPaymentLink: Boolean(paymentLink),
+        paymentProvider: paymentProvider ?? null,
         paymentLinkError: paymentLinkError ?? null,
       },
     })

@@ -1,18 +1,18 @@
 # Integrations — AI Secretary
 
-How the app talks to third-party services: email (SMTP), SMS/WhatsApp (Twilio or a self-hosted
-SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), Stripe payments, CalDAV
-calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
+How the app talks to third-party services: email (SMTP or SendGrid/Mailgun/Postmark/Resend/Brevo), SMS/WhatsApp (Twilio or a self-hosted/carrier SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), Stripe/Square payments, QuickBooks/Xero/MYB accounting, Shopify/WooCommerce/Wix/Mailchimp contact sync, CalDAV calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
 browser **Voice Console** is not an integration row — it rides the AI provider layer (capabilities
 `stt`/`tts`, same BYOK + data-mode policy as chat; see [ARCHITECTURE.md](./ARCHITECTURE.md) §9).
 Everything here is **BYOK (bring your own key)** — the app ships with zero third-party accounts and
 makes no network calls until you configure a channel.
 
 Status summary (details per section below): integrations CRUD, the outbox
-dispatcher, Stripe payment links + signature-verified webhooks, generic inbound
-payment webhooks, outbound signed webhooks, the ICS calendar feed, the real
-phone/SMS receptionist (Twilio Voice webhooks), SMS-gateway delivery, and
-CalDAV push/pull sync and **Google Calendar OAuth sync** are **implemented and live**. Every kind has a real
+dispatcher, Stripe/Square payment links + signature-verified webhooks, email
+provider APIs, SMS carrier APIs, QuickBooks/Xero/MYB push, commerce/CRM contact
+sync, generic inbound payment webhooks, outbound signed webhooks, the ICS
+calendar feed, the real phone/SMS receptionist (Twilio Voice webhooks),
+SMS-gateway delivery, and CalDAV push/pull sync and **Google Calendar OAuth
+sync** are **implemented and live**. Every kind has a real
 connection test exposed at `POST /api/integrations/[id]/test` (results stored in
 `lastTest*` and shown on the card); the test never claims message delivery.
 
@@ -50,9 +50,9 @@ connection test exposed at `POST /api/integrations/[id]/test` (results stored in
   (2^attempts minutes, capped at 60)**; after **5 attempts** the message is
   marked `failed` with the last (sanitized) error.
 - **Enabling an integration nudges pending messages**: queued messages of the
-  matching channel (`smtp→email`, `twilio_sms→sms`, `twilio_whatsapp→whatsapp`,
-  `webhook_out→webhook`) get `scheduledFor = now` and are flushed on the next
-  tick.
+  matching channel (`smtp→email`, `email_api→email`, `twilio_sms→sms`,
+  `twilio_whatsapp→whatsapp`, `webhook_out→webhook`) get `scheduledFor = now`
+  and are flushed on the next tick.
 - **Manual flush**: `POST /api/outbox/dispatch` (owner/admin) releases the
   backoff for every enabled channel and dispatches immediately — returns
   `{ ok, stats: { processed, sent, failed, waiting } }`; `409 worker_busy` when
@@ -64,8 +64,9 @@ connection test exposed at `POST /api/integrations/[id]/test` (results stored in
 Config = non-secret fields (`configJson`), Secrets = encrypted fields.
 `GET /api/integrations` returns config plus `configured`, `enabled`,
 `lastTestAt/Ok/Error` — never secrets. Singleton kinds (one row per org):
-`smtp`, `twilio_sms`, `twilio_whatsapp`, `twilio_voice`, `sms_gateway`, `caldav`, `google_calendar`,
-`stripe`; `webhook_out` allows one row per destination URL.
+`smtp`, `email_api`, `twilio_sms`, `twilio_whatsapp`, `twilio_voice`, `sms_gateway`, `caldav`,
+`google_calendar`, `microsoft_calendar`, `stripe`, `square`, `quickbooks`, `xero`, `myob`,
+`shopify`, `woocommerce`, `wix`, `mailchimp`; `webhook_out` allows one row per destination URL.
 
 ### `smtp` — email delivery
 
@@ -95,16 +96,26 @@ already_configured`.
 
 | | |
 |---|---|
-| Config | `provider` (required): `textbee`, `httpsms`, `android_sms_gateway`, or `generic_http`; `baseUrl?` (override the provider default); `from?` (required for httpSMS); `deviceId?` (TextBee); generic_http: `url` (required), `method` (`POST`/`PUT`), `authHeaderName?`, `bodyTemplate?`, `testRecipient?` |
-| Secrets | Provider-dependent: `apiKey?` (TextBee/httpSMS), `token?` or `username`+`password?` (android-sms-gateway; local mode may need none), `authValue?` (generic custom header). Absent credentials are legitimate; sends/tests fail honestly. |
-| Test routine | Read-only probe: TextBee `GET /gateway/devices`, httpSMS `GET /v1/messages?limit=1`, android-sms-gateway `GET /3rdparty/v1/messages?limit=1` (10 s). `generic_http` has no standard probe — it **sends a real SMS** to `testRecipient` if set, otherwise returns an explicit "set a testRecipient" failure. |
-| Delivery | `sendOrgSms()` prefers an enabled `twilio_sms` row; otherwise the enabled `sms_gateway`. Requests: TextBee `POST /gateway/send-sms`, httpSMS `POST /v1/messages/send`, android-sms-gateway `POST /3rdparty/v1/messages`, generic template with `{{to}}`/`{{message}}`/`{{from}}`. |
+| Config | `provider` (required): `textbee`, `httpsms`, `android_sms_gateway`, `telnyx`, `vonage`, `messagebird`, `plivo`, or `generic_http`; `baseUrl?` (override the provider default); `from?` (required for httpSMS and the carrier APIs); `deviceId?` (TextBee); generic_http: `url` (required), `method` (`POST`/`PUT`), `authHeaderName?`, `bodyTemplate?`, `testRecipient?`, `allowPrivate?` |
+| Secrets | Provider-dependent: `apiKey?` (TextBee/httpSMS/Telnyx/MessageBird), `apiKey`+`apiSecret` (Vonage), `accountId`+`apiSecret` (Plivo auth id/token), `token?` or `username`+`password?` (android-sms-gateway; local mode may need none), `authValue?` (generic custom header). Absent credentials are legitimate; sends/tests fail honestly. |
+| Test routine | Read-only probe: TextBee `GET /gateway/devices`, httpSMS `GET /v1/messages?limit=1`, android-sms-gateway `GET /3rdparty/v1/messages?limit=1`, Telnyx `GET /messages?page[size]=1`, Vonage `GET /account/get-balance`, MessageBird `GET /messages?limit=1`, Plivo `GET /Account/{authId}/` (10 s). `generic_http` has no standard probe — it **sends a real SMS** to `testRecipient` if set, otherwise returns an explicit "set a testRecipient" failure. |
+| Delivery | `sendOrgSms()` prefers an enabled `twilio_sms` row; otherwise the enabled `sms_gateway`. Requests: TextBee `POST /gateway/send-sms`, httpSMS `POST /v1/messages/send`, android-sms-gateway `POST /3rdparty/v1/messages`, Telnyx `POST /messages`, Vonage `POST /sms/json`, MessageBird `POST /messages`, Plivo `POST /Account/{authId}/Message/`, generic template with `{{to}}`/`{{message}}`/`{{from}}`. |
 | Honesty | HTTP 2xx means **accepted by the gateway**, not delivered to a handset. `statusReason` says "awaiting handset delivery"; delivery receipts require separate gateway webhooks (not implemented). Errors are sanitized/redacted. |
 | Wiring | Create the row, add credentials, click **Test**, enable it. Pending SMS outbox rows are nudged and retried on the next 30 s tick. |
 
 `generic_http` SSRF note: private/LAN addresses are intentionally allowed here because a
 self-hosted bridge is the normal deployment. Point it only at your own bridge; the URL is
 admin-supplied and never customer-controlled.
+
+### `email_api` — provider-native email delivery
+
+| | |
+|---|---|
+| Config | `provider` (`sendgrid`, `mailgun`, `postmark`, `resend`, `brevo`), `from`, `fromName?`, `domain?` (Mailgun), `region?` (`us`/`eu`, Mailgun), `messageStream?` (Postmark, default `outbound`) |
+| Secrets | `apiKey` |
+| Test routine | Read-only provider probe: SendGrid scopes, Mailgun domains, Postmark server, Resend domains, Brevo account. Never sends an email. |
+| Delivery | Raw HTTP to the provider API; the dispatcher prefers `email_api` over SMTP. A 2xx means the provider accepted the message; delivery receipts depend on the provider. |
+| Failure handling | Provider errors are sanitized/redacted. The dispatcher does not fall back to SMTP after an API failure, so an invoice is never sent twice. |
 
 ### `stripe` — payment links + payment webhooks
 
@@ -116,6 +127,37 @@ admin-supplied and never customer-controlled.
 | Failure examples | `Stripe API rejected the key (HTTP 401): Invalid API key provided: sk_live_***[redacted]` — **secret values are redacted from every error message** before storage/display. |
 
 Full payment flow in §4.
+
+### `square` — payment links + payment webhooks
+
+| | |
+|---|---|
+| Config | `locationId` (required), `environment?` (`production`/`sandbox`), `notificationUrl?` (must match Square exactly) |
+| Secrets | `accessToken`, `webhookSignatureKey?` |
+| Test routine | Real `GET /v2/locations` with the token (10 s). |
+| Delivery | `POST /v2/online-checkout/payment-links` with the invoice number, org slug and invoice metadata on the order; amounts are integer minor units. |
+| Webhook | `POST /api/square/webhook` verifies `x-square-hmacsha256-signature` (base64 HMAC-SHA256 over notification URL + raw body), resolves the org, fetches the order, reads invoice metadata and records a verified payment through `processWebhook`. Only `COMPLETED` payments are recorded. |
+| Preference | When both Stripe and Square are enabled, invoice payment links use Stripe. |
+
+### `quickbooks` / `xero` / `myob` — accounting push
+
+| | |
+|---|---|
+| Config | QuickBooks `{realmId}`; Xero `{tenantId, salesAccountCode}`; MYOB `{companyFileId, salesAccountCode}` |
+| Secrets | `clientId`, `clientSecret`, `refreshToken` (access tokens are refreshed automatically and stored encrypted) |
+| Test routine | QuickBooks company info, Xero organisation, MYOB company file — all read-only. |
+| Push | `POST /api/invoices/[id]/push-accounting` matches/creates the customer (external ref is stored on `Customer.externalRef`) and posts the invoice with the invoice number as the provider document number. A prior successful push for the same provider is refused to avoid duplicates. |
+| Honesty | Provider failures return `502 accounting_push_failed` with the sanitized provider message; nothing is reported as pushed unless the provider returned an id. |
+
+### `shopify` / `woocommerce` / `wix` / `mailchimp` — commerce/CRM contact sync
+
+| | |
+|---|---|
+| Config | Shopify `{shopDomain}`; WooCommerce `{storeUrl, allowPrivate?}`; Wix `{siteId}`; Mailchimp `{serverPrefix, listId}` |
+| Secrets | Shopify `{accessToken}`; WooCommerce `{consumerKey, consumerSecret}`; Wix/Mailchimp `{apiKey}` |
+| Test routine | Pulls one page of contacts (Shopify 250, WooCommerce 100, Wix 100, Mailchimp 500) and reports the real count. |
+| Sync | `POST /api/integrations/[id]/sync` upserts org-scoped Customers, matching by provider external ref, email or phone; tags are unioned and existing manual data is preserved. |
+| SSRF | WooCommerce store URLs pass the outbound URL guard unless `allowPrivate` is explicitly enabled for a self-hosted LAN store. |
 
 ### `webhook_out` — outbound signed webhooks
 
@@ -254,17 +296,20 @@ daily dedupe), `scheduledFor`, `sentAt`.
 - The outbox is the honesty surface: a message that could not be delivered says
   exactly why (`statusReason`), and the UI/diagnostics show attempts.
 
-## 4. Stripe payment flow
+## 4. Stripe / Square payment flow
 
 1. **Create a real Payment Link** — `POST /api/invoices/[id]/payment-link`
-   (owner/admin). Requires an *enabled* stripe integration (`503
-   stripe_not_enabled` otherwise); refuses void (`409`) or fully paid (`409
-   already_paid`) invoices. Calls the live Stripe Payment Links API:
+   (owner/admin). Requires an *enabled* payment integration (`503
+   payment_not_enabled` otherwise); Stripe is preferred, then Square. Refuses
+   void (`409`) or fully paid (`409 already_paid`) invoices. For Stripe it calls
+   the live Payment Links API:
    `unit_amount` = outstanding minor units, `currency` = invoice currency
    (lowercased), product name `Invoice <number> — <org name>`, and **metadata
    `org_slug`, `invoice_id`, `invoice_number`** (how callbacks find their
-   invoice). Success → `{ url, id }`. Stripe-side failure → honest `502
-   stripe_error` with the sanitized Stripe message.
+   invoice). Success → `{ url, id, provider }`. Provider-side failure → honest
+   `502 payment_link_error` with the sanitized message. For Square the same
+   metadata is attached to the order (`org_slug`, `invoice_id`,
+   `invoice_number`) and the webhook reads it back after fetching the order.
 2. **Attach to the invoice email** — `POST /api/invoices/[id]/send` renders the
    invoice email (see §7) and, when Stripe is enabled, tries to attach a
    payment link. A Stripe failure is reported back as `paymentLinkError` — the

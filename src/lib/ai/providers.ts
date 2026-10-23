@@ -5,16 +5,16 @@ import { encryptSecret, decryptSecret } from '@/lib/crypto'
 export type Capability = 'llm' | 'embedding' | 'stt' | 'tts' | 'realtime' | 'rerank' | 'vision'
 export const CAPABILITIES: Capability[] = ['llm', 'embedding', 'stt', 'tts', 'realtime', 'rerank', 'vision']
 
-export type ProviderKind = 'ollama' | 'openai_compatible' | 'browser' | 'local_neural' | 'local_lexical' | 'local_speech' | 'none'
+export type ProviderKind = 'ollama' | 'openai_compatible' | 'anthropic' | 'google' | 'azure_openai' | 'browser' | 'local_neural' | 'local_lexical' | 'local_speech' | 'none'
 
 export const CAPABILITY_INFO: Record<Capability, { label: string; description: string; kinds: ProviderKind[] }> = {
-  llm: { label: 'Conversation model (LLM)', description: 'Powers the AI receptionist chat and voice replies. Bring your own local Ollama model or an OpenAI-compatible endpoint.', kinds: ['ollama', 'openai_compatible', 'none'] },
-  embedding: { label: 'Knowledge retrieval (RAG embeddings)', description: 'Embeds and retrieves your approved documents. The built-in neural model runs entirely on this machine.', kinds: ['local_neural', 'ollama', 'openai_compatible', 'local_lexical'] },
+  llm: { label: 'Conversation model (LLM)', description: 'Powers the AI receptionist chat and voice replies. Use local Ollama, a self-hosted endpoint, or any cloud provider (OpenAI, Anthropic, Gemini, xAI, Groq, DeepSeek, Mistral, OpenRouter…).', kinds: ['ollama', 'openai_compatible', 'anthropic', 'google', 'azure_openai', 'none'] },
+  embedding: { label: 'Knowledge retrieval (RAG embeddings)', description: 'Embeds and retrieves your approved documents. The built-in neural model runs entirely on this machine.', kinds: ['local_neural', 'ollama', 'openai_compatible', 'google', 'azure_openai', 'local_lexical'] },
   stt: { label: 'Speech-to-text', description: 'Converts spoken words to text for voice conversations. The browser mic path works out of the box, or run Whisper fully locally.', kinds: ['browser', 'openai_compatible', 'local_speech'] },
   tts: { label: 'Text-to-speech', description: 'Speaks assistant replies aloud in voice mode. The browser synth path works out of the box, or run a local ONNX voice.', kinds: ['browser', 'openai_compatible', 'local_speech'] },
   realtime: { label: 'Realtime voice (optional)', description: 'Low-latency WebRTC voice with an OpenAI-compatible realtime endpoint. Falls back to the conversation model when not set.', kinds: ['none', 'openai_compatible'] },
   rerank: { label: 'Reranking (optional)', description: 'Second-stage ranking of retrieved knowledge. Optional — retrieval works without it.', kinds: ['none', 'openai_compatible'] },
-  vision: { label: 'Vision (optional)', description: 'Reads images (a photo of an invoice, a damage report). Optional.', kinds: ['none', 'openai_compatible'] },
+  vision: { label: 'Vision (optional)', description: 'Reads images (a photo of an invoice, a damage report). Works with OpenAI-compatible, Anthropic, Gemini and Azure OpenAI endpoints.', kinds: ['none', 'openai_compatible', 'anthropic', 'google', 'azure_openai'] },
 }
 
 export type PublicProviderConfig = {
@@ -37,6 +37,9 @@ function dataFlowLabel(provider: string, baseUrl: string): string {
   switch (provider) {
     case 'ollama': return `Local inference on this machine (${baseUrl || 'Ollama'}) — data stays local`
     case 'openai_compatible': return `External OpenAI-compatible endpoint (${baseUrl || 'custom'}) — data leaves this machine`
+    case 'anthropic': return `Anthropic Messages API (${baseUrl || 'api.anthropic.com'}) — data leaves this machine`
+    case 'google': return `Google Gemini API (${baseUrl || 'generativelanguage.googleapis.com'}) — data leaves this machine`
+    case 'azure_openai': return `Azure OpenAI deployment (${baseUrl || 'custom'}) — data leaves this machine`
     case 'browser': return 'In the browser (this device) — no server round-trip for media'
     case 'local_neural': return 'Runs on this machine (built-in ONNX embedding model) — text never leaves the server'
     case 'local_lexical': return 'Legacy keyword index — runs entirely on this machine, no model'
@@ -159,9 +162,52 @@ export async function testProvider(
     if (capability === 'vision' && row.provider !== 'none') {
       if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. https://api.example.com/v1)', latencyMs: 0 }
       const { TINY_PNG_BASE64 } = await import('@/lib/ai/vision')
-      const res = await fetchWithTimeout(`${row.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      if (row.provider === 'anthropic') {
+        const { anthropicHeaders, normalizeAnthropicBase } = await import('@/lib/ai/anthropic')
+        const res = await fetchWithTimeout(`${normalizeAnthropicBase(row.baseUrl)}/messages`, {
+          method: 'POST',
+          headers: anthropicHeaders(key),
+          body: JSON.stringify({
+            model: row.model,
+            max_tokens: 16,
+            messages: [{ role: 'user', content: [
+              { type: 'text', text: 'Reply with the single word: ok' },
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_BASE64 } },
+            ] }],
+          }),
+          timeoutMs: 20_000,
+        })
+        if (!res.ok) return { ok: false, message: `Anthropic vision endpoint returned HTTP ${res.status}`, latencyMs: Date.now() - started }
+        const { parseAnthropicResponse } = await import('@/lib/ai/anthropic')
+        const parsed = parseAnthropicResponse(await res.json())
+        return { ok: Boolean(parsed.content), message: parsed.content ? `The vision model answered (${parsed.content.slice(0, 40)}).` : 'The vision endpoint returned an empty answer.', latencyMs: Date.now() - started }
+      }
+      if (row.provider === 'google') {
+        const { googleHeaders, normalizeGoogleBase } = await import('@/lib/ai/google')
+        const res = await fetchWithTimeout(`${normalizeGoogleBase(row.baseUrl)}/models/${encodeURIComponent(row.model)}:generateContent`, {
+          method: 'POST',
+          headers: googleHeaders(key),
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [
+              { text: 'Reply with the single word: ok' },
+              { inline_data: { mime_type: 'image/png', data: TINY_PNG_BASE64 } },
+            ] }],
+            generationConfig: { maxOutputTokens: 16 },
+          }),
+          timeoutMs: 20_000,
+        })
+        if (!res.ok) return { ok: false, message: `Gemini vision endpoint returned HTTP ${res.status}`, latencyMs: Date.now() - started }
+        const { parseGoogleResponse } = await import('@/lib/ai/google')
+        const parsed = parseGoogleResponse(await res.json())
+        return { ok: Boolean(parsed.content), message: parsed.content ? `The vision model answered (${parsed.content.slice(0, 40)}).` : 'The vision endpoint returned an empty answer.', latencyMs: Date.now() - started }
+      }
+      const { azureHeaders, azureUrl } = await import('@/lib/ai/azure')
+      const isAzure = row.provider === 'azure_openai'
+      const url = isAzure ? azureUrl(row.baseUrl, row.model, 'chat/completions') : `${row.baseUrl.replace(/\/$/, '')}/chat/completions`
+      const headers = isAzure ? azureHeaders(key) : { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) }
+      const res = await fetchWithTimeout(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+        headers,
         body: JSON.stringify({
           model: row.model,
           messages: [
@@ -256,6 +302,35 @@ export async function testProvider(
             ? { ok: true, message: `Endpoint embedded a test string (${data.data[0].embedding.length} dims).`, latencyMs: Date.now() - started, details: { dim: data.data[0].embedding.length } }
             : { ok: false, message: 'Endpoint returned an empty embedding.', latencyMs: Date.now() - started }
         }
+        case 'google': {
+          if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. https://generativelanguage.googleapis.com/v1beta)', latencyMs: 0 }
+          const { googleHeaders, normalizeGoogleBase } = await import('@/lib/ai/google')
+          const res = await fetchWithTimeout(`${normalizeGoogleBase(row.baseUrl)}/models/${encodeURIComponent(row.model || 'gemini-embedding-001')}:embedContent`, {
+            method: 'POST',
+            headers: googleHeaders(key),
+            body: JSON.stringify({ content: { parts: [{ text: 'connection test' }] } }),
+          })
+          if (!res.ok) return { ok: false, message: `Gemini embedding endpoint returned HTTP ${res.status}`, latencyMs: Date.now() - started }
+          const data = (await res.json()) as { embedding?: { values?: number[] } }
+          const dim = data.embedding?.values?.length ?? 0
+          return dim
+            ? { ok: true, message: `Gemini embedded a test string (${dim} dims).`, latencyMs: Date.now() - started, details: { dim } }
+            : { ok: false, message: 'Gemini returned an empty embedding.', latencyMs: Date.now() - started }
+        }
+        case 'azure_openai': {
+          if (!row.baseUrl) return { ok: false, message: 'Deployment endpoint is required (https://YOUR.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT)', latencyMs: 0 }
+          const { azureHeaders, azureUrl } = await import('@/lib/ai/azure')
+          const res = await fetchWithTimeout(azureUrl(row.baseUrl, row.model, 'embeddings'), {
+            method: 'POST',
+            headers: azureHeaders(key),
+            body: JSON.stringify({ model: row.model, input: ['connection test'] }),
+          })
+          if (!res.ok) return { ok: false, message: `Azure OpenAI embedding endpoint returned HTTP ${res.status}`, latencyMs: Date.now() - started }
+          const data = (await res.json()) as { data?: Array<{ embedding: number[] }> }
+          return data.data?.[0]?.embedding?.length
+            ? { ok: true, message: `Azure OpenAI embedded a test string (${data.data[0].embedding.length} dims).`, latencyMs: Date.now() - started, details: { dim: data.data[0].embedding.length } }
+            : { ok: false, message: 'Azure OpenAI returned an empty embedding.', latencyMs: Date.now() - started }
+        }
         case 'local_lexical':
           return { ok: true, message: 'Legacy keyword index active — deterministic, no model. Switch to the built-in neural model for semantic search.', latencyMs: 0 }
         case 'none':
@@ -283,6 +358,44 @@ export async function testProvider(
         const data = (await res.json()) as { data?: Array<{ id: string }> }
         const models = data.data?.map((m) => m.id) ?? []
         return { ok: true, message: `Connected. ${models.length} model(s) available.`, latencyMs: Date.now() - started, details: { models: models.slice(0, 20) } }
+      }
+      case 'anthropic': {
+        if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. https://api.anthropic.com)', latencyMs: 0 }
+        const { anthropicHeaders, normalizeAnthropicBase } = await import('@/lib/ai/anthropic')
+        const res = await fetchWithTimeout(`${normalizeAnthropicBase(row.baseUrl)}/models?limit=100`, {
+          headers: anthropicHeaders(key),
+        })
+        if (!res.ok) return { ok: false, message: `Anthropic responded with HTTP ${res.status}`, latencyMs: Date.now() - started }
+        const data = (await res.json()) as { data?: Array<{ id: string }> }
+        const models = data.data?.map((m) => m.id) ?? []
+        return { ok: true, message: `Connected to Anthropic. ${models.length} model(s) available.`, latencyMs: Date.now() - started, details: { models: models.slice(0, 20) } }
+      }
+      case 'google': {
+        if (!row.baseUrl) return { ok: false, message: 'Base URL is required (e.g. https://generativelanguage.googleapis.com/v1beta)', latencyMs: 0 }
+        const { googleHeaders, normalizeGoogleBase } = await import('@/lib/ai/google')
+        const res = await fetchWithTimeout(`${normalizeGoogleBase(row.baseUrl)}/models?pageSize=200`, {
+          headers: googleHeaders(key),
+        })
+        if (!res.ok) return { ok: false, message: `Gemini responded with HTTP ${res.status}`, latencyMs: Date.now() - started }
+        const data = (await res.json()) as { models?: Array<{ name?: string }> }
+        const models = (data.models ?? []).map((m) => (m.name ?? '').replace(/^models\//, '')).filter(Boolean)
+        return { ok: true, message: `Connected to Gemini. ${models.length} model(s) available.`, latencyMs: Date.now() - started, details: { models: models.slice(0, 20) } }
+      }
+      case 'azure_openai': {
+        if (!row.baseUrl) return { ok: false, message: 'Deployment endpoint is required (https://YOUR.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT)', latencyMs: 0 }
+        const { azureHeaders, azureUrl } = await import('@/lib/ai/azure')
+        const res = await fetchWithTimeout(azureUrl(row.baseUrl, row.model, 'chat/completions'), {
+          method: 'POST',
+          headers: azureHeaders(key),
+          body: JSON.stringify({
+            model: row.model,
+            messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
+            max_tokens: 8,
+          }),
+          timeoutMs: 20_000,
+        })
+        if (!res.ok) return { ok: false, message: `Azure OpenAI responded with HTTP ${res.status}`, latencyMs: Date.now() - started }
+        return { ok: true, message: 'Azure OpenAI deployment answered a test prompt.', latencyMs: Date.now() - started }
       }
       case 'browser':
         return { ok: true, message: 'Runs in the user\'s browser — no server test needed.', latencyMs: 0 }
@@ -339,7 +452,7 @@ export function isLocalEndpoint(baseUrl: string): boolean {
 export async function assertAiPolicy(orgId: string, providerKind: string, baseUrl = '') {
   const org = await db.organization.findUnique({ where: { id: orgId }, select: { dataMode: true } })
   if (!org) throw new ApiError(404, 'Organization not found', 'not_found')
-  const cloudProviders = ['openai_compatible']
+  const cloudProviders = ['openai_compatible', 'anthropic', 'google', 'azure_openai']
   if (org.dataMode === 'local_only' && cloudProviders.includes(providerKind)) {
     // A self-hosted OpenAI-compatible server on this machine/private network is
     // not a cloud provider — allow it so local_only orgs can still run speech.

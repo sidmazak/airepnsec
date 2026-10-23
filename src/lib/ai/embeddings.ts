@@ -250,10 +250,69 @@ async function embedOpenAiCompatible(
   return out
 }
 
+async function embedGoogle(
+  row: { baseUrl: string; model: string; apiKeyEnc: string },
+  texts: string[]
+): Promise<number[][]> {
+  if (!row.baseUrl) throw new Error('Gemini embedding base URL is not configured')
+  const { googleHeaders, normalizeGoogleBase } = await import('@/lib/ai/google')
+  const key = getApiKey(row)
+  const base = normalizeGoogleBase(row.baseUrl)
+  const model = row.model || 'gemini-embedding-001'
+  const out: number[][] = []
+  for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+    const batch = texts.slice(i, i + EMBED_BATCH)
+    const res = await fetchWithTimeout(`${base}/models/${encodeURIComponent(model)}:batchEmbedContents`, {
+      method: 'POST',
+      headers: googleHeaders(key),
+      body: JSON.stringify({
+        requests: batch.map((text) => ({ model: `models/${model}`, content: { parts: [{ text }] } })),
+      }),
+    })
+    if (!res.ok) throw new Error(`Gemini embedding endpoint returned HTTP ${res.status}`)
+    const data = (await res.json()) as { embeddings?: Array<{ values?: number[] }> }
+    for (const item of data.embeddings ?? []) {
+      if (!item.values?.length) throw new Error('Gemini returned an empty embedding')
+      out.push(item.values)
+    }
+  }
+  return out
+}
+
+async function embedAzure(
+  row: { baseUrl: string; model: string; apiKeyEnc: string; configJson?: string },
+  texts: string[]
+): Promise<number[][]> {
+  if (!row.baseUrl) throw new Error('Azure OpenAI embedding deployment is not configured')
+  const { azureHeaders, azureUrl } = await import('@/lib/ai/azure')
+  const key = getApiKey(row)
+  let apiVersion = '2024-10-21'
+  try {
+    const config = JSON.parse(row.configJson || '{}') as { apiVersion?: unknown }
+    if (typeof config.apiVersion === 'string' && config.apiVersion) apiVersion = config.apiVersion
+  } catch { /* keep default */ }
+  const out: number[][] = []
+  for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+    const batch = texts.slice(i, i + EMBED_BATCH)
+    const res = await fetchWithTimeout(azureUrl(row.baseUrl, row.model, 'embeddings', apiVersion), {
+      method: 'POST',
+      headers: azureHeaders(key),
+      body: JSON.stringify({ model: row.model, input: batch }),
+    })
+    if (!res.ok) throw new Error(`Azure OpenAI embedding endpoint returned HTTP ${res.status}`)
+    const data = (await res.json()) as { data?: Array<{ index?: number; embedding: number[] }> }
+    const items = [...(data.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    for (const item of items) out.push(item.embedding)
+  }
+  return out
+}
+
 const EMBEDDER_LABELS: Record<string, string> = {
   local_neural: 'Built-in neural model (local ONNX)',
   ollama: 'Ollama (local)',
   openai_compatible: 'OpenAI-compatible endpoint',
+  google: 'Google Gemini embeddings',
+  azure_openai: 'Azure OpenAI embeddings',
   local_lexical: 'Legacy keyword index (local)',
 }
 
@@ -293,6 +352,32 @@ export async function resolveEmbedder(orgId: string): Promise<Embedder> {
           { baseUrl: row!.baseUrl, model: info.model, apiKeyEnc: row!.apiKeyEnc },
           texts
         )
+        info.dim = vectors[0]?.length ?? 0
+        return vectors
+      },
+    }
+  }
+
+  if (provider === 'google') {
+    const info: EmbedderInfo = { ...baseInfo, provider, model: model || 'gemini-embedding-001', dim: 0 }
+    return {
+      info,
+      embed: async (texts) => {
+        await assertAiPolicy(orgId, 'google', row!.baseUrl)
+        const vectors = await embedGoogle({ baseUrl: row!.baseUrl, model: info.model, apiKeyEnc: row!.apiKeyEnc }, texts)
+        info.dim = vectors[0]?.length ?? 0
+        return vectors
+      },
+    }
+  }
+
+  if (provider === 'azure_openai') {
+    const info: EmbedderInfo = { ...baseInfo, provider, model: model || 'text-embedding-3-small', dim: 0 }
+    return {
+      info,
+      embed: async (texts) => {
+        await assertAiPolicy(orgId, 'azure_openai', row!.baseUrl)
+        const vectors = await embedAzure({ baseUrl: row!.baseUrl, model: info.model, apiKeyEnc: row!.apiKeyEnc, configJson: row!.configJson }, texts)
         info.dim = vectors[0]?.length ?? 0
         return vectors
       },

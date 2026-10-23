@@ -18,7 +18,7 @@ Next.js 16 App Router deployment; the conceptual boundaries map to directories:
 | package: db | `src/lib/db.ts` (Prisma client singleton) | Data access; schema in `prisma/schema.prisma` |
 | package: ai | `src/lib/ai/**` | Provider adapters (Ollama, OpenAI-compatible), embeddings, policy gate (local_only/hybrid/cloud_first) |
 | package: datasources — bring-your-own DB into RAG | `src/lib/datasources/**` (registry, adapters, sync) + routes `src/app/api/datasources/**` + UI `src/components/sections/data-sources-section.tsx` | Connect an external relational DB (postgres/mysql/sqlite) or JSON HTTP endpoint; normalize rows → `KnowledgeDoc`s → the shared chunk/embed pipeline. Read-only SQL enforcement, SSRF guard, encrypted credentials, idempotent re-sync, worker auto-sync |
-| package: integrations | `src/lib/integrations/**` | SMTP/Twilio/Stripe/CalDAV adapters, outbox dispatcher, ICS feed + CalDAV push sync, generic signed-webhook adapter |
+| package: integrations | `src/lib/integrations/**` | SMTP/email-API/Twilio/SMS-carrier/Stripe/Square/accounting/commerce/CalDAV adapters, outbox dispatcher, ICS feed + CalDAV push sync, generic signed-webhook adapter |
 
 ```mermaid
 flowchart TB
@@ -37,7 +37,7 @@ flowchart TB
   end
   PRISMA[(Prisma client)]
   DB[(SQLite / PostgreSQL)]
-  EXT[Ollama / OpenAI-compatible<br/>SMTP · Twilio · Stripe · CalDAV · webhooks]
+  EXT[Ollama / OpenAI-compatible / Anthropic / Gemini / Azure<br/>SMTP · email APIs · Twilio · SMS carriers · Stripe/Square · QuickBooks/Xero/MYB · commerce · CalDAV · webhooks]
 
   UI -->|fetch JSON| ROUTES
   ROUTES --> AUTH
@@ -183,9 +183,9 @@ Protocol rules:
 
 | Mode | Allowed providers | Enforcement |
 |---|---|---|
-| **local_only** | Ollama / local or private-network endpoints | Policy gate checked before every AI call; external `openai_compatible` → hard error (no silent fallback) |
-| **hybrid** | Operator-configured local or cloud endpoints | Gate permits configured endpoints |
-| **cloud_first** | Operator-configured cloud endpoints | Keys AES-256-GCM encrypted, server-side only |
+| **local_only** | Ollama / local or private-network endpoints | Policy gate checked before every AI call; external `openai_compatible`/`anthropic`/`google`/`azure_openai` → hard error (no silent fallback) |
+| **hybrid** | Operator-configured local or cloud endpoints (Ollama, OpenAI-compatible, Anthropic, Google, Azure OpenAI) | Gate permits configured endpoints |
+| **cloud_first** | Operator-configured cloud endpoints | Keys AES-256-GCM encrypted, server-side only; Anthropic/Gemini use native HTTP but the same validated JSON tool protocol |
 
 - The mode is an org-level setting (schema/UI seed `hybrid`); changing it is audited.
 - There is no managed/bundled provider and no proprietary AI SDK.
@@ -204,7 +204,18 @@ Protocol rules:
   (SQLite build) is documented as the portable intermediate representation.
 - Provider connection tests (`POST /api/providers/[capability]/test`) store honest
   `lastTestOk/lastTestError`; the assistant surfaces a clear error when no enabled provider is
-  available rather than silently pretending to answer.
+  available rather than silently pretending to answer. `POST /api/providers/[capability]/models`
+  lists models from the configured endpoint (Ollama tags, OpenAI `/models`, Anthropic, Gemini,
+  Azure deployments).
+
+**Knowledge ingestion.** `src/lib/knowledge/extract.ts` extracts text from PDF (`unpdf`),
+DOCX (`mammoth`), HTML/Markdown/TXT/CSV/JSON; `POST /api/knowledge/extract` returns text for
+review and never indexes on its own. `src/lib/knowledge/crawl.ts` is a same-origin BFS crawler
+with a page limit and a `validateUrl` hook (the route injects `assertOutboundUrl`), storing each
+page as a `KnowledgeDoc` with `source:'website'`, `externalId:url`, a sha256 `contentHash` and
+upsert-by-url semantics, then indexing through the shared chunk/embed pipeline. The crawl is
+gated on an active LLM (`409 ai_not_configured`) and optionally cleans each page with the model;
+AI failure falls back to deterministic extraction. Audit `knowledge.website_imported`.
 
 ## 6. Automation engine
 
@@ -290,6 +301,24 @@ transaction), our own pushed bookings are excluded from those blocks, and bookin
 Google events marked with a private `aisBookingId` extended property (idempotent re-push).
 Remote cancellations and moves are pulled back through the validated booking service.
 
+**Payment links (Stripe/Square).** `src/lib/integrations/paymentLinks.ts` selects the enabled
+provider (Stripe first, then Square) for invoice send/payment-link routes and collections.
+Stripe builds Payment Links with `metadata.org_slug/invoice_id/invoice_number`; Square builds an
+order with the same metadata and returns the Square-hosted checkout URL. Inbound webhooks are
+signature-verified and mapped to the shared idempotent `recordVerifiedPayment` path; Square
+re-fetches the order to read metadata and records only `COMPLETED` payments.
+
+**Accounting push.** `src/lib/integrations/accounting.ts` refreshes QuickBooks/Xero/MYB access
+tokens from the operator-supplied refresh token (rotated tokens are re-encrypted), matches or
+creates the customer, and posts the invoice using the invoice number as the provider document
+number. A prior successful push for the same provider is refused to prevent duplicates; draft
+invoices and missing `salesAccountCode` (Xero/MYB) fail honestly.
+
+**Commerce/CRM sync.** `src/lib/integrations/commerce.ts` pulls one page of contacts from
+Shopify, WooCommerce, Wix or Mailchimp and upserts org-scoped customers, matching by provider
+external ref, email or phone; tags are unioned and manual fields preserved. WooCommerce store
+URLs pass the SSRF guard unless `allowPrivate` is explicitly enabled.
+
 **Microsoft 365 sync.** `src/lib/integrations/microsoftGraph.ts` speaks the Graph API directly
 (fixed `graph.microsoft.com` / `login.microsoftonline.com` endpoints — no user-controlled host,
 so no SSRF surface). OAuth 2.0 authorization-code flow against the Microsoft identity platform:
@@ -344,7 +373,7 @@ flowchart LR
   U[Users / Twilio / payment provider] -->|HTTPS| P[Reverse proxy<br/>Caddy or nginx<br/>TLS + request limits]
   P -->|HTTP :3000| A[app container<br/>Next standalone + workers]
   A -->|Prisma| D[(PostgreSQL 16<br/>pgdata volume)]
-  A -->|SMTP/HTTPS| X[Optional BYOK providers<br/>SMTP · Twilio · Stripe · CalDAV]
+  A -->|SMTP/HTTPS| X[Optional BYOK providers<br/>SMTP · email APIs · Twilio · SMS · Stripe/Square · accounting · commerce · CalDAV]
   A --> V[(Volumes<br/>.data key · backups · .models)]
   M[Host monitoring] -->|/api/health| A
   M -->|/api/health/ready| A

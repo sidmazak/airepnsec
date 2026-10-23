@@ -38,8 +38,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  CalendarClock, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
-  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Send, Smartphone, Trash2, Webhook as WebhookIcon, XCircle,
+  BookOpen, CalendarClock, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
+  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Send, ShoppingBag, Smartphone, Store, Trash2, Users, Webhook as WebhookIcon, XCircle,
 } from 'lucide-react'
 
 /* ------------------------------ helpers ------------------------------ */
@@ -86,6 +86,12 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
     icon: Mail,
     blurb: 'Outgoing email for invoices, reminders and receipts. Point it at your own SMTP server or relay.',
     needsCredentials: false,
+  },
+  email_api: {
+    title: 'Email (provider API)',
+    icon: Mail,
+    blurb: 'Send invoice and reminder email through SendGrid, Mailgun, Postmark, Resend or Brevo — alternative to SMTP.',
+    needsCredentials: true,
   },
   twilio_sms: {
     title: 'SMS (Twilio)',
@@ -137,6 +143,54 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
     blurb: 'Real Stripe payment links on invoices. Callbacks are verified against your signing secret.',
     needsCredentials: true,
   },
+  square: {
+    title: 'Payments (Square)',
+    icon: CreditCard,
+    blurb: 'Square payment links on invoices, with signed webhook callbacks that record verified payments.',
+    needsCredentials: true,
+  },
+  quickbooks: {
+    title: 'Accounting (QuickBooks Online)',
+    icon: BookOpen,
+    blurb: 'Push issued invoices and create customers in QuickBooks Online with your own OAuth app.',
+    needsCredentials: true,
+  },
+  xero: {
+    title: 'Accounting (Xero)',
+    icon: BookOpen,
+    blurb: 'Push issued invoices and contacts into Xero using your Xero OAuth app.',
+    needsCredentials: true,
+  },
+  myob: {
+    title: 'Accounting (MYOB AccountRight)',
+    icon: BookOpen,
+    blurb: 'Push issued invoices and customers into MYOB AccountRight company files.',
+    needsCredentials: true,
+  },
+  shopify: {
+    title: 'Shopify',
+    icon: ShoppingBag,
+    blurb: 'Import Shopify customers (with tags) into your customer list.',
+    needsCredentials: true,
+  },
+  woocommerce: {
+    title: 'WooCommerce',
+    icon: Store,
+    blurb: 'Import WooCommerce customers from your WordPress store.',
+    needsCredentials: true,
+  },
+  wix: {
+    title: 'Wix',
+    icon: Users,
+    blurb: 'Import Wix contacts into your customer list.',
+    needsCredentials: true,
+  },
+  mailchimp: {
+    title: 'Mailchimp',
+    icon: Mail,
+    blurb: 'Import Mailchimp audience members into your customer list.',
+    needsCredentials: true,
+  },
   webhook_out: {
     title: 'Webhooks',
     icon: WebhookIcon,
@@ -145,7 +199,13 @@ const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: strin
   },
 }
 
-const SINGLETON_KINDS = ['smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav', 'google_calendar', 'microsoft_calendar', 'stripe'] as const
+const SINGLETON_KINDS = [
+  'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
+  'google_calendar', 'microsoft_calendar', 'stripe', 'square', 'quickbooks', 'xero', 'myob',
+  'shopify', 'woocommerce', 'wix', 'mailchimp',
+] as const
+
+const COMMERCE_KINDS = ['shopify', 'woocommerce', 'wix', 'mailchimp'] as const
 
 const OUTBOX_STATUS_CLASS: Record<string, string> = {
   sent: 'bg-emerald-100 text-emerald-900',
@@ -250,15 +310,51 @@ function GoogleCalendarBox({ connected, canManage, onChanged }: { connected: boo
 /* ------------------------------ drafts ------------------------------ */
 
 
-type ConfigDraft = { host: string; port: string; secure: boolean; from: string; url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string; baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean; calendarId: string; redirectUri: string; tenant: string; calendarEmail: string }
-type SecretsDraft = { user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string; password: string; apiKey: string; username: string; passwordGw: string; token: string; authValue: string; clientId: string; clientSecret: string }
+type ConfigDraft = {
+  host: string; port: string; secure: boolean; from: string; fromName: string; domain: string; region: string; messageStream: string
+  url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string
+  baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean
+  calendarId: string; redirectUri: string; tenant: string; calendarEmail: string
+  locationId: string; environment: string; notificationUrl: string
+  realmId: string; tenantId: string; companyFileId: string; salesAccountCode: string
+  shopDomain: string; storeUrl: string; siteId: string; serverPrefix: string; listId: string
+}
+type SecretsDraft = {
+  user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string
+  password: string; apiKey: string; apiSecret: string; accountId: string; username: string; passwordGw: string; token: string
+  authValue: string; clientId: string; clientSecret: string; accessToken: string; webhookSignatureKey: string; refreshToken: string
+  consumerKey: string; consumerSecret: string
+}
 
-const EMPTY_CONFIG: ConfigDraft = { host: '', port: '', secure: false, from: '', url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee', baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false, calendarId: 'primary', redirectUri: '', tenant: 'common', calendarEmail: '' }
-const EMPTY_SECRETS: SecretsDraft = { user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '', apiKey: '', username: '', passwordGw: '', token: '', authValue: '', clientId: '', clientSecret: '' }
+const EMPTY_CONFIG: ConfigDraft = {
+  host: '', port: '', secure: false, from: '', fromName: '', domain: '', region: 'us', messageStream: '',
+  url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee',
+  baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false,
+  calendarId: 'primary', redirectUri: '', tenant: 'common', calendarEmail: '',
+  locationId: '', environment: 'production', notificationUrl: '',
+  realmId: '', tenantId: '', companyFileId: '', salesAccountCode: '',
+  shopDomain: '', storeUrl: '', siteId: '', serverPrefix: '', listId: '',
+}
+const EMPTY_SECRETS: SecretsDraft = {
+  user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '',
+  apiKey: '', apiSecret: '', accountId: '', username: '', passwordGw: '', token: '', authValue: '',
+  clientId: '', clientSecret: '', accessToken: '', webhookSignatureKey: '', refreshToken: '',
+  consumerKey: '', consumerSecret: '',
+}
 
 function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
   if (kind === 'smtp') {
     return { host: d.host.trim(), port: Number.parseInt(d.port, 10) || 0, secure: d.secure, from: d.from.trim() }
+  }
+  if (kind === 'email_api') {
+    const out: Record<string, unknown> = { provider: d.provider || 'sendgrid', from: d.from.trim() }
+    if (d.fromName.trim()) out.fromName = d.fromName.trim()
+    if (d.provider === 'mailgun') {
+      out.domain = d.domain.trim()
+      out.region = d.region === 'eu' ? 'eu' : 'us'
+    }
+    if (d.provider === 'postmark' && d.messageStream.trim()) out.messageStream = d.messageStream.trim()
+    return out
   }
   if (kind === 'twilio_sms' || kind === 'twilio_whatsapp') return { from: d.from.trim() }
   if (kind === 'twilio_voice') {
@@ -304,6 +400,27 @@ function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
     if (d.allowPrivate) out.allowPrivate = true
     return out
   }
+  if (kind === 'square') {
+    const out: Record<string, unknown> = { locationId: d.locationId.trim(), environment: d.environment === 'sandbox' ? 'sandbox' : 'production' }
+    if (d.notificationUrl.trim()) out.notificationUrl = d.notificationUrl.trim()
+    return out
+  }
+  if (kind === 'quickbooks' || kind === 'xero' || kind === 'myob') {
+    const out: Record<string, unknown> = {}
+    if (kind === 'quickbooks') out.realmId = d.realmId.trim()
+    if (kind === 'xero') out.tenantId = d.tenantId.trim()
+    if (kind === 'myob') out.companyFileId = d.companyFileId.trim()
+    if (d.salesAccountCode.trim()) out.salesAccountCode = d.salesAccountCode.trim()
+    return out
+  }
+  if (kind === 'shopify') return { shopDomain: d.shopDomain.trim() }
+  if (kind === 'woocommerce') {
+    const out: Record<string, unknown> = { storeUrl: d.storeUrl.trim() }
+    if (d.allowPrivate) out.allowPrivate = true
+    return out
+  }
+  if (kind === 'wix') return { siteId: d.siteId.trim() }
+  if (kind === 'mailchimp') return { serverPrefix: d.serverPrefix.trim(), listId: d.listId.trim() }
   return {} // stripe — config only holds secrets
 }
 
@@ -319,8 +436,12 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
   } else if (kind === 'twilio_sms' || kind === 'twilio_whatsapp' || kind === 'twilio_voice') {
     if (d.accountSid.trim()) out.accountSid = d.accountSid.trim()
     if (d.authToken) out.authToken = d.authToken
+  } else if (kind === 'email_api') {
+    if (d.apiKey) out.apiKey = d.apiKey
   } else if (kind === 'sms_gateway') {
     if (d.apiKey) out.apiKey = d.apiKey
+    if (d.apiSecret) out.apiSecret = d.apiSecret
+    if (d.accountId.trim()) out.accountId = d.accountId.trim()
     if (d.username.trim()) out.username = d.username.trim()
     if (d.passwordGw) out.password = d.passwordGw
     if (d.token) out.token = d.token
@@ -330,6 +451,20 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
   } else if (kind === 'stripe') {
     if (d.secretKey) out.secretKey = d.secretKey
     if (d.webhookSecret) out.webhookSecret = d.webhookSecret
+  } else if (kind === 'square') {
+    if (d.accessToken) out.accessToken = d.accessToken
+    if (d.webhookSignatureKey) out.webhookSignatureKey = d.webhookSignatureKey
+  } else if (kind === 'quickbooks' || kind === 'xero' || kind === 'myob') {
+    if (d.clientId.trim()) out.clientId = d.clientId.trim()
+    if (d.clientSecret) out.clientSecret = d.clientSecret
+    if (d.refreshToken) out.refreshToken = d.refreshToken
+  } else if (kind === 'shopify') {
+    if (d.accessToken) out.accessToken = d.accessToken
+  } else if (kind === 'woocommerce') {
+    if (d.consumerKey.trim()) out.consumerKey = d.consumerKey.trim()
+    if (d.consumerSecret) out.consumerSecret = d.consumerSecret
+  } else if (kind === 'wix' || kind === 'mailchimp') {
+    if (d.apiKey) out.apiKey = d.apiKey
   } else if (kind === 'google_calendar' || kind === 'microsoft_calendar') {
     if (d.clientId.trim()) out.clientId = d.clientId.trim()
     if (d.clientSecret) out.clientSecret = d.clientSecret
@@ -513,21 +648,29 @@ function ConnectorCard({
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<IntegrationTestResult | null>(null)
   const [toggling, setToggling] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const canSync = (COMMERCE_KINDS as readonly string[]).includes(kind)
 
   /** Snapshot the row's config at open time — later refreshes must not reset the dialog mid-edit. */
   const openDialog = () => {
     const c = row?.config ?? {}
     setInitialCfg({
       host: str(c.host), port: c.port != null ? String(c.port) : '', secure: c.secure === true,
-      from: str(c.from), url: str(c.url), username: str(c.username),
+      from: str(c.from), fromName: str(c.fromName), domain: str(c.domain),
+      region: str(c.region) || 'us', messageStream: str(c.messageStream),
+      url: str(c.url), username: str(c.username),
       language: str(c.language), voiceName: str(c.voiceName),
       transferNumber: str(c.transferNumber), publicBaseUrl: str(c.publicBaseUrl),
-      provider: str(c.provider) || 'textbee', baseUrl: str(c.baseUrl), deviceId: str(c.deviceId),
+      provider: str(c.provider) || (kind === 'email_api' ? 'sendgrid' : 'textbee'), baseUrl: str(c.baseUrl), deviceId: str(c.deviceId),
       method: str(c.method) || 'POST', authHeaderName: str(c.authHeaderName),
       bodyTemplate: str(c.bodyTemplate), testRecipient: str(c.testRecipient),
       allowPrivate: c.allowPrivate === true,
       calendarId: str(c.calendarId) || 'primary', redirectUri: str(c.redirectUri),
       tenant: str(c.tenant) || 'common', calendarEmail: str(c.calendarEmail),
+      locationId: str(c.locationId), environment: str(c.environment) || 'production', notificationUrl: str(c.notificationUrl),
+      realmId: str(c.realmId), tenantId: str(c.tenantId), companyFileId: str(c.companyFileId), salesAccountCode: str(c.salesAccountCode),
+      shopDomain: str(c.shopDomain), storeUrl: str(c.storeUrl), siteId: str(c.siteId),
+      serverPrefix: str(c.serverPrefix), listId: str(c.listId),
     })
     setDlgOpen(true)
   }
@@ -560,6 +703,23 @@ function ConnectorCard({
       toast({ title: next ? 'Could not enable' : 'Could not disable', description: friendlyApiErrorLocal(err, 'Update failed'), variant: 'destructive' })
     } finally {
       setToggling(false)
+    }
+  }
+
+  const runSync = async () => {
+    if (!row) return
+    setSyncing(true)
+    try {
+      const r = await api.post<{ label: string; fetched: number; created: number; updated: number; skipped: number }>(`/api/integrations/${row.id}/sync`)
+      toast({
+        title: `${r.label}: ${r.fetched} contacts fetched`,
+        description: `${r.created} created · ${r.updated} updated${r.skipped ? ` · ${r.skipped} skipped (no email/phone)` : ''}`,
+      })
+      await onChanged()
+    } catch (err) {
+      toast({ title: 'Customer sync failed', description: friendlyApiErrorLocal(err, 'Sync failed'), variant: 'destructive' })
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -609,6 +769,30 @@ function ConnectorCard({
                 {str(row.config.host) ? `${str(row.config.host)}${row.config.port ? `:${str(row.config.port)}` : ''} · from ${str(row.config.from) || '—'}` : 'No server configured yet.'}
               </p>
             )}
+            {kind === 'email_api' && (
+              <p className="text-xs text-muted-foreground break-all">
+                {str(row.config.provider) || 'no provider selected'} · from {str(row.config.from) || 'not set'}
+              </p>
+            )}
+            {kind === 'square' && (
+              <p className="text-xs text-muted-foreground break-all">
+                {str(row.config.environment) || 'production'} · location {str(row.config.locationId) || 'not set'}
+              </p>
+            )}
+            {(kind === 'quickbooks' || kind === 'xero' || kind === 'myob') && (
+              <p className="text-xs text-muted-foreground break-all">
+                {kind === 'quickbooks'
+                  ? `Realm ${str(row.config.realmId) || 'not set'}`
+                  : kind === 'xero'
+                    ? `Tenant ${str(row.config.tenantId) || 'not set'}`
+                    : `Company file ${str(row.config.companyFileId) || 'not set'}`}
+                {str(row.config.salesAccountCode) ? ` · sales account ${str(row.config.salesAccountCode)}` : ''}
+              </p>
+            )}
+            {kind === 'shopify' && <p className="text-xs text-muted-foreground break-all">{str(row.config.shopDomain) || 'No shop domain configured yet.'}</p>}
+            {kind === 'woocommerce' && <p className="text-xs text-muted-foreground break-all">{str(row.config.storeUrl) || 'No store URL configured yet.'}</p>}
+            {kind === 'wix' && <p className="text-xs text-muted-foreground break-all">Site {str(row.config.siteId) || 'not set'}</p>}
+            {kind === 'mailchimp' && <p className="text-xs text-muted-foreground break-all">{str(row.config.serverPrefix) || 'no server prefix'} · list {str(row.config.listId) || 'not set'}</p>}
             {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
               <p className="text-xs text-muted-foreground break-all">Sender: {str(row.config.from) || 'not set'}</p>
             )}
@@ -710,6 +894,18 @@ function ConnectorCard({
             >
               {testing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
               Test connection
+            </Button>
+          )}
+          {row && canSync && (
+            <Button
+              variant="outline" className="min-h-[44px]"
+              onClick={() => void runSync()}
+              disabled={syncing || !canManage || !row.enabled || !row.configured}
+              title={!row.enabled || !row.configured ? 'Enable the integration and save credentials first' : 'Pull contacts from the provider'}
+              aria-label={`Sync customers from ${meta.title}`}
+            >
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Users className="h-4 w-4" aria-hidden />}
+              Sync customers
             </Button>
           )}
         </div>
@@ -839,6 +1035,59 @@ function ConfigureDialog({
           }}
         >
           {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+
+          {kind === 'email_api' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-emailprovider`}>Provider</Label>
+                <select
+                  id={`${idBase}-emailprovider`}
+                  value={cfg.provider}
+                  onChange={(e) => setCfg((s) => ({ ...s, provider: e.target.value }))}
+                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  disabled={busy || !canManage}
+                >
+                  <option value="sendgrid">SendGrid</option>
+                  <option value="mailgun">Mailgun</option>
+                  <option value="postmark">Postmark</option>
+                  <option value="resend">Resend</option>
+                  <option value="brevo">Brevo</option>
+                </select>
+                <p className="text-xs text-muted-foreground">The API key goes in Credentials below. A 2xx response means the provider accepted the email — delivery receipts depend on the provider.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-emailfrom`}>From address</Label>
+                  <Input id={`${idBase}-emailfrom`} type="email" value={cfg.from} onChange={(e) => setCfg((s) => ({ ...s, from: e.target.value }))} placeholder="invoices@yourdomain.com" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-fromname`}>From name (optional)</Label>
+                  <Input id={`${idBase}-fromname`} value={cfg.fromName} onChange={(e) => setCfg((s) => ({ ...s, fromName: e.target.value }))} placeholder="Your Business" className="min-h-[44px]" />
+                </div>
+              </div>
+              {cfg.provider === 'mailgun' && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-domain`}>Sending domain</Label>
+                    <Input id={`${idBase}-domain`} value={cfg.domain} onChange={(e) => setCfg((s) => ({ ...s, domain: e.target.value }))} placeholder="mg.yourdomain.com" className="min-h-[44px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-region`}>Region</Label>
+                    <select id={`${idBase}-region`} value={cfg.region} onChange={(e) => setCfg((s) => ({ ...s, region: e.target.value }))} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                      <option value="us">US (api.mailgun.net)</option>
+                      <option value="eu">EU (api.eu.mailgun.net)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+              {cfg.provider === 'postmark' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-stream`}>Message stream (optional)</Label>
+                  <Input id={`${idBase}-stream`} value={cfg.messageStream} onChange={(e) => setCfg((s) => ({ ...s, messageStream: e.target.value }))} placeholder="outbound" className="min-h-[44px]" />
+                </div>
+              )}
+            </div>
+          )}
 
           {kind === 'smtp' && (
             <div className="space-y-3">
@@ -987,6 +1236,110 @@ function ConfigureDialog({
             </div>
           )}
 
+          {kind === 'square' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-location`}>Location ID</Label>
+                  <Input id={`${idBase}-location`} value={cfg.locationId} onChange={(e) => setCfg((s) => ({ ...s, locationId: e.target.value }))} placeholder="L…" autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-sqenv`}>Environment</Label>
+                  <select id={`${idBase}-sqenv`} value={cfg.environment} onChange={(e) => setCfg((s) => ({ ...s, environment: e.target.value }))} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="production">Production</option>
+                    <option value="sandbox">Sandbox</option>
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-sqnotify`}>Webhook notification URL (optional)</Label>
+                <Input id={`${idBase}-sqnotify`} type="url" value={cfg.notificationUrl} onChange={(e) => setCfg((s) => ({ ...s, notificationUrl: e.target.value }))} placeholder={`${origin}/api/square/webhook`} autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">Must match the URL configured in Square exactly (used for signature verification).</p>
+              </div>
+              <div className="rounded-md border p-3 space-y-2">
+                <p className="text-sm font-medium">Square webhook endpoint</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="text-xs bg-muted rounded px-2 py-1.5 break-all flex-1 min-w-0">{origin ? `${origin}/api/square/webhook` : '/api/square/webhook'}</code>
+                  <CopyButton value={origin ? `${origin}/api/square/webhook` : ''} label="Copy Square webhook URL" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {(kind === 'quickbooks' || kind === 'xero' || kind === 'myob') && (
+            <div className="space-y-3">
+              {kind === 'quickbooks' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-realm`}>Company realm ID</Label>
+                  <Input id={`${idBase}-realm`} value={cfg.realmId} onChange={(e) => setCfg((s) => ({ ...s, realmId: e.target.value }))} placeholder="123456789012345" autoComplete="off" className="min-h-[44px]" />
+                </div>
+              )}
+              {kind === 'xero' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-tenant`}>Tenant ID</Label>
+                  <Input id={`${idBase}-tenant`} value={cfg.tenantId} onChange={(e) => setCfg((s) => ({ ...s, tenantId: e.target.value }))} placeholder="Xero tenant GUID" autoComplete="off" className="min-h-[44px]" />
+                </div>
+              )}
+              {kind === 'myob' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-companyfile`}>Company file ID</Label>
+                  <Input id={`${idBase}-companyfile`} value={cfg.companyFileId} onChange={(e) => setCfg((s) => ({ ...s, companyFileId: e.target.value }))} placeholder="MYOB company file GUID" autoComplete="off" className="min-h-[44px]" />
+                </div>
+              )}
+              {kind !== 'quickbooks' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-accountcode`}>Sales account code</Label>
+                  <Input id={`${idBase}-accountcode`} value={cfg.salesAccountCode} onChange={(e) => setCfg((s) => ({ ...s, salesAccountCode: e.target.value }))} placeholder="e.g. 200" autoComplete="off" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">Required by {kind === 'xero' ? 'Xero' : 'MYOB'} for invoice line items.</p>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">Uses a refresh-token OAuth2 connection. Access tokens are refreshed automatically and stored encrypted.</p>
+            </div>
+          )}
+
+          {kind === 'shopify' && (
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idBase}-shopdomain`}>Shop domain</Label>
+              <Input id={`${idBase}-shopdomain`} value={cfg.shopDomain} onChange={(e) => setCfg((s) => ({ ...s, shopDomain: e.target.value }))} placeholder="my-store.myshopify.com" autoComplete="off" className="min-h-[44px]" />
+            </div>
+          )}
+
+          {kind === 'woocommerce' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-storeurl`}>Store URL</Label>
+                <Input id={`${idBase}-storeurl`} type="url" value={cfg.storeUrl} onChange={(e) => setCfg((s) => ({ ...s, storeUrl: e.target.value }))} placeholder="https://shop.example.com" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+                <div>
+                  <Label htmlFor={`${idBase}-wooprivate`}>Allow private/local store</Label>
+                  <p className="text-xs text-muted-foreground">Off blocks loopback/LAN URLs (SSRF protection). Enable only for a trusted self-hosted store.</p>
+                </div>
+                <Switch id={`${idBase}-wooprivate`} checked={cfg.allowPrivate} onCheckedChange={(v) => setCfg((s) => ({ ...s, allowPrivate: v }))} aria-label="Allow private WooCommerce store" />
+              </div>
+            </div>
+          )}
+
+          {kind === 'wix' && (
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idBase}-siteid`}>Wix site ID</Label>
+              <Input id={`${idBase}-siteid`} value={cfg.siteId} onChange={(e) => setCfg((s) => ({ ...s, siteId: e.target.value }))} placeholder="Wix site GUID" autoComplete="off" className="min-h-[44px]" />
+            </div>
+          )}
+
+          {kind === 'mailchimp' && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-dc`}>Server prefix</Label>
+                <Input id={`${idBase}-dc`} value={cfg.serverPrefix} onChange={(e) => setCfg((s) => ({ ...s, serverPrefix: e.target.value }))} placeholder="us21" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-listid`}>Audience (list) ID</Label>
+                <Input id={`${idBase}-listid`} value={cfg.listId} onChange={(e) => setCfg((s) => ({ ...s, listId: e.target.value }))} placeholder="abc123def" autoComplete="off" className="min-h-[44px]" />
+              </div>
+            </div>
+          )}
+
           {kind === 'sms_gateway' && (
             <div className="space-y-3">
               <div className="space-y-1.5">
@@ -1001,10 +1354,14 @@ function ConfigureDialog({
                   <option value="textbee">TextBee (Android, Apache-2.0)</option>
                   <option value="httpsms">httpSMS (Android, MIT)</option>
                   <option value="android_sms_gateway">Android SMS Gateway Server (Apache-2.0, self-hosted or cloud)</option>
+                  <option value="telnyx">Telnyx (global carrier API)</option>
+                  <option value="vonage">Vonage / Nexmo</option>
+                  <option value="messagebird">MessageBird (Bird)</option>
+                  <option value="plivo">Plivo</option>
                   <option value="generic_http">Custom HTTP gateway / bridge (incl. iOS, Gammu, Kannel, SMPP shims)</option>
                 </select>
                 <p className="text-xs text-muted-foreground">
-                  TextBee/httpSMS use your Android phone; Android SMS Gateway also lets you self-host the server. Custom HTTP gateway covers anything with a documented REST endpoint.
+                  TextBee/httpSMS use your Android phone; Android SMS Gateway also lets you self-host the server. Telnyx, Vonage, MessageBird and Plivo are carrier APIs with their own credentials below. Custom HTTP covers anything with a documented REST endpoint.
                 </p>
               </div>
               <div className="space-y-1.5">
@@ -1077,6 +1434,73 @@ function ConfigureDialog({
               </>
             )}
 
+            {kind === 'email_api' && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-emailkey`}>API key</Label>
+                <Input id={`${idBase}-emailkey`} type="password" value={sec.apiKey} onChange={(e) => setSec((s) => ({ ...s, apiKey: e.target.value }))} placeholder={cfg.provider === 'sendgrid' ? 'SG.…' : cfg.provider === 'resend' ? 're_…' : 'provider API key'} autoComplete="new-password" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">Stored encrypted and never returned. The read-only connection test verifies it with the provider.</p>
+              </div>
+            )}
+
+            {kind === 'sms_gateway' && (
+              <>
+                {(cfg.provider === 'textbee' || cfg.provider === 'httpsms' || cfg.provider === 'telnyx' || cfg.provider === 'messagebird') && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-gwkey`}>API key</Label>
+                    <Input id={`${idBase}-gwkey`} type="password" value={sec.apiKey} onChange={(e) => setSec((s) => ({ ...s, apiKey: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                  </div>
+                )}
+                {cfg.provider === 'vonage' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-vkey`}>API key</Label>
+                      <Input id={`${idBase}-vkey`} value={sec.apiKey} onChange={(e) => setSec((s) => ({ ...s, apiKey: e.target.value }))} autoComplete="off" className="min-h-[44px]" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-vsecret`}>API secret</Label>
+                      <Input id={`${idBase}-vsecret`} type="password" value={sec.apiSecret} onChange={(e) => setSec((s) => ({ ...s, apiSecret: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                    </div>
+                  </>
+                )}
+                {cfg.provider === 'plivo' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-plivoid`}>Auth ID</Label>
+                      <Input id={`${idBase}-plivoid`} value={sec.accountId} onChange={(e) => setSec((s) => ({ ...s, accountId: e.target.value }))} placeholder="MA…" autoComplete="off" className="min-h-[44px]" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-plivotoken`}>Auth token</Label>
+                      <Input id={`${idBase}-plivotoken`} type="password" value={sec.apiSecret} onChange={(e) => setSec((s) => ({ ...s, apiSecret: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                    </div>
+                  </>
+                )}
+                {cfg.provider === 'android_sms_gateway' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-gwuser`}>Username (optional, basic auth)</Label>
+                      <Input id={`${idBase}-gwuser`} value={sec.username} onChange={(e) => setSec((s) => ({ ...s, username: e.target.value }))} autoComplete="off" className="min-h-[44px]" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-gwpass`}>Password (optional, basic auth)</Label>
+                      <Input id={`${idBase}-gwpass`} type="password" value={sec.passwordGw} onChange={(e) => setSec((s) => ({ ...s, passwordGw: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-gwtoken`}>Bearer token (optional)</Label>
+                      <Input id={`${idBase}-gwtoken`} type="password" value={sec.token} onChange={(e) => setSec((s) => ({ ...s, token: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                    </div>
+                    <p className="text-xs text-muted-foreground">A local server may run without credentials — the connection test reports the truth.</p>
+                  </>
+                )}
+                {cfg.provider === 'generic_http' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-gwauth`}>Auth header value (optional)</Label>
+                    <Input id={`${idBase}-gwauth`} type="password" value={sec.authValue} onChange={(e) => setSec((s) => ({ ...s, authValue: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                    <p className="text-xs text-muted-foreground">Sent in the header named above (e.g. X-Api-Key).</p>
+                  </div>
+                )}
+              </>
+            )}
+
             {(kind === 'twilio_sms' || kind === 'twilio_whatsapp' || kind === 'twilio_voice') && (
               <>
                 <div className="space-y-1.5">
@@ -1124,6 +1548,65 @@ function ConfigureDialog({
                   <p className="text-xs text-muted-foreground">Set it to verify Stripe callbacks against the endpoint shown above.</p>
                 </div>
               </>
+            )}
+
+            {kind === 'square' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-sqtoken`}>Access token</Label>
+                  <Input id={`${idBase}-sqtoken`} type="password" value={sec.accessToken} onChange={(e) => setSec((s) => ({ ...s, accessToken: e.target.value }))} placeholder="EAAA…" autoComplete="new-password" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-sqsig`}>Webhook signature key (optional)</Label>
+                  <Input id={`${idBase}-sqsig`} type="password" value={sec.webhookSignatureKey} onChange={(e) => setSec((s) => ({ ...s, webhookSignatureKey: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">From the Square webhook subscription — required to verify and record callbacks.</p>
+                </div>
+              </>
+            )}
+
+            {(kind === 'quickbooks' || kind === 'xero' || kind === 'myob') && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-accclientid`}>OAuth client ID</Label>
+                  <Input id={`${idBase}-accclientid`} value={sec.clientId} onChange={(e) => setSec((s) => ({ ...s, clientId: e.target.value }))} autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-accclientsecret`}>OAuth client secret</Label>
+                  <Input id={`${idBase}-accclientsecret`} type="password" value={sec.clientSecret} onChange={(e) => setSec((s) => ({ ...s, clientSecret: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-accrefresh`}>Refresh token</Label>
+                  <Input id={`${idBase}-accrefresh`} type="password" value={sec.refreshToken} onChange={(e) => setSec((s) => ({ ...s, refreshToken: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">Leave empty to keep the stored refresh token. Access tokens rotate automatically on first use.</p>
+                </div>
+              </>
+            )}
+
+            {kind === 'shopify' && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-shoptoken`}>Admin API access token</Label>
+                <Input id={`${idBase}-shoptoken`} type="password" value={sec.accessToken} onChange={(e) => setSec((s) => ({ ...s, accessToken: e.target.value }))} placeholder="shpat_…" autoComplete="new-password" className="min-h-[44px]" />
+              </div>
+            )}
+
+            {kind === 'woocommerce' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-woock`}>Consumer key</Label>
+                  <Input id={`${idBase}-woock`} value={sec.consumerKey} onChange={(e) => setSec((s) => ({ ...s, consumerKey: e.target.value }))} placeholder="ck_…" autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-woocs`}>Consumer secret</Label>
+                  <Input id={`${idBase}-woocs`} type="password" value={sec.consumerSecret} onChange={(e) => setSec((s) => ({ ...s, consumerSecret: e.target.value }))} placeholder="cs_…" autoComplete="new-password" className="min-h-[44px]" />
+                </div>
+              </>
+            )}
+
+            {(kind === 'wix' || kind === 'mailchimp') && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-apikey`}>{kind === 'wix' ? 'Wix API key' : 'Mailchimp API key'}</Label>
+                <Input id={`${idBase}-apikey`} type="password" value={sec.apiKey} onChange={(e) => setSec((s) => ({ ...s, apiKey: e.target.value }))} placeholder={kind === 'wix' ? 'IST.…' : '…-us21'} autoComplete="new-password" className="min-h-[44px]" />
+              </div>
             )}
 
             {kind === 'webhook_out' && (

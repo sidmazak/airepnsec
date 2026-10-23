@@ -26,7 +26,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
-  BadgeCheck, Ban, CheckCircle2, Copy, ExternalLink, FlaskConical, Link2, Loader2, Mail, Plus, RefreshCw,
+  BadgeCheck, Ban, BookOpen, CheckCircle2, Copy, ExternalLink, FlaskConical, Link2, Loader2, Mail, Plus, RefreshCw,
   Receipt, ShieldAlert, Trash2, Wallet,
 } from 'lucide-react'
 
@@ -304,6 +304,10 @@ function InvoiceDetailDialog({
   const [linkBusy, setLinkBusy] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkResult, setLinkResult] = useState<{ url: string; id: string } | null>(null)
+  const [pushOpen, setPushOpen] = useState(false)
+  const [pushKind, setPushKind] = useState('quickbooks')
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushResult, setPushResult] = useState<{ label: string; number: string; externalId: string } | null>(null)
 
   const load = useCallback(async (id: string) => {
     setLoading(true)
@@ -322,6 +326,7 @@ function InvoiceDetailDialog({
     if (invoiceId) {
       setInvoice(null); setRecordOpen(false); setSimulateOpen(false); setVoidOpen(false); void load(invoiceId)
       setSendLink(''); setSendLinkError(''); setLinkOpen(false); setLinkResult(null)
+      setPushOpen(false); setPushResult(null)
     }
   }, [invoiceId, load])
 
@@ -358,6 +363,21 @@ function InvoiceDetailDialog({
       toast({ title: 'Could not send invoice', description: friendlyError(err, 'Send failed'), variant: 'destructive' })
     } finally {
       setSendBusy(false)
+    }
+  }
+
+  const pushToAccounting = async () => {
+    if (!invoice) return
+    setPushBusy(true)
+    setPushResult(null)
+    try {
+      const r = await api.post<{ label: string; number: string; externalId: string }>(`/api/invoices/${invoice.id}/push-accounting`, { kind: pushKind })
+      setPushResult(r)
+      toast({ title: `Pushed to ${r.label}`, description: `Provider document ${r.number} created.` })
+    } catch (err) {
+      toast({ title: 'Accounting push failed', description: friendlyError(err, 'Push failed'), variant: 'destructive' })
+    } finally {
+      setPushBusy(false)
     }
   }
 
@@ -530,9 +550,18 @@ function InvoiceDetailDialog({
                   className="min-h-[44px]"
                   disabled={!isAdmin || linkBusy || invoice.status === 'void'}
                   onClick={() => void createLink()}
-                  title={isAdmin ? 'Create a Stripe payment link for the outstanding balance' : 'Owner or admin only'}
+                  title={isAdmin ? 'Create a Stripe or Square payment link for the outstanding balance' : 'Owner or admin only'}
                 >
                   {linkBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Link2 className="h-4 w-4" aria-hidden />} Payment link
+                </Button>
+                <Button
+                  variant="outline"
+                  className="min-h-[44px]"
+                  disabled={!isAdmin || invoice.status === 'void' || invoice.status === 'draft'}
+                  onClick={() => setPushOpen(true)}
+                  title={isAdmin ? 'Push this invoice to QuickBooks, Xero or MYOB' : 'Owner or admin only'}
+                >
+                  <BookOpen className="h-4 w-4" aria-hidden /> Push to accounting
                 </Button>
                 {!isAdmin && (
                   <p className="text-xs text-muted-foreground w-full">Payment recording, sending, payment links, webhook simulation and voiding are restricted to owner/admin accounts.</p>
@@ -547,6 +576,42 @@ function InvoiceDetailDialog({
         <>
           <RecordPaymentDialog invoice={recordOpen ? invoice : null} onClose={() => setRecordOpen(false)} onChanged={refreshDetail} />
           <SimulateWebhookDialog invoice={simulateOpen ? invoice : null} onClose={() => setSimulateOpen(false)} onChanged={refreshDetail} />
+
+          <Dialog open={pushOpen} onOpenChange={(open) => { setPushOpen(open); if (!open) setPushResult(null) }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Push invoice {invoice.number} to accounting</DialogTitle>
+                <DialogDescription>
+                  The customer is matched or created in the provider, then the invoice is posted with this number. A prior push is refused to avoid duplicates.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="push-accounting-kind">Accounting provider</Label>
+                  <Select value={pushKind} onValueChange={setPushKind}>
+                    <SelectTrigger id="push-accounting-kind" className="min-h-[44px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="quickbooks">QuickBooks Online</SelectItem>
+                      <SelectItem value="xero">Xero</SelectItem>
+                      <SelectItem value="myob">MYOB AccountRight</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {pushResult && (
+                  <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900" role="status">
+                    <CheckCircle2 className="h-4 w-4" aria-hidden />
+                    <AlertDescription>{pushResult.label} document {pushResult.number} created (id {pushResult.externalId}).</AlertDescription>
+                  </Alert>
+                )}
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setPushOpen(false)}>Close</Button>
+                <Button type="button" className="min-h-[44px]" disabled={pushBusy} onClick={() => void pushToAccounting()}>
+                  {pushBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <BookOpen className="h-4 w-4" aria-hidden />} Push invoice
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
             <DialogContent className="sm:max-w-md">

@@ -9,17 +9,38 @@ import { assertOutboundUrl } from '@/lib/security/outbound'
  * NEVER leaves the server — error messages are sanitized against secret values.
  */
 
-export type IntegrationKind = 'smtp' | 'twilio_sms' | 'twilio_whatsapp' | 'twilio_voice' | 'sms_gateway' | 'caldav' | 'google_calendar' | 'microsoft_calendar' | 'stripe' | 'webhook_out'
+export type IntegrationKind =
+  | 'smtp'
+  | 'email_api'
+  | 'twilio_sms'
+  | 'twilio_whatsapp'
+  | 'twilio_voice'
+  | 'sms_gateway'
+  | 'caldav'
+  | 'google_calendar'
+  | 'microsoft_calendar'
+  | 'stripe'
+  | 'square'
+  | 'quickbooks'
+  | 'xero'
+  | 'myob'
+  | 'shopify'
+  | 'woocommerce'
+  | 'wix'
+  | 'mailchimp'
+  | 'webhook_out'
 
 export const INTEGRATION_KINDS: IntegrationKind[] = [
-  'smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
-  'google_calendar', 'microsoft_calendar', 'stripe', 'webhook_out',
+  'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
+  'google_calendar', 'microsoft_calendar', 'stripe', 'square', 'quickbooks', 'xero', 'myob',
+  'shopify', 'woocommerce', 'wix', 'mailchimp', 'webhook_out',
 ]
 
 /** Kinds that allow only one row per org (enforced at create time). */
 export const SINGLETON_KINDS: IntegrationKind[] = [
-  'smtp', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
-  'google_calendar', 'microsoft_calendar', 'stripe',
+  'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
+  'google_calendar', 'microsoft_calendar', 'stripe', 'square', 'quickbooks', 'xero', 'myob',
+  'shopify', 'woocommerce', 'wix', 'mailchimp',
 ]
 
 export function isIntegrationKind(kind: string): kind is IntegrationKind {
@@ -200,10 +221,17 @@ async function testWebhookOut(orgId: string, integration: { configJson: string; 
   }
 }
 
-export async function testIntegration(orgId: string, integration: { kind: string; configJson: string; secretsEnc: string }): Promise<TestResult> {
+export async function testIntegration(
+  orgId: string,
+  integration: { id?: string; orgId?: string; kind: string; configJson: string; secretsEnc: string }
+): Promise<TestResult> {
   switch (integration.kind) {
     case 'smtp':
       return testSmtp(integration)
+    case 'email_api': {
+      const { testEmailApi } = await import('@/lib/integrations/emailApi')
+      return testEmailApi(str(integrationConfig(integration), 'provider'), integrationConfig(integration), decryptSecrets(integration))
+    }
     case 'twilio_sms':
     case 'twilio_whatsapp':
     case 'twilio_voice':
@@ -228,6 +256,29 @@ export async function testIntegration(orgId: string, integration: { kind: string
     }
     case 'stripe':
       return testStripe(integration)
+    case 'square': {
+      const { testSquare } = await import('@/lib/integrations/square')
+      return testSquare(integration)
+    }
+    case 'quickbooks':
+    case 'xero':
+    case 'myob': {
+      const { testAccounting } = await import('@/lib/integrations/accounting')
+      return testAccounting(integration.kind, {
+        id: integration.id ?? '',
+        orgId: integration.orgId ?? orgId,
+        kind: integration.kind,
+        configJson: integration.configJson,
+        secretsEnc: integration.secretsEnc,
+      })
+    }
+    case 'shopify':
+    case 'woocommerce':
+    case 'wix':
+    case 'mailchimp': {
+      const { testCommerce } = await import('@/lib/integrations/commerce')
+      return testCommerce(integration.kind, integration)
+    }
     case 'webhook_out':
       return testWebhookOut(orgId, integration)
     default:
@@ -267,6 +318,24 @@ export async function sendEmail(integration: { kind: string; configJson: string;
       ...(input.html ? { html: input.html } : {}),
     })
     return { messageId: info.messageId ?? '' }
+  } catch (err) {
+    throw new Error(sanitizeMessage(err instanceof Error ? err.message : String(err), integration))
+  }
+}
+
+/** Send a real email through a native provider API (email_api integration). */
+export async function sendEmailViaApi(
+  integration: { kind: string; configJson: string; secretsEnc: string },
+  input: EmailInput
+): Promise<{ messageId: string }> {
+  if (integration.kind !== 'email_api') throw new Error('sendEmailViaApi requires an email_api integration')
+  const config = integrationConfig(integration)
+  const secrets = decryptSecrets(integration)
+  const provider = str(config, 'provider')
+  try {
+    const { sendViaEmailApi } = await import('@/lib/integrations/emailApi')
+    const result = await sendViaEmailApi(provider, config, secrets, input)
+    return { messageId: result.messageId }
   } catch (err) {
     throw new Error(sanitizeMessage(err instanceof Error ? err.message : String(err), integration))
   }

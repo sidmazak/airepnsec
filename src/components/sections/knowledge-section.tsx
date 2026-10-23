@@ -21,8 +21,8 @@ import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import {
-  BookMarked, CheckCircle2, ChevronDown, ChevronUp, Database, FileQuestion, Loader2,
-  Pencil, Plus, RefreshCw, ScanEye, Search, ShieldAlert, Trash2,
+  BookMarked, CheckCircle2, ChevronDown, ChevronUp, Database, FileQuestion, FileUp, Globe2, Loader2,
+  Pencil, Plus, RefreshCw, ScanEye, Search, ShieldAlert, Sparkles, Trash2,
 } from 'lucide-react'
 
 type DocForm = {
@@ -79,6 +79,39 @@ export function KnowledgeSection() {
   const [testing, setTesting] = useState(false)
   const [hits, setHits] = useState<Hit[] | null>(null)
   const [testError, setTestError] = useState('')
+
+  /* ---------- document import (PDF/DOCX/text/HTML) ---------- */
+  type ExtractedDoc = { title: string; text: string; format: string; pages?: number; warnings: string[] }
+  const [importOpen, setImportOpen] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importDoc, setImportDoc] = useState<ExtractedDoc | null>(null)
+  const [importTitle, setImportTitle] = useState('')
+  const [importTags, setImportTags] = useState('')
+  const [importApproved, setImportApproved] = useState(true)
+  const [importError, setImportError] = useState('')
+  const [importSaving, setImportSaving] = useState(false)
+
+  /* ---------- website import ---------- */
+  const [crawlOpen, setCrawlOpen] = useState(false)
+  const [crawlUrl, setCrawlUrl] = useState('')
+  const [crawlMaxPages, setCrawlMaxPages] = useState(15)
+  const [crawlMaxDepth, setCrawlMaxDepth] = useState(2)
+  const [crawlSameOrigin, setCrawlSameOrigin] = useState(true)
+  const [crawlUseAi, setCrawlUseAi] = useState(true)
+  const [crawlApproved, setCrawlApproved] = useState(true)
+  const [crawling, setCrawling] = useState(false)
+  const [crawlError, setCrawlError] = useState('')
+  const [crawlResult, setCrawlResult] = useState<{
+    message: string
+    created: number
+    updated: number
+    chunks: number
+    aiCleaned: number
+    aiFailures: Array<{ url: string; message: string }>
+    errors: Array<{ url: string; message: string }>
+    skipped: Array<{ url: string; reason: string }>
+  } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -154,6 +187,114 @@ export function KnowledgeSection() {
   }
 
   const openNew = () => { setForm(EMPTY_FORM); setFormOpen(true) }
+
+  const readFileBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onerror = () => reject(new Error('The file could not be read'))
+      reader.onload = () => {
+        const result = String(reader.result ?? '')
+        const comma = result.indexOf(',')
+        resolve(comma >= 0 ? result.slice(comma + 1) : result)
+      }
+      reader.readAsDataURL(file)
+    })
+
+  const resetImport = () => {
+    setImportFile(null)
+    setImportDoc(null)
+    setImportTitle('')
+    setImportTags('')
+    setImportApproved(true)
+    setImportError('')
+    setImportBusy(false)
+    setImportSaving(false)
+  }
+
+  const pickImportFile = async (file: File | null) => {
+    setImportFile(file)
+    setImportDoc(null)
+    setImportError('')
+    if (!file) return
+    if (file.size > 25 * 1024 * 1024) {
+      setImportError('The file is larger than the 25 MB upload limit.')
+      return
+    }
+    setImportBusy(true)
+    try {
+      const base64 = await readFileBase64(file)
+      const d = await api.post<{ document: ExtractedDoc }>('/api/knowledge/extract', {
+        filename: file.name,
+        mimeType: file.type || undefined,
+        base64,
+      })
+      setImportDoc(d.document)
+      setImportTitle(d.document.title)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'The file could not be read')
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  const saveImport = async () => {
+    if (!importDoc) return
+    setImportSaving(true)
+    setImportError('')
+    try {
+      const tags = importTags.split(',').map((t) => t.trim()).filter(Boolean)
+      await api.post('/api/knowledge', {
+        title: importTitle.trim() || importDoc.title,
+        content: importDoc.text,
+        approved: importApproved,
+        tags,
+        source: 'file',
+      })
+      toast({
+        title: 'Document imported',
+        description: importApproved ? 'Indexed and available to the AI receptionist.' : 'Saved as a draft (not approved yet).',
+      })
+      setImportOpen(false)
+      resetImport()
+      await load()
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'The document could not be saved')
+    } finally {
+      setImportSaving(false)
+    }
+  }
+
+  const runCrawl = async () => {
+    setCrawling(true)
+    setCrawlError('')
+    setCrawlResult(null)
+    try {
+      const d = await api.post<{
+        message: string
+        created: number
+        updated: number
+        chunks: number
+        aiCleaned: number
+        aiFailures: Array<{ url: string; message: string }>
+        errors: Array<{ url: string; message: string }>
+        skipped: Array<{ url: string; reason: string }>
+      }>('/api/knowledge/crawl', {
+        url: crawlUrl.trim(),
+        maxPages: crawlMaxPages,
+        maxDepth: crawlMaxDepth,
+        sameOrigin: crawlSameOrigin,
+        useAi: crawlUseAi,
+        approved: crawlApproved,
+      })
+      setCrawlResult(d)
+      toast({ title: 'Website imported', description: d.message })
+      await load()
+    } catch (err) {
+      setCrawlError(err instanceof Error ? err.message : 'The website could not be imported')
+    } finally {
+      setCrawling(false)
+    }
+  }
 
   const openEdit = (doc: DocRow) => {
     // The list endpoint returns only a 300-char preview. Prefill with it; if the
@@ -251,6 +392,12 @@ export function KnowledgeSection() {
             What your AI receptionist is allowed to say. {approvedCount} of {docs.length} document{docs.length === 1 ? '' : 's'} approved.
           </p>
         </div>
+        <Button variant="outline" onClick={() => { resetImport(); setImportOpen(true) }} className="min-h-[44px]" aria-label="Import a document file">
+          <FileUp className="h-4 w-4" aria-hidden /> Import file
+        </Button>
+        <Button variant="outline" onClick={() => { setCrawlOpen(true); setCrawlError(''); setCrawlResult(null) }} className="min-h-[44px]" aria-label="Import a website">
+          <Globe2 className="h-4 w-4" aria-hidden /> Import website
+        </Button>
         <Button onClick={openNew} className="min-h-[44px]" aria-label="Add a knowledge document">
           <Plus className="h-4 w-4" aria-hidden /> New document
         </Button>
@@ -606,6 +753,249 @@ export function KnowledgeSection() {
             <Button onClick={() => void saveDoc()} disabled={saving || !form.title.trim() || (!form.id && !form.content.trim())} className="min-h-[44px]">
               {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
               {form.id ? 'Save changes' : 'Add document'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* document import dialog */}
+      <Dialog open={importOpen} onOpenChange={(o) => { setImportOpen(o); if (!o) resetImport() }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Import a document</DialogTitle>
+            <DialogDescription>
+              Upload PDF, DOCX, HTML, Markdown, CSV, JSON or plain text (up to 25 MB). The text is extracted on this server — review it before saving.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="import-file">File</Label>
+              <Input
+                id="import-file"
+                type="file"
+                accept=".pdf,.docx,.html,.htm,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.log,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*,application/json"
+                onChange={(e) => void pickImportFile(e.target.files?.[0] ?? null)}
+                disabled={importBusy || importSaving}
+                className="min-h-[44px]"
+              />
+              {importFile && (
+                <p className="text-xs text-muted-foreground">
+                  {importFile.name} · {(importFile.size / 1024).toFixed(0)} KB
+                  {importDoc ? ` · ${importDoc.format.toUpperCase()}${importDoc.pages ? ` · ${importDoc.pages} pages` : ''}` : ''}
+                </p>
+              )}
+            </div>
+
+            {importBusy && (
+              <p className="text-sm text-muted-foreground flex items-center gap-2" role="status">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Extracting text…
+              </p>
+            )}
+
+            {importError && (
+              <Alert variant="destructive" role="alert">
+                <ShieldAlert className="h-4 w-4" aria-hidden />
+                <AlertDescription>{importError}</AlertDescription>
+              </Alert>
+            )}
+
+            {importDoc?.warnings.length ? (
+              <Alert className="border-amber-200 bg-amber-50 text-amber-900" role="status">
+                <ShieldAlert className="h-4 w-4" aria-hidden />
+                <AlertDescription>
+                  <ul className="list-disc pl-4 space-y-1">
+                    {importDoc.warnings.map((w) => <li key={w}>{w}</li>)}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {importDoc && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="import-title">Title</Label>
+                  <Input
+                    id="import-title"
+                    value={importTitle}
+                    onChange={(e) => setImportTitle(e.target.value)}
+                    className="min-h-[44px]"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="import-preview">Extracted text ({importDoc.text.length.toLocaleString()} characters)</Label>
+                  <Textarea
+                    id="import-preview"
+                    readOnly
+                    rows={8}
+                    value={importDoc.text.slice(0, 8_000)}
+                    className="max-h-64 overflow-y-auto font-mono text-xs"
+                    aria-label="Preview of the extracted document text"
+                  />
+                  {importDoc.text.length > 8_000 && (
+                    <p className="text-xs text-muted-foreground">Showing the first 8,000 characters. The full text is saved.</p>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="import-tags">Tags (comma separated)</Label>
+                  <Input
+                    id="import-tags"
+                    value={importTags}
+                    onChange={(e) => setImportTags(e.target.value)}
+                    placeholder="faq, policies"
+                    className="min-h-[44px]"
+                  />
+                </div>
+                <div className="flex items-start gap-3 rounded-md border p-3">
+                  <Switch
+                    id="import-approved"
+                    checked={importApproved}
+                    onCheckedChange={setImportApproved}
+                    aria-label="Approve the imported document for AI use"
+                  />
+                  <div>
+                    <Label htmlFor="import-approved" className="cursor-pointer">Approved for AI use</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">Approved documents are indexed and quoted by the AI receptionist.</p>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)} className="min-h-[44px]">Cancel</Button>
+            <Button onClick={() => void saveImport()} disabled={!importDoc || importSaving || !importTitle.trim()} className="min-h-[44px]">
+              {importSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileUp className="h-4 w-4" aria-hidden />}
+              Save document
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* website import dialog */}
+      <Dialog open={crawlOpen} onOpenChange={setCrawlOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Import a website</DialogTitle>
+            <DialogDescription>
+              Crawls a public site (robots.txt respected, same origin by default) and stores each readable page as a knowledge document.
+              Your configured AI model is used to strip navigation and marketing filler.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="crawl-url">Website URL</Label>
+              <Input
+                id="crawl-url"
+                type="url"
+                value={crawlUrl}
+                onChange={(e) => setCrawlUrl(e.target.value)}
+                placeholder="https://example.com"
+                disabled={crawling}
+                className="min-h-[44px]"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="crawl-pages">Max pages</Label>
+                <Input
+                  id="crawl-pages"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={crawlMaxPages}
+                  onChange={(e) => setCrawlMaxPages(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+                  disabled={crawling}
+                  className="min-h-[44px]"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="crawl-depth">Max link depth</Label>
+                <Input
+                  id="crawl-depth"
+                  type="number"
+                  min={0}
+                  max={4}
+                  value={crawlMaxDepth}
+                  onChange={(e) => setCrawlMaxDepth(Math.max(0, Math.min(4, Number(e.target.value) || 0)))}
+                  disabled={crawling}
+                  className="min-h-[44px]"
+                />
+              </div>
+            </div>
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="flex items-start gap-3">
+                <Switch id="crawl-same-origin" checked={crawlSameOrigin} onCheckedChange={setCrawlSameOrigin} disabled={crawling} aria-label="Stay on the same website" />
+                <div>
+                  <Label htmlFor="crawl-same-origin" className="cursor-pointer">Stay on this website</Label>
+                  <p className="text-xs text-muted-foreground">Skip links to other domains.</p>
+                </div>
+              </div>
+              <Separator />
+              <div className="flex items-start gap-3">
+                <Switch id="crawl-use-ai" checked={crawlUseAi} onCheckedChange={setCrawlUseAi} disabled={crawling} aria-label="Clean pages with the configured AI model" />
+                <div>
+                  <Label htmlFor="crawl-use-ai" className="cursor-pointer flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" aria-hidden /> Clean with AI</Label>
+                  <p className="text-xs text-muted-foreground">
+                    One model call per page. Without it, pages are imported as deterministic extracted text. An AI model must be configured either way.
+                  </p>
+                </div>
+              </div>
+              <Separator />
+              <div className="flex items-start gap-3">
+                <Switch id="crawl-approved" checked={crawlApproved} onCheckedChange={setCrawlApproved} disabled={crawling} aria-label="Approve imported pages for AI use" />
+                <div>
+                  <Label htmlFor="crawl-approved" className="cursor-pointer">Approved for AI use</Label>
+                  <p className="text-xs text-muted-foreground">Imported pages are indexed immediately when approved.</p>
+                </div>
+              </div>
+            </div>
+
+            {crawlError && (
+              <Alert variant="destructive" role="alert">
+                <ShieldAlert className="h-4 w-4" aria-hidden />
+                <AlertDescription className="space-y-2">
+                  <p>{crawlError}</p>
+                  {crawlError.toLowerCase().includes('configure') && (
+                    <Button size="sm" variant="outline" onClick={() => { setCrawlOpen(false); setActiveSection('ai') }} className="min-h-[44px]">
+                      Open AI Providers
+                    </Button>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {crawling && (
+              <p className="text-sm text-muted-foreground flex items-center gap-2" role="status">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Crawling and indexing — this can take a minute for larger sites…
+              </p>
+            )}
+
+            {crawlResult && (
+              <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900" role="status">
+                <CheckCircle2 className="h-4 w-4" aria-hidden />
+                <AlertDescription className="space-y-2">
+                  <p>{crawlResult.message}</p>
+                  {(crawlResult.errors.length > 0 || crawlResult.aiFailures.length > 0 || crawlResult.skipped.length > 0) && (
+                    <details>
+                      <summary className="cursor-pointer text-xs underline underline-offset-2">
+                        {crawlResult.errors.length + crawlResult.aiFailures.length + crawlResult.skipped.length} page(s) had issues
+                      </summary>
+                      <ul className="mt-1 space-y-0.5 text-xs break-all">
+                        {crawlResult.errors.slice(0, 8).map((e) => <li key={`e-${e.url}`}>{e.url} — {e.message}</li>)}
+                        {crawlResult.aiFailures.slice(0, 8).map((e) => <li key={`a-${e.url}`}>{e.url} — AI cleanup failed ({e.message}); saved extracted text.</li>)}
+                        {crawlResult.skipped.slice(0, 8).map((s) => <li key={`s-${s.url}`}>{s.url} — {s.reason}</li>)}
+                      </ul>
+                    </details>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCrawlOpen(false)} disabled={crawling} className="min-h-[44px]">Close</Button>
+            <Button onClick={() => void runCrawl()} disabled={crawling || !crawlUrl.trim()} className="min-h-[44px]">
+              {crawling ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Globe2 className="h-4 w-4" aria-hidden />}
+              Start import
             </Button>
           </DialogFooter>
         </DialogContent>
