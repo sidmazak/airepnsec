@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { BrandLogo, aiBrandId } from '@/components/brand-logo'
 import { PROVIDER_KIND_LABELS, presetsFor, type AiPreset, type PresetCapability } from '@/lib/ai/presets'
 import {
   Bot, CheckCircle2, Database, Download, Globe, KeyRound, Loader2, Monitor, PlugZap, RefreshCw,
@@ -26,6 +27,20 @@ import {
 /* ------------------------------ helpers ------------------------------ */
 
 const PROVIDER_LABELS: Record<string, string> = PROVIDER_KIND_LABELS
+
+type ChannelReadiness = {
+  key: string
+  label: string
+  ready: boolean
+  providerLabel: string | null
+  integrationId: string | null
+  detail: string
+}
+
+const CHANNEL_BRAND: Record<string, string> = {
+  email: 'email', sms: 'twilio', whatsapp: 'whatsapp', voice: 'twilio', imap: 'imap',
+  calendar: 'google', payments: 'stripe', accounting: 'quickbooks', commerce: 'shopify',
+}
 
 const CLOUD_PROVIDERS = ['openai_compatible', 'anthropic', 'google', 'azure_openai']
 
@@ -122,8 +137,9 @@ function HardwareRecommendations({ info }: { info: HardwareInfoResponse }) {
         )}
       </p>
       {configuredChat && (
-        <p className="text-xs text-muted-foreground">
-          Currently configured: {configuredChat.provider} · {configuredChat.model || 'no model set'}
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <BrandLogo id={aiBrandId(configuredChat.provider)} size={16} />
+          Currently configured: {PROVIDER_LABELS[configuredChat.provider] ?? configuredChat.provider} · {configuredChat.model || 'no model set'}
         </p>
       )}
       <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
@@ -173,8 +189,8 @@ export function AiSection() {
   const [hardwareInfo, setHardwareInfo] = useState<HardwareInfoResponse | null>(null)
   const [logsError, setLogsError] = useState('')
 
-  const [channels, setChannels] = useState<{ email: boolean; sms: boolean } | null>(null)
-  const [channelsBusy, setChannelsBusy] = useState(false)
+  const setActiveSection = useAppStore((s) => s.setActiveSection)
+  const [channels, setChannels] = useState<ChannelReadiness[] | null>(null)
 
   // The local speech model catalog — one row per ONNX model in .models/.
   const [localSpeechModels, setLocalSpeechModels] = useState<LocalSpeechModelRow[]>([])
@@ -234,8 +250,8 @@ export function AiSection() {
 
   const loadChannels = useCallback(async () => {
     try {
-      const d = await api.get<{ email: boolean; sms: boolean }>('/api/settings/channels')
-      setChannels(d)
+      const d = await api.get<{ channels: ChannelReadiness[] }>('/api/settings/channels')
+      setChannels(d.channels)
     } catch { /* non-fatal */ }
   }, [])
 
@@ -376,24 +392,6 @@ export function AiSection() {
       }))
     } finally {
       setTestingCap(null)
-    }
-  }
-
-  const toggleChannel = async (key: 'email' | 'sms', value: boolean) => {
-    if (!channels || !canManage) return
-    setChannelsBusy(true)
-    const next = { ...channels, [key]: value }
-    try {
-      const d = await api.put<{ email: boolean; sms: boolean }>('/api/settings/channels', next)
-      setChannels(d)
-      toast({
-        title: value ? `${key.toUpperCase()} channel marked configured` : `${key.toUpperCase()} channel disabled`,
-        description: value ? 'Queued outbox messages will use it once a sender is wired.' : undefined,
-      })
-    } catch (err) {
-      toast({ title: 'Could not update channels', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
-    } finally {
-      setChannelsBusy(false)
     }
   }
 
@@ -602,11 +600,19 @@ export function AiSection() {
                       <Label htmlFor={`prov-${cap}`}>Provider</Label>
                       <Select value={draft.provider} disabled={!canManage} onValueChange={(v) => setDraft(cap, { provider: v })}>
                         <SelectTrigger id={`prov-${cap}`} className="min-h-[44px]" aria-label={`Provider for ${info?.label ?? cap}`}>
-                          <SelectValue />
+                          <span className="flex min-w-0 items-center gap-2">
+                            <BrandLogo id={aiBrandId(draft.provider)} size={18} />
+                            <SelectValue />
+                          </span>
                         </SelectTrigger>
                         <SelectContent>
                           {(info?.kinds ?? Object.keys(PROVIDER_LABELS)).map((k) => (
-                            <SelectItem key={k} value={k}>{PROVIDER_LABELS[k] ?? k}</SelectItem>
+                            <SelectItem key={k} value={k}>
+                              <span className="flex items-center gap-2">
+                                <BrandLogo id={aiBrandId(k)} size={18} />
+                                {PROVIDER_LABELS[k] ?? k}
+                              </span>
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -628,7 +634,12 @@ export function AiSection() {
                           </SelectTrigger>
                           <SelectContent>
                             {presets.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                              <SelectItem key={p.id} value={p.id}>
+                                <span className="flex items-center gap-2">
+                                  <BrandLogo id={aiBrandId(p.provider)} size={18} />
+                                  {p.label}
+                                </span>
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -818,36 +829,39 @@ export function AiSection() {
           {/* channels mini-card */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Database className="h-4 w-4" aria-hidden /> Channels</CardTitle>
-              <CardDescription>Mark email/SMS as configured for queued delivery.</CardDescription>
+              <CardTitle className="text-base flex items-center gap-2"><Database className="h-4 w-4" aria-hidden /> Message channels</CardTitle>
+              <CardDescription>Live readiness from your integrations — a channel is ready only when its sender is enabled and configured.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {channels ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {(['email', 'sms'] as const).map((ch) => (
-                    <label key={ch} className="flex items-center gap-3 rounded-md border p-3 text-sm">
-                      <Switch
-                        checked={channels[ch]}
-                        disabled={!canManage || channelsBusy}
-                        onCheckedChange={(v) => void toggleChannel(ch, v)}
-                        aria-label={`${channels[ch] ? 'Disable' : 'Enable'} ${ch} channel`}
-                      />
-                      <span className="capitalize font-medium">{ch}</span>
-                      <Badge variant={channels[ch] ? 'secondary' : 'outline'} className="ml-auto text-[10px]">
-                        {channels[ch] ? 'configured' : 'not configured'}
-                      </Badge>
-                    </label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {channels.filter((ch) => ['email', 'sms', 'whatsapp', 'imap'].includes(ch.key)).map((ch) => (
+                    <div key={ch.key} className="flex items-start gap-2.5 rounded-md border p-3 text-sm min-h-[44px]">
+                      <BrandLogo id={CHANNEL_BRAND[ch.key] ?? 'generic'} size={26} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{ch.label}</span>
+                          <Badge
+                            variant={ch.ready ? 'secondary' : 'outline'}
+                            className={cn('ml-auto text-[10px] shrink-0', ch.ready && 'bg-emerald-100 text-emerald-900')}
+                          >
+                            {ch.ready ? 'Ready' : 'Needs setup'}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate" title={ch.detail}>{ch.detail}</p>
+                      </div>
+                    </div>
                   ))}
                 </div>
               ) : (
                 <Skeleton className="h-16 w-full" />
               )}
-              <Alert className="border-amber-200 bg-amber-50 text-amber-900" role="note">
-                <ShieldAlert className="h-4 w-4" aria-hidden />
-                <AlertDescription>
-                  In this build, enabling marks the channel as configured for queued outbox delivery; no external sender is wired.
-                </AlertDescription>
-              </Alert>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('integrations')}>
+                  <PlugZap className="h-4 w-4 mr-1.5" aria-hidden /> Configure in Integrations
+                </Button>
+                <p className="text-xs text-muted-foreground">Readiness is derived from real credentials; queued messages never claim to be sent.</p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

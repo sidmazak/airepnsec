@@ -74,7 +74,7 @@ export async function withConversationTurnLock<T>(conversationId: string, fn: ()
 /* background workers                                                  */
 /* ------------------------------------------------------------------ */
 
-export const WORKER_NAMES = ['automation', 'outbox', 'datasources', 'backups'] as const
+export const WORKER_NAMES = ['automation', 'outbox', 'datasources', 'backups', 'imap'] as const
 export type WorkerName = (typeof WORKER_NAMES)[number]
 
 const WORKER_DEFAULT_TTL_MS: Record<WorkerName, number> = {
@@ -82,6 +82,7 @@ const WORKER_DEFAULT_TTL_MS: Record<WorkerName, number> = {
   outbox: 2 * 60_000,
   datasources: 15 * 60_000,
   backups: 30 * 60_000,
+  imap: 10 * 60_000,
 }
 
 function envFlag(name: string): boolean {

@@ -29,18 +29,19 @@ export type IntegrationKind =
   | 'wix'
   | 'mailchimp'
   | 'webhook_out'
+  | 'imap'
 
 export const INTEGRATION_KINDS: IntegrationKind[] = [
   'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
   'google_calendar', 'microsoft_calendar', 'stripe', 'square', 'quickbooks', 'xero', 'myob',
-  'shopify', 'woocommerce', 'wix', 'mailchimp', 'webhook_out',
+  'shopify', 'woocommerce', 'wix', 'mailchimp', 'webhook_out', 'imap',
 ]
 
 /** Kinds that allow only one row per org (enforced at create time). */
 export const SINGLETON_KINDS: IntegrationKind[] = [
   'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
   'google_calendar', 'microsoft_calendar', 'stripe', 'square', 'quickbooks', 'xero', 'myob',
-  'shopify', 'woocommerce', 'wix', 'mailchimp',
+  'shopify', 'woocommerce', 'wix', 'mailchimp', 'imap',
 ]
 
 export function isIntegrationKind(kind: string): kind is IntegrationKind {
@@ -281,6 +282,10 @@ export async function testIntegration(
     }
     case 'webhook_out':
       return testWebhookOut(orgId, integration)
+    case 'imap': {
+      const { testImap } = await import('@/lib/integrations/imap')
+      return testImap(integration.kind, integration)
+    }
     default:
       return { ok: false, detail: `Unknown integration kind "${integration.kind}"` }
   }

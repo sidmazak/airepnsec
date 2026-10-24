@@ -13,7 +13,7 @@ provider. What cannot be done in this environment is signing up for third-party 
 user's behalf (Twilio, Stripe, Google Cloud, an SMTP relay, a CalDAV server). Those tests are
 honest: they report the provider's real answer instead of a fake success.
 
-This now covers Twilio, Stripe, Square, SMTP, email provider APIs (SendGrid/Mailgun/Postmark/Resend/Brevo), SMS gateways (TextBee/httpSMS/Android/Telnyx/Vonage/MessageBird/Plivo), CalDAV, Google/Microsoft calendars, QuickBooks/Xero/MYOB, Shopify/WooCommerce/Wix/Mailchimp, and any OpenAI-compatible AI endpoint.
+This now covers Twilio, Stripe, Square, SMTP, email provider APIs (SendGrid/Mailgun/Postmark/Resend/Brevo), IMAP mailboxes, SMS gateways (TextBee/httpSMS/Android/Telnyx/Vonage/MessageBird/Plivo), CalDAV, Google/Microsoft calendars, QuickBooks/Xero/MYOB, Shopify/WooCommerce/Wix/Mailchimp, and any OpenAI-compatible AI endpoint.
 
 To close this: run the app against real credentials and record the results in
 [docs/TEST_PLAN.md](docs/TEST_PLAN.md).

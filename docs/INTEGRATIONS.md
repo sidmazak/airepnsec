@@ -1,6 +1,6 @@
 # Integrations — AI Secretary
 
-How the app talks to third-party services: email (SMTP or SendGrid/Mailgun/Postmark/Resend/Brevo), SMS/WhatsApp (Twilio or a self-hosted/carrier SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), Stripe/Square payments, QuickBooks/Xero/MYB accounting, Shopify/WooCommerce/Wix/Mailchimp contact sync, CalDAV calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
+How the app talks to third-party services: email (SMTP or SendGrid/Mailgun/Postmark/Resend/Brevo), SMS/WhatsApp (Twilio or a self-hosted/carrier SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), inbound email (IMAP), Stripe/Square payments, QuickBooks/Xero/MYB accounting, Shopify/WooCommerce/Wix/Mailchimp contact sync, CalDAV calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
 browser **Voice Console** is not an integration row — it rides the AI provider layer (capabilities
 `stt`/`tts`, same BYOK + data-mode policy as chat; see [ARCHITECTURE.md](./ARCHITECTURE.md) §9).
 Everything here is **BYOK (bring your own key)** — the app ships with zero third-party accounts and
@@ -116,6 +116,16 @@ admin-supplied and never customer-controlled.
 | Test routine | Read-only provider probe: SendGrid scopes, Mailgun domains, Postmark server, Resend domains, Brevo account. Never sends an email. |
 | Delivery | Raw HTTP to the provider API; the dispatcher prefers `email_api` over SMTP. A 2xx means the provider accepted the message; delivery receipts depend on the provider. |
 | Failure handling | Provider errors are sanitized/redacted. The dispatcher does not fall back to SMTP after an API failure, so an invoice is never sent twice. |
+
+### `imap` — inbound email (IMAP mailbox polling + push webhook)
+
+| | |
+|---|---|
+| Config | `host`, `port`, `secure?`, `username`, `folders?` (comma-separated, default `INBOX`), `pollIntervalMinutes?` (1–60, default 5), `maxMessagesPerPoll?` (1–200, default 50), `allowPrivate?` |
+| Secrets | `password`, optional `webhookSecret` (16–200 chars) for the push endpoint |
+| Test routine | Connects, logs in, lists the configured folders and reports unseen counts. SSRF-guarded (`assertImapHostAllowed` blocks cloud metadata always; LAN mail servers opt in via `allowPrivate`). |
+| Inbound | The instrumentation worker polls every 60 s (per-integration interval honoured); a push endpoint `POST /api/telephony/imap/webhook?integration=<id>` (or `x-ais-integration-id`) accepts JSON with `MessageId`/`subject`/`from`/`text`/`html` and requires `x-webhook-secret` or `x-webhook-signature`. Each message is deduplicated by `Message-ID`, persisted as a customer/conversation/message, handed to the receptionist with `channel: 'email'`, and the reply is queued in the outbox with `dedupeKey email-reply:<orgId>:<messageId>` (threading via `In-Reply-To`/`References`). |
+| Delivery | Outbound replies use the org's enabled email sender (SMTP or email_api) via the dispatcher; queued ≠ sent. |
 
 ### `stripe` — payment links + payment webhooks
 
@@ -246,8 +256,7 @@ Both CalDAV and Google Calendar feed the **same** availability engine, so the bo
 always matches the real diary. Manual blocks can be managed through
 `GET/POST/DELETE /api/calendar/blocks` and through the assistant's `block_time` tool.
 
-**Microsoft 365 / Graph** is not implemented — use CalDAV (Outlook exposes a CalDAV endpoint) or
-stay on the ICS feed.
+**Microsoft 365 / Graph** is implemented as a two-way sync (see below). CalDAV and the ICS feed remain the alternatives for tenants without an Entra ID app.
 
 ### `microsoft_calendar` — two-way sync with Microsoft 365 (Graph OAuth)
 
@@ -427,9 +436,8 @@ integration's credentials.
   `{{customer_name}}`, `{{business_name}}`, `{{invoice_number}}`,
   `{{amount_due}}`, `{{due_date}}`, `{{service_name}}`, `{{start_time}}` —
   e.g. booking confirmations via a `booking_created` automation with a
-  `send_email` action. (A rich booking-confirmation HTML template with the
-  .ics path exists in the template library but is not wired to an endpoint yet
-  — honest gap.)
+  `send_email` action. The booking-confirmation HTML template (with the .ics
+  attachment) is wired through `renderBookingEmail` in the automation engine.
 - **Consent & quiet hours**: opt-out is checked at queue time *and* at run
   time (opted-out customers produce explicit `skipped: opt_out` outcomes, not
   silent drops). Quiet hours (`HH:MM`–`HH:MM`, evaluated against the server's

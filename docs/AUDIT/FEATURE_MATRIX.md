@@ -44,7 +44,7 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | SMS | DONE | Twilio plus `sms_gateway` adapters: TextBee, httpSMS, android-sms-gateway, Telnyx, Vonage, MessageBird, Plivo, generic HTTP. |
 | WhatsApp | DONE | Twilio inbound/outbound; inbound webhook signature-verified. |
 | Outbound email | DONE | SMTP via nodemailer or `email_api` (SendGrid/Mailgun/Postmark/Resend/Brevo); invoice HTML/text templates; dispatcher prefers the API and never double-sends. |
-| Inbound email | **MISSING** | No IMAP/webhook ingest. |
+| Inbound email | **DONE** | IMAP polling + signed webhook ingest; per-folder config, MIME parsing, SSRF guard, AI reply queued to the outbox. |
 | Calendar | DONE | ICS feed + per-booking `.ics` + two-way CalDAV push/pull + Google Calendar OAuth sync + Microsoft 365 Graph OAuth sync. External busy times become `CalendarBlock` rows, so a busy diary removes slots from availability and blocks new bookings. |
 | Payments online | DONE | Stripe + Square Payment Links, signature-verified webhooks, generic webhook; Stripe preferred when both are enabled. |
 | Accounting push | DONE | QuickBooks Online, Xero, MYOB: refresh-token OAuth rotation, customer match/create, invoice push with duplicate guard. |

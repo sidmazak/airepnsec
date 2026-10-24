@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { withAuth, json, parseBody, ApiError } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
+import { getChannelReadinessMap } from '@/lib/integrations/readiness'
 
 const schema = z.object({
   channel: z.enum(['email', 'sms', 'inapp']).default('email'),
@@ -16,9 +17,9 @@ function fmtWhen(startAt: Date, endAt: Date): string {
 /**
  * POST /api/bookings/[id]/remind {channel?: 'email'|'sms'|'inapp'}
  * Queues a booking reminder into the outbox with HONEST delivery states:
- * - email/sms: always 'queued' in this build; statusReason states 'no external
- *   channel configured' unless the matching AppSetting (channel_email /
- *   channel_sms) exists — no SMTP/SMS sender is wired, nothing is reported sent.
+ * - email/sms: always 'queued'; statusReason explains when no enabled
+ *   integration can actually deliver (computed from the integrations, not a
+ *   toggle). The outbox dispatcher reports the real send result later.
  * - inapp: recorded as 'sent' (it is genuinely visible in the app).
  * Deduplicated per booking+channel+day.
  */
@@ -63,13 +64,8 @@ export const POST = withAuth(async (req, ctx, params) => {
   }
 
   const isExternal = channel !== 'inapp'
-  const hasChannelConfigured = isExternal
-    ? Boolean(
-        await db.appSetting.findUnique({
-          where: { orgId_key: { orgId: ctx.org.id, key: `channel_${channel}` } },
-        })
-      )
-    : true
+  const readiness = isExternal ? (await getChannelReadinessMap(ctx.org.id))[channel] : null
+  const hasChannelConfigured = isExternal ? Boolean(readiness?.ready) : true
 
   const subject = `Appointment reminder — ${booking.service.name}`
   const body = `Hello ${booking.customer.name},\n\nThis is a reminder for your ${booking.service.name} appointment on ${fmtWhen(
@@ -87,7 +83,7 @@ export const POST = withAuth(async (req, ctx, params) => {
         subject,
         body,
         status: isExternal ? 'queued' : 'sent',
-        statusReason: isExternal && !hasChannelConfigured ? 'no external channel configured' : '',
+        statusReason: isExternal && !hasChannelConfigured ? readiness?.detail ?? `no ${channel} integration enabled` : '',
         relatedType: 'booking',
         relatedId: booking.id,
         dedupeKey,

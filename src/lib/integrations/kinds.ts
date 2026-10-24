@@ -130,6 +130,22 @@ export const webhookOutConfigSchema = z.object({
   allowPrivate: z.boolean().optional(),
 })
 
+export const imapConfigSchema = z.object({
+  host: z.string().min(1, 'host is required'),
+  port: z.coerce.number().int('port must be an integer').positive('port must be positive'),
+  secure: z.boolean().optional(), // true for IMAPS (993), false for STARTTLS (143)
+  username: z.string().min(1, 'username is required'),
+  // Folders to monitor (comma-separated). Default: INBOX
+  folders: z.string().max(500).optional(),
+  // How often to poll (minutes). Default: 5
+  pollIntervalMinutes: z.coerce.number().int().positive().max(60).optional(),
+  // Maximum messages to fetch per poll. Default: 50
+  maxMessagesPerPoll: z.coerce.number().int().positive().max(200).optional(),
+  // Self-hosted mail servers usually live on the LAN: set allowPrivate to opt in
+  // (cloud metadata endpoints stay blocked regardless).
+  allowPrivate: z.boolean().optional(),
+})
+
 /** Secrets accepted per kind (full-replacement semantics on PATCH). */
 export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
   smtp: z.object({ user: z.string().optional(), pass: z.string().optional() }),
@@ -194,6 +210,7 @@ export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
   wix: z.object({ apiKey: z.string().min(1, 'apiKey is required') }),
   mailchimp: z.object({ apiKey: z.string().min(1, 'apiKey is required') }),
   webhook_out: z.object({ secret: z.string().optional() }),
+  imap: z.object({ password: z.string().min(1, 'password is required'), webhookSecret: z.string().min(16, 'webhookSecret must be at least 16 characters').max(200).optional() }),
 }
 
 export const configSchemaFor: Record<string, z.ZodTypeAny> = {
@@ -216,6 +233,7 @@ export const configSchemaFor: Record<string, z.ZodTypeAny> = {
   wix: wixConfigSchema,
   mailchimp: mailchimpConfigSchema,
   webhook_out: webhookOutConfigSchema,
+  imap: imapConfigSchema,
 }
 
 /** Minimal credential check so "configured" always means "testable". */
@@ -260,6 +278,8 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
       return Boolean(secrets.apiKey)
     case 'webhook_out':
       return true // signing secret is optional by design
+    case 'imap':
+      return Boolean(secrets.password)
     default:
       return false
   }

@@ -14,6 +14,8 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
 
+  // The instrumentation hook can run more than once in a dev server. Without
+  // this guard each run would schedule another set of intervals.
   const globalKey = globalThis as unknown as { __aisWorkerStarted?: boolean }
   if (globalKey.__aisWorkerStarted) return
   globalKey.__aisWorkerStarted = true
@@ -104,6 +106,27 @@ export async function register() {
     console.log('[worker] backup scheduler started (hourly interval, lease-protected)')
   } else {
     console.log('[worker] backup scheduler disabled by environment')
+  }
+
+  // IMAP email sync: polls configured IMAP servers for new emails and ingests them
+  // into conversations. Ticks every 60s; each integration's pollIntervalMinutes
+  // (default 5) decides when it is actually contacted.
+  if (isWorkerEnabled('imap')) {
+    const { syncAllImapIntegrations } = await import('@/lib/integrations/imap')
+    schedule('imap sync', 30_000, 60_000, async () => {
+      const outcome = await runWithWorkerLease('imap', () => syncAllImapIntegrations())
+      if (!outcome.ran) return
+      const results = outcome.result
+      const processed = results.reduce((sum, r) => sum + r.processed, 0)
+      const created = results.reduce((sum, r) => sum + r.created, 0)
+      const errors = results.reduce((sum, r) => sum + r.errors.length, 0)
+      if (results.length) {
+        console.log(`[worker] imap sync: ${results.length} integration(s), ${processed} message(s) checked, ${created} ingested${errors ? `, ${errors} error(s)` : ''}`)
+      }
+    })
+    console.log('[worker] imap sync started (60s tick, per-integration interval, lease-protected)')
+  } else {
+    console.log('[worker] imap sync disabled by environment')
   }
 
   // Pre-load the local embedding model so the first knowledge search / AI answer is fast.

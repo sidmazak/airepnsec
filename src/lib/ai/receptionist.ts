@@ -40,7 +40,7 @@ type ToolCtx = {
  * an anonymous website visitor must not be able to reach tools that expose a
  * customer's bookings/invoices or that change the business diary.
  */
-export type ReceptionistChannel = 'dashboard' | 'web' | 'sms' | 'whatsapp' | 'voice' | 'realtime'
+export type ReceptionistChannel = 'dashboard' | 'web' | 'sms' | 'whatsapp' | 'voice' | 'realtime' | 'email'
 
 export type ToolPolicy = {
   channel: ReceptionistChannel
@@ -65,6 +65,7 @@ export function policyForChannel(channel: ReceptionistChannel): ToolPolicy {
     case 'sms':
     case 'whatsapp':
     case 'voice':
+    case 'email':
       return { channel, identityTools: true, staffTools: false }
     case 'dashboard':
     case 'realtime':

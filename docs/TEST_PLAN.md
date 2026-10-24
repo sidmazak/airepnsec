@@ -65,6 +65,7 @@
 | W7 | Accounting | Unit: QBO/Xero/MYB token + invoice payloads, refresh rotation | Provider doc number = invoice number; draft refused | P0 | ✅ unit |
 | W8 | Commerce sync | Unit: Shopify/Woo/Wix/Mailchimp request/parse | Contacts normalized; one page; tags unioned | P1 | ✅ unit |
 | W9 | Smoke | `node scripts/smoke.mjs` | 44/44 checks pass against the running dev server | P0 | ✅ |
+| W10 | Inbound email | IMAP test + webhook auth (local harness) | Private/metadata hosts blocked; unsigned/wrong-secret webhooks 403; missing secret 503; signed payload without MessageId 422 | P0 | ✅ curl |
 
 ## 2. Browser verification protocol
 

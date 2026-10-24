@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, formatMoney, type Service, type Staff, type SessionInfo } from '@/lib/client/api'
+import { BrandLogo } from '@/components/brand-logo'
 import { useAppStore } from '@/lib/client/store'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -17,9 +18,10 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
-import { Separator } from '@/components/ui/separator'
+import { getChannelReadiness, type ChannelReadiness } from '@/lib/integrations/readiness'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   ArrowLeft, ArrowRight, Bot, CalendarCheck, CheckCircle2, CircleDashed, Download,
@@ -1299,28 +1301,29 @@ function AiStep({ canManage, markStepDone }: StepProps) {
 
 function ChannelsStep({ markStepDone, canManage }: StepProps) {
   const { toast } = useToast()
-  const [channels, setChannels] = useState<{ email: boolean; sms: boolean } | null>(null)
+  const setActiveSection = useAppStore((s) => s.setActiveSection)
+  const [channels, setChannels] = useState<Array<{ key: string; label: string; ready: boolean; detail: string; integrationId: string | null }> | null>(null)
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        setChannels(await api.get<{ email: boolean; sms: boolean }>('/api/settings/channels'))
-      } catch {
-        setChannels({ email: false, sms: false })
-      }
-    })()
+  const load = useCallback(async () => {
+    try {
+      const d = await api.get<{ channels: Array<{ key: string; label: string; ready: boolean; detail: string; integrationId: string | null }> }>('/api/settings/channels')
+      setChannels(d.channels)
+    } catch {
+      setChannels([])
+    }
   }, [])
+  useEffect(() => { void load() }, [load])
 
-  const toggle = async (key: 'email' | 'sms', value: boolean) => {
-    if (!channels) return
+  const CHANNEL_BRAND = { email: 'email', sms: 'twilio', whatsapp: 'whatsapp', voice: 'twilio', imap: 'imap' }
+
+  const essential = (channels ?? []).filter((c) => ['email', 'sms', 'whatsapp', 'voice', 'imap'].includes(c.key))
+
+  const toggleDone = async () => {
     setBusy(true)
     try {
-      const d = await api.put<{ email: boolean; sms: boolean }>('/api/settings/channels', { ...channels, [key]: value })
-      setChannels(d)
       await markStepDone('channels')
-    } catch (err) {
-      toast({ title: 'Could not update channels', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+      toast({ title: 'Channels step marked complete' })
     } finally {
       setBusy(false)
     }
@@ -1330,31 +1333,42 @@ function ChannelsStep({ markStepDone, canManage }: StepProps) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2"><Mail className="h-4 w-4" aria-hidden /> Channels</CardTitle>
-        <CardDescription>Where outbound messages (reminders, confirmations) are intended to go.</CardDescription>
+        <CardDescription>Live readiness derived from your integrations. A channel is ready only when its sender is enabled and configured — no fake toggles.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {!channels ? <Skeleton className="h-20 w-full" aria-label="Loading channels" /> : (
+        {!channels ? <Skeleton className="h-44 w-full" aria-label="Loading channels" /> : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {(['email', 'sms'] as const).map((ch) => (
-              <label key={ch} className="flex items-center gap-3 rounded-md border p-3 text-sm min-h-[44px]">
-                <Switch checked={channels[ch]} disabled={!canManage || busy} onCheckedChange={(v) => void toggle(ch, v)} aria-label={`Enable ${ch} channel`} />
-                <span className="capitalize font-medium">{ch}</span>
-                <Badge variant={channels[ch] ? 'secondary' : 'outline'} className="ml-auto text-[10px]">{channels[ch] ? 'configured' : 'off'}</Badge>
-              </label>
+            {essential.map((ch) => (
+              <div key={ch.key} className="flex items-start gap-2.5 rounded-md border p-3 text-sm min-h-[44px]">
+                <BrandLogo id={CHANNEL_BRAND[ch.key] ?? 'generic'} size={28} />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{ch.label}</span>
+                    <Badge variant={ch.ready ? 'secondary' : 'outline'} className={cn('ml-auto text-[10px] shrink-0', ch.ready && 'bg-emerald-100 text-emerald-900')}>
+                      {ch.ready ? 'Ready' : 'Needs setup'}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground break-words">{ch.detail}</p>
+                  <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setActiveSection('integrations')}>
+                    {ch.integrationId ? 'Finish setup' : 'Add integration'} →
+                  </Button>
+                </div>
+              </div>
             ))}
           </div>
         )}
-        <Alert className="border-amber-200 bg-amber-50 text-amber-900" role="note">
-          <ShieldAlert className="h-4 w-4" aria-hidden />
-          <AlertDescription>
-            Honest note: in this build there is no SMTP/SMS sender wired. Enabling a channel marks it as configured — outbound messages are queued in the Outbox with their real status, never silently dropped or faked as sent.
-          </AlertDescription>
-        </Alert>
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 flex gap-2">
+          <ShieldAlert className="h-4 w-4 shrink-0" aria-hidden />
+          <span>Queued messages are never reported as sent until the outbox dispatcher actually delivers through an enabled, configured integration.</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setActiveSection('integrations')} className="min-h-[44px]">Open Integrations</Button>
+          <Button onClick={() => void toggleDone()} disabled={busy || !canManage} className="min-h-[44px] ml-auto">Mark step complete</Button>
+        </div>
       </CardContent>
     </Card>
   )
 }
-
 /* ============================== step 7: collections ============================== */
 
 function CollectionsStep({ org, queueSave, canManage, markStepDone }: StepProps) {

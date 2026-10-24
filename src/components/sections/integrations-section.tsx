@@ -38,9 +38,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  BookOpen, CalendarClock, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
-  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Send, ShoppingBag, Smartphone, Store, Trash2, Users, Webhook as WebhookIcon, XCircle,
+  BookOpen, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
+  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Search, Send, Smartphone, Trash2, Users, Webhook as WebhookIcon, XCircle,
 } from 'lucide-react'
+import { BrandLogo } from '@/components/brand-logo'
+import {
+  CATEGORY_META, CATEGORY_ORDER, INTEGRATION_CATALOG,
+  catalogEntry, providerBrand, providerLabel, type IntegrationCatalogEntry,
+} from '@/lib/integrations/catalog'
 
 /* ------------------------------ helpers ------------------------------ */
 
@@ -80,130 +85,13 @@ function useOrigin(): string {
   return origin
 }
 
-const KIND_META: Record<string, { title: string; icon: typeof Mail; blurb: string; needsCredentials: boolean }> = {
-  smtp: {
-    title: 'Email (SMTP)',
-    icon: Mail,
-    blurb: 'Outgoing email for invoices, reminders and receipts. Point it at your own SMTP server or relay.',
-    needsCredentials: false,
-  },
-  email_api: {
-    title: 'Email (provider API)',
-    icon: Mail,
-    blurb: 'Send invoice and reminder email through SendGrid, Mailgun, Postmark, Resend or Brevo — alternative to SMTP.',
-    needsCredentials: true,
-  },
-  twilio_sms: {
-    title: 'SMS (Twilio)',
-    icon: MessageSquare,
-    blurb: 'Text messages for reminders and escalations, sent from your own Twilio account.',
-    needsCredentials: true,
-  },
-  twilio_whatsapp: {
-    title: 'WhatsApp (Twilio)',
-    icon: Phone,
-    blurb: 'WhatsApp messages via Twilio (requires a WhatsApp-enabled sender).',
-    needsCredentials: true,
-  },
-  twilio_voice: {
-    title: 'Phone Receptionist (Twilio Voice)',
-    icon: PhoneCall,
-    blurb: 'Point your Twilio number at this app: the AI receptionist answers real calls and texts, books, quotes prices and escalates.',
-    needsCredentials: true,
-  },
-  sms_gateway: {
-    title: 'SMS Gateway (bring your own)',
-    icon: Smartphone,
-    blurb: 'Send SMS through your own phone/modem or bridge — TextBee, httpSMS, android-sms-gateway, or any HTTP gateway (incl. iOS/iMessage bridges). Alternative to Twilio.',
-    // Self-hosted gateways (android-sms-gateway local mode, a LAN/iOS bridge) can be
-    // credential-less, so enabling is not blocked; the real connection test reports the truth.
-    needsCredentials: false,
-  },
-  caldav: {
-    title: 'Calendar Sync (CalDAV)',
-    icon: CalendarClock,
-    blurb: 'Push upcoming bookings to your own calendar — Nextcloud, Fastmail, Radicale, iCloud (app password).',
-    needsCredentials: false,
-  },
-  google_calendar: {
-    title: 'Google Calendar',
-    icon: CalendarDays,
-    blurb: 'Two-way sync with Google Calendar: your busy times block the bookable slots, and bookings appear on your calendar.',
-    needsCredentials: true,
-  },
-  microsoft_calendar: {
-    title: 'Microsoft 365 Calendar',
-    icon: CalendarDays,
-    blurb: 'Two-way sync with Microsoft 365 through the Graph API: busy times block the bookable slots, and bookings appear in Outlook.',
-    needsCredentials: true,
-  },
-  stripe: {
-    title: 'Payments (Stripe)',
-    icon: CreditCard,
-    blurb: 'Real Stripe payment links on invoices. Callbacks are verified against your signing secret.',
-    needsCredentials: true,
-  },
-  square: {
-    title: 'Payments (Square)',
-    icon: CreditCard,
-    blurb: 'Square payment links on invoices, with signed webhook callbacks that record verified payments.',
-    needsCredentials: true,
-  },
-  quickbooks: {
-    title: 'Accounting (QuickBooks Online)',
-    icon: BookOpen,
-    blurb: 'Push issued invoices and create customers in QuickBooks Online with your own OAuth app.',
-    needsCredentials: true,
-  },
-  xero: {
-    title: 'Accounting (Xero)',
-    icon: BookOpen,
-    blurb: 'Push issued invoices and contacts into Xero using your Xero OAuth app.',
-    needsCredentials: true,
-  },
-  myob: {
-    title: 'Accounting (MYOB AccountRight)',
-    icon: BookOpen,
-    blurb: 'Push issued invoices and customers into MYOB AccountRight company files.',
-    needsCredentials: true,
-  },
-  shopify: {
-    title: 'Shopify',
-    icon: ShoppingBag,
-    blurb: 'Import Shopify customers (with tags) into your customer list.',
-    needsCredentials: true,
-  },
-  woocommerce: {
-    title: 'WooCommerce',
-    icon: Store,
-    blurb: 'Import WooCommerce customers from your WordPress store.',
-    needsCredentials: true,
-  },
-  wix: {
-    title: 'Wix',
-    icon: Users,
-    blurb: 'Import Wix contacts into your customer list.',
-    needsCredentials: true,
-  },
-  mailchimp: {
-    title: 'Mailchimp',
-    icon: Mail,
-    blurb: 'Import Mailchimp audience members into your customer list.',
-    needsCredentials: true,
-  },
-  webhook_out: {
-    title: 'Webhooks',
-    icon: WebhookIcon,
-    blurb: 'Zapier / Make / custom endpoints that receive signed events.',
-    needsCredentials: false,
-  },
-}
-
-const SINGLETON_KINDS = [
-  'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
-  'google_calendar', 'microsoft_calendar', 'stripe', 'square', 'quickbooks', 'xero', 'myob',
-  'shopify', 'woocommerce', 'wix', 'mailchimp',
-] as const
+const KIND_META: Record<string, { title: string; blurb: string; needsCredentials: boolean; brand: string }> =
+  Object.fromEntries(INTEGRATION_CATALOG.map((entry) => [entry.kind, {
+    title: entry.title,
+    blurb: entry.blurb,
+    needsCredentials: entry.needsCredentials,
+    brand: entry.brand,
+  }]))
 
 const COMMERCE_KINDS = ['shopify', 'woocommerce', 'wix', 'mailchimp'] as const
 
@@ -318,6 +206,7 @@ type ConfigDraft = {
   locationId: string; environment: string; notificationUrl: string
   realmId: string; tenantId: string; companyFileId: string; salesAccountCode: string
   shopDomain: string; storeUrl: string; siteId: string; serverPrefix: string; listId: string
+  folders: string; pollIntervalMinutes: string; maxMessagesPerPoll: string
 }
 type SecretsDraft = {
   user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string
@@ -334,6 +223,7 @@ const EMPTY_CONFIG: ConfigDraft = {
   locationId: '', environment: 'production', notificationUrl: '',
   realmId: '', tenantId: '', companyFileId: '', salesAccountCode: '',
   shopDomain: '', storeUrl: '', siteId: '', serverPrefix: '', listId: '',
+  folders: 'INBOX', pollIntervalMinutes: '5', maxMessagesPerPoll: '50',
 }
 const EMPTY_SECRETS: SecretsDraft = {
   user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '',
@@ -421,6 +311,19 @@ function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
   }
   if (kind === 'wix') return { siteId: d.siteId.trim() }
   if (kind === 'mailchimp') return { serverPrefix: d.serverPrefix.trim(), listId: d.listId.trim() }
+  if (kind === 'imap') {
+    const out: Record<string, unknown> = {
+      host: d.host.trim(),
+      port: Number.parseInt(d.port, 10) || 993,
+      secure: d.secure,
+      username: d.username.trim(),
+      folders: d.folders.trim() || 'INBOX',
+    }
+    if (d.pollIntervalMinutes.trim()) out.pollIntervalMinutes = Number.parseInt(d.pollIntervalMinutes, 10) || 5
+    if (d.maxMessagesPerPoll.trim()) out.maxMessagesPerPoll = Number.parseInt(d.maxMessagesPerPoll, 10) || 50
+    if (d.allowPrivate) out.allowPrivate = true
+    return out
+  }
   return {} // stripe — config only holds secrets
 }
 
@@ -470,6 +373,9 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
     if (d.clientSecret) out.clientSecret = d.clientSecret
   } else if (kind === 'webhook_out') {
     if (d.secret) out.secret = d.secret
+  } else if (kind === 'imap') {
+    if (d.password) out.password = d.password
+    if (d.webhookSecret) out.webhookSecret = d.webhookSecret
   }
   return Object.keys(out).length > 0 ? out : undefined
 }
@@ -641,7 +547,6 @@ function ConnectorCard({
   const { toast } = useToast()
   const origin = useOrigin()
   const meta = KIND_META[kind]
-  const Icon = meta.icon
 
   const [dlgOpen, setDlgOpen] = useState(false)
   const [initialCfg, setInitialCfg] = useState<ConfigDraft>(EMPTY_CONFIG)
@@ -671,6 +576,7 @@ function ConnectorCard({
       realmId: str(c.realmId), tenantId: str(c.tenantId), companyFileId: str(c.companyFileId), salesAccountCode: str(c.salesAccountCode),
       shopDomain: str(c.shopDomain), storeUrl: str(c.storeUrl), siteId: str(c.siteId),
       serverPrefix: str(c.serverPrefix), listId: str(c.listId),
+      folders: str(c.folders) || 'INBOX', pollIntervalMinutes: c.pollIntervalMinutes != null ? String(c.pollIntervalMinutes) : '5', maxMessagesPerPoll: c.maxMessagesPerPoll != null ? String(c.maxMessagesPerPoll) : '50',
     })
     setDlgOpen(true)
   }
@@ -730,8 +636,9 @@ function ConnectorCard({
       <CardHeader>
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Icon className="h-4 w-4 shrink-0" aria-hidden /> {meta.title}
+            <CardTitle className="text-base flex items-center gap-2.5">
+              <BrandLogo id={meta.brand} size={30} />
+              <span className="min-w-0 truncate">{meta.title}</span>
             </CardTitle>
             <CardDescription className="mt-1">{meta.blurb}</CardDescription>
           </div>
@@ -770,8 +677,14 @@ function ConnectorCard({
               </p>
             )}
             {kind === 'email_api' && (
-              <p className="text-xs text-muted-foreground break-all">
-                {str(row.config.provider) || 'no provider selected'} · from {str(row.config.from) || 'not set'}
+              <p className="text-xs text-muted-foreground break-all flex flex-wrap items-center gap-1.5">
+                {str(row.config.provider) ? (
+                  <>
+                    <BrandLogo id={providerBrand(catalogEntry('email_api'), str(row.config.provider))} size={16} />
+                    <span>{providerLabel(catalogEntry('email_api'), str(row.config.provider))}</span>
+                  </>
+                ) : 'no provider selected'}
+                <span>· from {str(row.config.from) || 'not set'}</span>
               </p>
             )}
             {kind === 'square' && (
@@ -831,6 +744,12 @@ function ConnectorCard({
             {kind === 'caldav' && (
               <p className="text-xs text-muted-foreground break-all">
                 {str(row.config.url) ? <>Calendar: {str(row.config.url)}{str(row.config.username) ? <> · user {str(row.config.username)}</> : null}</> : 'No calendar URL configured yet.'}
+              </p>
+            )}
+
+            {kind === 'imap' && (
+              <p className="text-xs text-muted-foreground break-all">
+                {str(row.config.host) ? `IMAP: ${str(row.config.host)}:${row.config.port != null ? String(row.config.port) : '993'} · user ${str(row.config.username) || '—'}` : 'No IMAP server configured yet.'}
               </p>
             )}
 
@@ -927,6 +846,46 @@ function ConnectorCard({
 
 /* ------------------------------ configure dialog ------------------------------ */
 
+function ProviderPicker({
+  label, options, value, onChange, disabled,
+}: {
+  label: string
+  options: IntegrationCatalogEntry['providers']
+  value: string
+  onChange: (id: string) => void
+  disabled?: boolean
+}) {
+  if (!options?.length) return null
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <div role="radiogroup" aria-label={label} className="grid gap-2 sm:grid-cols-2">
+        {options.map((option) => {
+          const selected = option.id === value
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={disabled}
+              onClick={() => onChange(option.id)}
+              className={cn(
+                'flex items-center gap-2 rounded-md border p-2.5 text-sm min-h-[44px] text-left transition-colors disabled:opacity-60',
+                selected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:bg-muted',
+              )}
+            >
+              <BrandLogo id={option.brand} size={26} />
+              <span className="min-w-0 truncate">{option.label}</span>
+              {selected && <CheckCircle2 className="ml-auto h-4 w-4 text-primary shrink-0" aria-hidden />}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ConfigureDialog({
   kind, existing, initialConfig, open, onOpenChange, canManage, onSaved,
 }: {
@@ -941,6 +900,7 @@ function ConfigureDialog({
   const { toast } = useToast()
   const origin = useOrigin()
   const meta = KIND_META[kind]
+  const metaEntry = catalogEntry(kind)
   const [cfg, setCfg] = useState<ConfigDraft>(EMPTY_CONFIG)
   const [sec, setSec] = useState<SecretsDraft>(EMPTY_SECRETS)
   const [saving, setSaving] = useState(false)
@@ -1020,10 +980,28 @@ function ConfigureDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{existing ? `Configure ${meta.title}` : `Set up ${meta.title}`}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2.5">
+            <BrandLogo id={meta.brand} size={30} />
+            <span className="min-w-0 truncate">{existing ? `Configure ${meta.title}` : `Set up ${meta.title}`}</span>
+          </DialogTitle>
           <DialogDescription>
             {existing ? 'Changes apply to future sends immediately. Saved credentials are never shown again.' : meta.blurb}
           </DialogDescription>
+          {(metaEntry?.guide || metaEntry?.docsUrl) && (
+            <div className="space-y-1 pt-1">
+              {metaEntry?.guide && <p className="text-xs text-muted-foreground">{metaEntry.guide}</p>}
+              {metaEntry?.docsUrl && (
+                <a
+                  href={metaEntry.docsUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1 text-xs underline underline-offset-2 hover:text-foreground min-h-[28px]"
+                >
+                  Provider documentation <ExternalLink className="h-3 w-3" aria-hidden />
+                </a>
+              )}
+            </div>
+          )}
         </DialogHeader>
 
         <form
@@ -1038,23 +1016,14 @@ function ConfigureDialog({
 
           {kind === 'email_api' && (
             <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor={`${idBase}-emailprovider`}>Provider</Label>
-                <select
-                  id={`${idBase}-emailprovider`}
-                  value={cfg.provider}
-                  onChange={(e) => setCfg((s) => ({ ...s, provider: e.target.value }))}
-                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  disabled={busy || !canManage}
-                >
-                  <option value="sendgrid">SendGrid</option>
-                  <option value="mailgun">Mailgun</option>
-                  <option value="postmark">Postmark</option>
-                  <option value="resend">Resend</option>
-                  <option value="brevo">Brevo</option>
-                </select>
-                <p className="text-xs text-muted-foreground">The API key goes in Credentials below. A 2xx response means the provider accepted the email — delivery receipts depend on the provider.</p>
-              </div>
+              <ProviderPicker
+                label="Provider"
+                options={catalogEntry('email_api')?.providers}
+                value={cfg.provider}
+                onChange={(provider) => setCfg((s) => ({ ...s, provider }))}
+                disabled={busy || !canManage}
+              />
+              <p className="text-xs text-muted-foreground">The API key goes in Credentials below. A 2xx response means the provider accepted the email — delivery receipts depend on the provider.</p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor={`${idBase}-emailfrom`}>From address</Label>
@@ -1223,6 +1192,66 @@ function ConfigureDialog({
             </div>
           )}
 
+          {kind === 'imap' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-host`}>IMAP host</Label>
+                  <Input id={`${idBase}-host`} value={cfg.host} onChange={(e) => setCfg((s) => ({ ...s, host: e.target.value }))} placeholder="imap.example.com" autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-port`}>Port</Label>
+                  <Input id={`${idBase}-port`} type="number" min={1} max={65535} value={cfg.port} onChange={(e) => setCfg((s) => ({ ...s, port: e.target.value }))} placeholder="993" className="min-h-[44px]" />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-user`}>Username (email address)</Label>
+                <Input id={`${idBase}-user`} type="email" value={cfg.username} onChange={(e) => setCfg((s) => ({ ...s, username: e.target.value }))} placeholder="inbox@yourdomain.com" autoComplete="off" className="min-h-[44px]" />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-folders`}>Folders to monitor (comma-separated)</Label>
+                  <Input id={`${idBase}-folders`} value={cfg.folders} onChange={(e) => setCfg((s) => ({ ...s, folders: e.target.value }))} placeholder="INBOX,Archive" autoComplete="off" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">Default: INBOX. Add more folders to monitor multiple mailboxes.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-poll`}>Poll interval (minutes)</Label>
+                  <Input id={`${idBase}-poll`} type="number" min={1} max={60} value={cfg.pollIntervalMinutes} onChange={(e) => setCfg((s) => ({ ...s, pollIntervalMinutes: e.target.value }))} placeholder="5" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">How often to check for new emails (1–60 min). Default: 5.</p>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-max`}>Max messages per poll</Label>
+                  <Input id={`${idBase}-max`} type="number" min={1} max={200} value={cfg.maxMessagesPerPoll} onChange={(e) => setCfg((s) => ({ ...s, maxMessagesPerPoll: e.target.value }))} placeholder="50" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">Safety limit per folder per poll (1–200). Default: 50.</p>
+                </div>
+                <label className="flex items-center gap-3 text-sm rounded-md border p-3 min-h-[44px]">
+                  <Switch checked={cfg.secure} onCheckedChange={(v) => setCfg((s) => ({ ...s, secure: v }))} aria-label="Use IMAPS (port 993)" />
+                  Use implicit TLS (IMAPS, port 993)
+                </label>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+                <div>
+                  <Label htmlFor={`${idBase}-imap-private`}>Allow private/local IMAP server</Label>
+                  <p className="text-xs text-muted-foreground">Off blocks loopback/LAN URLs (SSRF protection). Enable only for a trusted self-hosted mail server.</p>
+                </div>
+                <Switch id={`${idBase}-imap-private`} checked={cfg.allowPrivate} onCheckedChange={(v) => setCfg((s) => ({ ...s, allowPrivate: v }))} aria-label="Allow private IMAP destination" />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Webhook endpoint for real-time email notifications:{' '}
+                <code className="bg-muted px-1.5 py-0.5 rounded break-all">
+                  {origin}/api/telephony/imap/webhook{existing ? `?integration=${existing.id}` : ''}
+                </code>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {existing
+                  ? 'Configure your email provider to POST here with the x-webhook-secret header (or &secret=… in the URL).'
+                  : 'Save the integration first, then the endpoint URL including its integration id appears here.'}
+              </p>
+            </div>
+          )}
+
           {kind === 'stripe' && (
             <div className="rounded-md border p-3 space-y-2">
               <p className="text-sm font-medium">Stripe webhook endpoint</p>
@@ -1342,28 +1371,16 @@ function ConfigureDialog({
 
           {kind === 'sms_gateway' && (
             <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor={`${idBase}-provider`}>Gateway provider</Label>
-                <select
-                  id={`${idBase}-provider`}
-                  value={cfg.provider}
-                  onChange={(e) => setCfg((s) => ({ ...s, provider: e.target.value }))}
-                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  disabled={busy || !canManage}
-                >
-                  <option value="textbee">TextBee (Android, Apache-2.0)</option>
-                  <option value="httpsms">httpSMS (Android, MIT)</option>
-                  <option value="android_sms_gateway">Android SMS Gateway Server (Apache-2.0, self-hosted or cloud)</option>
-                  <option value="telnyx">Telnyx (global carrier API)</option>
-                  <option value="vonage">Vonage / Nexmo</option>
-                  <option value="messagebird">MessageBird (Bird)</option>
-                  <option value="plivo">Plivo</option>
-                  <option value="generic_http">Custom HTTP gateway / bridge (incl. iOS, Gammu, Kannel, SMPP shims)</option>
-                </select>
-                <p className="text-xs text-muted-foreground">
-                  TextBee/httpSMS use your Android phone; Android SMS Gateway also lets you self-host the server. Telnyx, Vonage, MessageBird and Plivo are carrier APIs with their own credentials below. Custom HTTP covers anything with a documented REST endpoint.
-                </p>
-              </div>
+              <ProviderPicker
+                label="Gateway provider"
+                options={catalogEntry('sms_gateway')?.providers}
+                value={cfg.provider}
+                onChange={(provider) => setCfg((s) => ({ ...s, provider }))}
+                disabled={busy || !canManage}
+              />
+              <p className="text-xs text-muted-foreground">
+                TextBee/httpSMS use your Android phone; Android SMS Gateway also lets you self-host the server. Telnyx, Vonage, MessageBird and Plivo are carrier APIs with their own credentials below. Custom HTTP covers anything with a documented REST endpoint.
+              </p>
               <div className="space-y-1.5">
                 <Label htmlFor={`${idBase}-base`}>Base URL (optional override)</Label>
                 <Input id={`${idBase}-base`} value={cfg.baseUrl} onChange={(e) => setCfg((s) => ({ ...s, baseUrl: e.target.value }))} placeholder="https://api.textbee.dev/api/v1" autoComplete="off" className="min-h-[44px]" />
@@ -1614,6 +1631,21 @@ function ConfigureDialog({
                 <Label htmlFor={`${idBase}-secret`}>Signing secret (optional)</Label>
                 <Input id={`${idBase}-secret`} type="password" value={sec.secret} onChange={(e) => setSec((s) => ({ ...s, secret: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
                 <p className="text-xs text-muted-foreground">Every automation can also post to these URLs, signed with your secret (x-signature header).</p>
+              </div>
+            )}
+
+            {kind === 'imap' && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-password`}>Password</Label>
+                  <Input id={`${idBase}-password`} type="password" value={sec.password} onChange={(e) => setSec((s) => ({ ...s, password: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">The IMAP password for the username above. App-specific password recommended.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-imap-whsec`}>Webhook signing secret (optional)</Label>
+                  <Input id={`${idBase}-imap-whsec`} type="password" value={sec.webhookSecret} onChange={(e) => setSec((s) => ({ ...s, webhookSecret: e.target.value }))} placeholder="at least 16 characters" autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">Required for real-time provider callbacks. Send it as the x-webhook-secret header; unsigned webhooks are rejected.</p>
+                </div>
               </div>
             )}
 
@@ -2126,6 +2158,7 @@ export function IntegrationsSection() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [rows, setRows] = useState<IntegrationInfo[]>([])
+  const [query, setQuery] = useState('')
 
   /**
    * Refresh never flips `loading` back to true — a skeleton swap would unmount
@@ -2148,6 +2181,20 @@ export function IntegrationsSection() {
 
   const singleton = (kind: string) => rows.find((r) => r.kind === kind) ?? null
   const webhookRows = rows.filter((r) => r.kind === 'webhook_out')
+
+  const q = query.trim().toLowerCase()
+  const matches = (entry: IntegrationCatalogEntry) =>
+    !q ||
+    entry.title.toLowerCase().includes(q) ||
+    entry.blurb.toLowerCase().includes(q) ||
+    entry.kind.includes(q) ||
+    Boolean(entry.providers?.some((p) => p.label.toLowerCase().includes(q) || p.id.includes(q)))
+  const groups = CATEGORY_ORDER.map((category) => ({
+    category,
+    meta: CATEGORY_META[category],
+    entries: INTEGRATION_CATALOG.filter((entry) => entry.category === category && matches(entry)),
+  })).filter((group) => group.entries.length > 0)
+  const matchCount = groups.reduce((n, group) => n + group.entries.length, 0)
 
   if (loading) {
     return (
@@ -2196,18 +2243,60 @@ export function IntegrationsSection() {
         </Alert>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {SINGLETON_KINDS.map((kind) => (
-          <ConnectorCard
-            key={kind}
-            kind={kind}
-            row={singleton(kind)}
-            canManage={canManage}
-            onChanged={load}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search integrations (e.g. WhatsApp, Xero, calendar)"
+            className="pl-9 min-h-[44px]"
+            aria-label="Search integrations"
           />
-        ))}
-        <WebhookDestinationsCard rows={webhookRows} canManage={canManage} onChanged={load} />
+        </div>
+        {q && (
+          <p className="text-xs text-muted-foreground" aria-live="polite">
+            {matchCount} {matchCount === 1 ? 'match' : 'matches'}
+            <Button variant="link" size="sm" onClick={() => setQuery('')} className="ml-1 h-auto p-0 text-xs">Clear</Button>
+          </p>
+        )}
       </div>
+
+      {matchCount === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center space-y-3">
+            <p className="text-sm text-muted-foreground">No integrations match “{query}”.</p>
+            <Button variant="outline" onClick={() => setQuery('')} className="min-h-[44px]">Clear search</Button>
+          </CardContent>
+        </Card>
+      ) : (
+        groups.map(({ category, meta: categoryMeta, entries }) => (
+          <section key={category} aria-labelledby={`integration-cat-${category}`} className="space-y-3">
+            <div>
+              <h3 id={`integration-cat-${category}`} className="text-base font-semibold tracking-tight flex items-center gap-2">
+                {categoryMeta.title}
+                <Badge variant="outline" className="text-[10px]">{entries.length}</Badge>
+              </h3>
+              <p className="text-xs text-muted-foreground">{categoryMeta.description}</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {entries.map((entry) => (
+                entry.kind === 'webhook_out' ? (
+                  <WebhookDestinationsCard key={entry.kind} rows={webhookRows} canManage={canManage} onChanged={load} />
+                ) : (
+                  <ConnectorCard
+                    key={entry.kind}
+                    kind={entry.kind}
+                    row={singleton(entry.kind)}
+                    canManage={canManage}
+                    onChanged={load}
+                  />
+                )
+              ))}
+            </div>
+          </section>
+        ))
+      )}
 
       <Tabs defaultValue="outbox">
         <TabsList aria-label="Integration tools">
