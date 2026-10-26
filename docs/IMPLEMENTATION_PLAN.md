@@ -134,3 +134,13 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Refunds**: `POST /api/payments/[id]/refund` refunds a verified payment partially or fully. The original payment stays verified, a linked `source:'refund'` row + append-only `refund` ledger entry reduce `paidCents`, and the invoice reopens. Idempotent by `refund:<paymentId>:<key>`; over-refunds are rejected.
 ✅ **UI**: draft checkbox, issue-date input, "Issue invoice" and per-payment "Refund" actions with honest toasts.
 ✅ **Verification**: tsc clean, lint clean, 161/161 unit tests, 18/18 invoice lifecycle E2E checks, 44/44 smoke checks.
+
+## Phase 21 — Telephony PABX/voicemail, notification routing and inbound SMS (2026-10-26)
+✅ **PABX routing**: `twilio_voice` config gained `routingStrategy` (`receptionist`, `least_busy`, `round_robin`, `redirect`, `simultaneous`), `agentLines` (up to 20), `ringTimeoutSec`, voicemail and after-hours fields. The incoming/gather/status routes ring agents or the AI receptionist, exclude disabled/paused lines, and enforce opening hours/holidays.
+✅ **Voicemail**: signature-verified `<Record>` + transcription callback (`/api/telephony/voice/voicemail`) stores recording/transcript, updates the call, notifies staff in-app/email, and can queue a caller acknowledgement SMS. Paused AI, after-hours, routed-call misses and repeated no-input all fall back to voicemail when enabled.
+✅ **Notification routing** (`src/lib/notifications/policy.ts`, `/api/settings/notifications`): org-wide customer event × channel matrix (service/booking/invoice/reminder/marketing), staff alerts (missed call, voicemail, escalation, integration failure), silent quiet hours with deferral for reminders/marketing, and consent requirements. The outbox dispatcher enforces it before delivery and records `status:'skipped'` honestly when suppressed.
+✅ **Per-customer preferences**: `Customer.commPrefs` JSON (partial opt-ins, marketing default off) exposed through the customers API and edit dialog, with channel badges in the customer detail view.
+✅ **Inbound SMS**: shared `ingestInboundSms`/`replyToInboundSms` pipeline for Twilio and all `sms_gateway` providers (`/api/telephony/sms/gateway-incoming`, org slug + timing-safe webhook secret). STOP/STOPALL/UNSUBSCRIBE/CANCEL/END/QUIT opt out and acknowledge; START/UNSTOP/RESUME opt in. Handles dedupe, AI pause, escalation and queued replies.
+✅ **Provider breadth**: Mailjet, SparkPost and Elastic Email for `email_api`; Sinch, Infobip and ClickSend for `sms_gateway` (request builders, tests, credential fields, readiness).
+✅ **Demo seed**: writes the default notification config and varied customer channel prefs.
+✅ **Verification**: tsc clean, lint clean, 177/177 unit tests.

@@ -5,8 +5,8 @@ import { PrismaClient } from '@prisma/client'
 // serves the OLD client class. We version the global key and, in dev, rebuild
 // the singleton from a freshly required @prisma/client when the key changes.
 // Bump PRISMA_GLOBAL_VERSION whenever the schema gains new models at runtime.
-const PRISMA_GLOBAL_VERSION = 6 // v6: SsoConfig, ScimConfig + User federation fields
-const LEGACY_KEYS = ['prisma', '__aisPrisma_v2', '__aisPrisma_v3', '__aisPrisma_v4', '__aisPrisma_v5'] // stale class instances
+const PRISMA_GLOBAL_VERSION = 8 // v8: Organization.receptionistSchedule for receptionist scheduling
+const LEGACY_KEYS = ['prisma', '__aisPrisma_v2', '__aisPrisma_v3', '__aisPrisma_v4', '__aisPrisma_v5', '__aisPrisma_v6', '__aisPrisma_v7'] // stale class instances
 
 const globalForPrisma = globalThis as unknown as Record<string, PrismaClient | undefined>
 

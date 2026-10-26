@@ -13,7 +13,7 @@ provider. What cannot be done in this environment is signing up for third-party 
 user's behalf (Twilio, Stripe, Google Cloud, an SMTP relay, a CalDAV server). Those tests are
 honest: they report the provider's real answer instead of a fake success.
 
-This now covers Twilio, Stripe, Square, SMTP, email provider APIs (SendGrid/Mailgun/Postmark/Resend/Brevo), IMAP mailboxes, SMS gateways (TextBee/httpSMS/Android/Telnyx/Vonage/MessageBird/Plivo), CalDAV, Google/Microsoft calendars, QuickBooks/Xero/MYOB, Shopify/WooCommerce/Wix/Mailchimp, and any OpenAI-compatible AI endpoint.
+This now covers Twilio (voice/voicemail/SMS), Stripe, Square, SMTP, email provider APIs (SendGrid/Mailgun/Postmark/Resend/Brevo/Mailjet/SparkPost/Elastic Email), IMAP mailboxes, SMS gateways (TextBee/httpSMS/Android/Telnyx/Vonage/MessageBird/Plivo/Sinch/Infobip/ClickSend), CalDAV, Google/Microsoft calendars, QuickBooks/Xero/MYOB, Shopify/WooCommerce/Wix/Mailchimp, and any OpenAI-compatible AI endpoint.
 
 To close this: run the app against real credentials and record the results in
 [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
@@ -36,7 +36,16 @@ Federated sign-in is implemented with full SAML 2.0 (SP-initiated Web Browser SS
   stored encrypted (never returned after save).
 - Audit logging for config changes, sign-ins, provisioning events.
 
-## 3. Local speech models — Kokoro / Piper voices
+## 3. SMS delivery receipts — not implemented
+
+Outbound SMS is honest about acceptance only: a 2xx means the gateway/provider accepted the
+message, not that a handset received it. Inbound SMS (including STOP/START) is implemented, but
+per-message DLR/status callbacks (`delivered`/`failed`) are not ingested, so `OutboxMessage` can
+stay at "accepted" forever. To close this: add a signed status-callback route per carrier
+(Twilio `MessageStatus`, Sinch/Infobip/ClickSend DLRs, generic gateway webhook) and update the
+outbox/delivery history from the provider's event id.
+
+## 4. Local speech models — Kokoro / Piper voices
 
 Whisper (speech-to-text) and MMS-TTS (text-to-speech) run fully locally through transformers.js
 (`src/lib/ai/localSpeech.ts`); the weights are downloaded on demand into `.models/`. What is
@@ -46,7 +55,7 @@ the local catalog. Both work today through the OpenAI-compatible provider path �
 capability at a local Kokoro-FastAPI or piper-http server and the Voice Console uses it like any
 other endpoint.
 
-## 4. Role-matrix E2E
+## 5. Role-matrix E2E
 
 The role matrix is enforced in code and covered by unit tests. The smoke script exercises the team
 flow end to end, but there is still no automated per-role sweep over every endpoint.
@@ -56,8 +65,11 @@ flow end to end, but there is still no automated per-role sweep over every endpo
 - ~~Invoice drafts, issue dates, overdue state and refunds~~ — implemented (draft→issue with a single ledger charge, custom `issueDate`, derived `overdue` status/filter, partial/full idempotent refunds).
 - ~~File inputs across the SPA~~ — implemented (customer/service CSV uploads, knowledge document import, website crawl import, voice audio-file transcription, SAML certificate upload).
 - ~~AI provider breadth~~ — implemented (Anthropic, Google Gemini, Azure OpenAI, provider presets/model discovery alongside Ollama and OpenAI-compatible endpoints).
-- ~~Email provider APIs~~ — implemented (`email_api`: SendGrid, Mailgun, Postmark, Resend, Brevo; dispatcher prefers it over SMTP).
-- ~~Additional SMS carriers~~ — implemented (`sms_gateway`: Telnyx, Vonage, MessageBird, Plivo).
+- ~~Email provider APIs~~ — implemented (`email_api`: SendGrid, Mailgun, Postmark, Resend, Brevo, Mailjet, SparkPost, Elastic Email; dispatcher prefers it over SMTP).
+- ~~Additional SMS carriers~~ — implemented (`sms_gateway`: Telnyx, Vonage, MessageBird, Plivo, Sinch, Infobip, ClickSend).
+- ~~Notification routing and consent~~ — implemented (org event × channel matrix, quiet hours, staff alerts, per-customer channel prefs, quiet-hours deferral, honest `skipped` outbox state).
+- ~~Inbound SMS + STOP/START~~ — implemented for Twilio and every `sms_gateway` provider (shared consent/conversation/AI-reply pipeline, signed generic webhook).
+- ~~PABX routing, voicemail and after-hours~~ — implemented (least-busy/round-robin/redirect/simultaneous, recording + transcript, staff alerts, caller acknowledgement SMS).
 - ~~Square payments~~ — implemented (payment links + signature-verified webhook recording verified payments).
 - ~~Accounting push~~ — implemented (QuickBooks Online, Xero, MYOB AccountRight invoice/customer push with refresh-token OAuth2).
 - ~~Commerce/CRM contact sync~~ — implemented (Shopify, WooCommerce, Wix, Mailchimp customer import).

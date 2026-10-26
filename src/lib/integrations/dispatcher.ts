@@ -1,6 +1,10 @@
 import { db } from '@/lib/db'
 import { decryptSecrets, getEnabledIntegration, integrationConfig, sanitizeMessage, sendEmail, sendEmailViaApi, sendTwilio, signWebhookPayload, str } from '@/lib/integrations/connectors'
-import { sendSmsGateway } from '@/lib/integrations/sms'
+import { normalizePhone, sendSmsGateway } from '@/lib/integrations/sms'
+import { getSetting } from '@/lib/org'
+import {
+  NOTIFICATION_SETTING_KEY, decideDelivery, eventForAutomation, eventForOutbox, normalizeCustomerPrefs, normalizeNotificationConfig,
+} from '@/lib/notifications/policy'
 import type { OutboxMessage } from '@prisma/client'
 import { assertOutboundUrl } from '@/lib/security/outbound'
 
@@ -14,7 +18,7 @@ import { assertOutboundUrl } from '@/lib/security/outbound'
  *   at 60); after 5 attempts the message is marked "failed" with the last error.
  */
 
-export type DispatchStats = { processed: number; sent: number; failed: number; waiting: number }
+export type DispatchStats = { processed: number; sent: number; failed: number; waiting: number; skipped: number }
 
 const BATCH = 15
 const MAX_ATTEMPTS = 5
@@ -34,7 +38,7 @@ function lockOk(): boolean {
  * serves every org.
  */
 export async function dispatchOutbox(orgId?: string): Promise<DispatchStats> {
-  const stats: DispatchStats = { processed: 0, sent: 0, failed: 0, waiting: 0 }
+  const stats: DispatchStats = { processed: 0, sent: 0, failed: 0, waiting: 0, skipped: 0 }
   if (!lockOk()) return stats
 
   try {
@@ -50,6 +54,7 @@ export async function dispatchOutbox(orgId?: string): Promise<DispatchStats> {
         const outcome = await deliver(message)
         if (outcome === 'sent') stats.sent++
         else if (outcome === 'failed') stats.failed++
+        else if (outcome === 'skipped') stats.skipped++
         else stats.waiting++
       } catch (err) {
         // deliver() handles its own errors; this is a safety net.
@@ -86,9 +91,12 @@ export async function nudgeChannel(orgId: string, kind: string): Promise<void> {
   })
 }
 
-type Outcome = 'sent' | 'failed' | 'waiting'
+type Outcome = 'sent' | 'failed' | 'waiting' | 'skipped'
 
 async function deliver(message: OutboxMessage): Promise<Outcome> {
+  const gated = await applyNotificationPolicy(message)
+  if (gated !== 'allowed') return gated
+
   switch (message.channel) {
     case 'inapp':
       await markSent(message)
@@ -105,6 +113,86 @@ async function deliver(message: OutboxMessage): Promise<Outcome> {
       await markFailed(message, `unknown channel "${message.channel}" — cannot dispatch`)
       return 'failed'
   }
+}
+
+/* ---------------- notification policy ---------------- */
+
+async function customerForMessage(message: OutboxMessage) {
+  if (message.channel === 'email') {
+    const email = message.recipient.trim().toLowerCase()
+    if (!email) return null
+    return db.customer.findFirst({
+      where: { orgId: message.orgId, email },
+      select: { optOut: true, consentContact: true, commPrefs: true },
+    })
+  }
+
+  if (message.channel === 'sms' || message.channel === 'whatsapp') {
+    const target = normalizePhone(message.recipient)
+    if (!target) return null
+    const exact = await db.customer.findFirst({
+      where: { orgId: message.orgId, phone: message.recipient.trim() },
+      select: { optOut: true, consentContact: true, commPrefs: true },
+    })
+    if (exact) return exact
+
+    const candidates = await db.customer.findMany({
+      where: { orgId: message.orgId, NOT: { phone: '' } },
+      select: { phone: true, optOut: true, consentContact: true, commPrefs: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 300,
+    })
+    return candidates.find((row) => normalizePhone(row.phone) === target) ?? null
+  }
+
+  return null
+}
+
+async function applyNotificationPolicy(message: OutboxMessage): Promise<'allowed' | 'waiting' | 'skipped'> {
+  if (message.channel === 'webhook' || message.channel === 'inapp') return 'allowed'
+
+  const stored = await getSetting<unknown>(message.orgId, NOTIFICATION_SETTING_KEY, null)
+  const config = normalizeNotificationConfig(stored)
+  let event = eventForOutbox(message)
+  if (message.relatedType === 'automation' && message.relatedId) {
+    const automation = await db.automation.findFirst({
+      where: { id: message.relatedId, orgId: message.orgId },
+      select: { triggerType: true },
+    })
+    if (automation) event = { audience: 'customer', event: eventForAutomation(automation.triggerType) }
+  }
+  const customer = event.audience === 'customer' ? await customerForMessage(message) : null
+
+  const decision = decideDelivery({
+    config,
+    event,
+    channel: message.channel,
+    customer: customer
+      ? { optOut: customer.optOut, consentContact: customer.consentContact, prefs: normalizeCustomerPrefs(customer.commPrefs) }
+      : null,
+  })
+
+  if (!decision.allowed) {
+    await db.outboxMessage.update({
+      where: { id: message.id },
+      data: { status: 'skipped', statusReason: decision.reason },
+    })
+    return 'skipped'
+  }
+
+  if ('deferUntil' in decision && decision.deferUntil) {
+    await db.outboxMessage.update({
+      where: { id: message.id },
+      data: {
+        status: 'queued',
+        statusReason: `quiet hours — scheduled for ${decision.deferUntil.toISOString()}`,
+        scheduledFor: decision.deferUntil,
+      },
+    })
+    return 'waiting'
+  }
+
+  return 'allowed'
 }
 
 /* ---------------- channel adapters ---------------- */

@@ -82,9 +82,9 @@ export async function resolveSafeGatewayUrl(raw: string, allowPrivate: boolean):
  * gateway's inbound webhooks, which are separate.
  */
 
-export type SmsProviderId = 'textbee' | 'httpsms' | 'android_sms_gateway' | 'telnyx' | 'vonage' | 'messagebird' | 'plivo' | 'generic_http'
+export type SmsProviderId = 'textbee' | 'httpsms' | 'android_sms_gateway' | 'telnyx' | 'vonage' | 'messagebird' | 'plivo' | 'sinch' | 'infobip' | 'clicksend' | 'generic_http'
 
-export const SMS_PROVIDER_IDS: SmsProviderId[] = ['textbee', 'httpsms', 'android_sms_gateway', 'telnyx', 'vonage', 'messagebird', 'plivo', 'generic_http']
+export const SMS_PROVIDER_IDS: SmsProviderId[] = ['textbee', 'httpsms', 'android_sms_gateway', 'telnyx', 'vonage', 'messagebird', 'plivo', 'sinch', 'infobip', 'clicksend', 'generic_http']
 
 export function isSmsProviderId(value: unknown): value is SmsProviderId {
   return typeof value === 'string' && (SMS_PROVIDER_IDS as string[]).includes(value)
@@ -112,6 +112,9 @@ const DEFAULT_BASE: Record<SmsProviderId, string> = {
   vonage: 'https://rest.nexmo.com',
   messagebird: 'https://rest.messagebird.com',
   plivo: 'https://api.plivo.com/v1',
+  sinch: 'https://us.sms.api.sinch.com',
+  infobip: 'https://api.infobip.com',
+  clicksend: 'https://rest.clicksend.com/v3',
   generic_http: '',
 }
 
@@ -154,6 +157,20 @@ function authHeaders(provider: SmsProviderId, config: SmsGatewayConfig, secrets:
   if (provider === 'messagebird') {
     const apiKey = str(secrets, 'apiKey')
     return apiKey ? { Authorization: `AccessKey ${apiKey}` } : {}
+  }
+  if (provider === 'sinch') {
+    const apiKey = str(secrets, 'apiKey')
+    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+  }
+  if (provider === 'infobip') {
+    const apiKey = str(secrets, 'apiKey')
+    return apiKey ? { Authorization: `App ${apiKey}` } : {}
+  }
+  if (provider === 'clicksend') {
+    const username = str(secrets, 'username')
+    const apiKey = str(secrets, 'apiKey')
+    if (!username || !apiKey) return {}
+    return { Authorization: `Basic ${Buffer.from(`${username}:${apiKey}`).toString('base64')}` }
   }
   if (provider === 'plivo') {
     const authId = str(secrets, 'accountId') || str(secrets, 'username')
@@ -267,6 +284,37 @@ export function buildSendRequest(
         body: JSON.stringify({ src: from, dst: to, text: input.body }),
       }
     }
+    case 'sinch': {
+      const from = str(config, 'from')
+      const servicePlanId = str(config, 'servicePlanId')
+      if (!from) throw new Error('Sinch SMS config needs a "from" number or sender')
+      if (!servicePlanId) throw new Error('Sinch SMS config needs a servicePlanId')
+      return {
+        url: `${baseUrl('sinch', config)}/xms/v1/${encodeURIComponent(servicePlanId)}/batches`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('sinch', config, secrets) },
+        body: JSON.stringify({ from, to: [to.replace(/^\+/, '')], body: input.body }),
+      }
+    }
+    case 'infobip': {
+      const from = str(config, 'from')
+      if (!from) throw new Error('Infobip SMS config needs a "from" sender')
+      return {
+        url: `${baseUrl('infobip', config)}/sms/2/text/advanced`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('infobip', config, secrets) },
+        body: JSON.stringify({ messages: [{ destinations: [{ to }], from, text: input.body }] }),
+      }
+    }
+    case 'clicksend': {
+      const from = str(config, 'from')
+      return {
+        url: `${baseUrl('clicksend', config)}/sms/send`,
+        method: 'POST',
+        headers: { ...json, ...authHeaders('clicksend', config, secrets) },
+        body: JSON.stringify({ messages: [{ source: 'ais', ...(from ? { from } : {}), body: input.body, to }] }),
+      }
+    }
     case 'generic_http': {
       const url = str(config, 'url')
       if (!url) throw new Error('generic_http gateway config needs a destination "url"')
@@ -311,6 +359,15 @@ export function buildTestRequest(provider: string, config: SmsGatewayConfig, sec
       if (!authId) return null
       return { url: `${baseUrl('plivo', config)}/Account/${encodeURIComponent(authId)}/`, method: 'GET', headers: authHeaders('plivo', config, secrets) }
     }
+    case 'sinch': {
+      const servicePlanId = str(config, 'servicePlanId')
+      if (!servicePlanId) return null
+      return { url: `${baseUrl('sinch', config)}/xms/v1/${encodeURIComponent(servicePlanId)}/batches?page_size=1`, method: 'GET', headers: authHeaders('sinch', config, secrets) }
+    }
+    case 'infobip':
+      return { url: `${baseUrl('infobip', config)}/sms/1/reports?limit=1`, method: 'GET', headers: authHeaders('infobip', config, secrets) }
+    case 'clicksend':
+      return { url: `${baseUrl('clicksend', config)}/account`, method: 'GET', headers: authHeaders('clicksend', config, secrets) }
     case 'generic_http':
       // No standardized read-only endpoint — the caller decides how to probe.
       return null
@@ -324,13 +381,15 @@ export function extractMessageId(provider: string, data: unknown): string {
   const d = data as Record<string, unknown> | null
   if (!d || typeof d !== 'object') return ''
   const inner = (d.data && typeof d.data === 'object' ? (d.data as Record<string, unknown>) : d)
-  for (const key of ['smsBatchId', 'id', 'messageId', 'sid', 'message_uuid', 'message-id']) {
+  for (const key of ['smsBatchId', 'id', 'messageId', 'message_id', 'sid', 'message_uuid', 'message-id']) {
     const v = inner[key] ?? d[key]
     if (typeof v === 'string' && v) return v
   }
-  if (Array.isArray((d as { messages?: unknown }).messages)) {
-    const first = (d as { messages: Array<Record<string, unknown>> }).messages[0]
-    for (const key of ['message-id', 'id']) {
+  const messageArrays = [inner.messages, (d as { messages?: unknown }).messages]
+  for (const list of messageArrays) {
+    if (!Array.isArray(list)) continue
+    const first = list[0] as Record<string, unknown> | undefined
+    for (const key of ['message-id', 'messageId', 'message_id', 'id']) {
       const v = first?.[key]
       if (typeof v === 'string' && v) return v
     }

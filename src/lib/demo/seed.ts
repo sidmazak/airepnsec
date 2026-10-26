@@ -4,6 +4,8 @@ import { createBooking } from '@/lib/business/booking'
 import { createInvoice } from '@/lib/business/invoice'
 import { recordVerifiedPayment, recordPaymentClaim } from '@/lib/business/payments'
 import { indexDocument } from '@/lib/ai/embeddings'
+import { setSetting } from '@/lib/org'
+import { DEFAULT_NOTIFICATION_CONFIG, NOTIFICATION_SETTING_KEY } from '@/lib/notifications/policy'
 
 export const DEMO_ORG_SLUG = 'demo'
 export const DEMO_OWNER_EMAIL = 'demo@aisecretary.local'
@@ -74,6 +76,8 @@ export async function seedDemo(): Promise<{ orgId: string; email: string; passwo
     data: { orgId: org.id, email: DEMO_OWNER_EMAIL, passwordHash: hashPassword(DEMO_OWNER_PASSWORD), name: 'Demo Owner', role: 'owner' },
   })
 
+  await setSetting(org.id, NOTIFICATION_SETTING_KEY, DEFAULT_NOTIFICATION_CONFIG)
+
   // staff
   const maya = await db.staff.create({ data: { orgId: org.id, name: 'Maya Chen', role: 'Senior Stylist', email: 'maya@harborview.example' } })
   const leo = await db.staff.create({ data: { orgId: org.id, name: 'Leo Park', role: 'Barber', email: 'leo@harborview.example' } })
@@ -100,12 +104,12 @@ export async function seedDemo(): Promise<{ orgId: string; email: string; passwo
   // customers
   const customers = await Promise.all(
     [
-      { name: 'Priya Sharma', email: 'priya.sharma@example.com', phone: '+1 555 201 8845', tags: ['regular'] },
-      { name: 'James Wu', email: 'james.wu@example.com', phone: '+1 555 318 2210', tags: [] },
-      { name: 'Sofia Martinez', email: 'sofia.m@example.com', phone: '+1 555 774 9032', tags: ['vip'] },
-      { name: 'Daniel Okafor', email: 'd.okafor@example.com', phone: '+1 555 662 4471', tags: [] },
-      { name: 'Emma Lindqvist', email: 'emma.l@example.com', phone: '+1 555 990 1187', tags: ['regular'] },
-    ].map((c) => db.customer.create({ data: { orgId: org.id, ...c, tags: JSON.stringify(c.tags) } }))
+      { name: 'Priya Sharma', email: 'priya.sharma@example.com', phone: '+1 555 201 8845', tags: ['regular'], commPrefs: { email: true, sms: true, whatsapp: true, service: true, booking: true, invoice: true, reminder: true, marketing: true } },
+      { name: 'James Wu', email: 'james.wu@example.com', phone: '+1 555 318 2210', tags: [], commPrefs: {} },
+      { name: 'Sofia Martinez', email: 'sofia.m@example.com', phone: '+1 555 774 9032', tags: ['vip'], commPrefs: { sms: false } },
+      { name: 'Daniel Okafor', email: 'd.okafor@example.com', phone: '+1 555 662 4471', tags: [], commPrefs: { reminder: false } },
+      { name: 'Emma Lindqvist', email: 'emma.l@example.com', phone: '+1 555 990 1187', tags: ['regular'], commPrefs: { marketing: true } },
+    ].map((c) => db.customer.create({ data: { orgId: org.id, name: c.name, email: c.email, phone: c.phone, tags: JSON.stringify(c.tags), commPrefs: JSON.stringify(c.commPrefs) } }))
   )
 
   // upcoming bookings via the REAL booking engine — scheduled on the next three

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '@/lib/client/store'
 import {
   api, ApiClientError, formatMoney, formatDateTime, formatDate,
-  type Customer, type Booking, type Invoice, type LedgerEntryRow,
+  type Customer, type CustomerCommPrefs, type Booking, type Invoice, type LedgerEntryRow,
 } from '@/lib/client/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,22 @@ import {
   Download, FileDown, Loader2, Plus, RefreshCw, Search, ShieldOff,
   Trash2, Upload, UserRound, Eye, Pencil, Users,
 } from 'lucide-react'
+
+const DEFAULT_COMM_PREFS: CustomerCommPrefs = {
+  email: true, sms: true, whatsapp: true,
+  service: true, booking: true, invoice: true, reminder: true, marketing: false,
+}
+
+const PREF_LABELS: Array<{ key: keyof CustomerCommPrefs; label: string; detail: string }> = [
+  { key: 'email', label: 'Email', detail: 'Allow email delivery' },
+  { key: 'sms', label: 'SMS', detail: 'Allow text messages' },
+  { key: 'whatsapp', label: 'WhatsApp', detail: 'Allow WhatsApp messages' },
+  { key: 'service', label: 'Conversation replies', detail: 'Replies to this customer’s enquiries' },
+  { key: 'booking', label: 'Bookings', detail: 'Confirmations, reschedules and cancellations' },
+  { key: 'invoice', label: 'Invoices', detail: 'Invoices and payment receipts' },
+  { key: 'reminder', label: 'Reminders', detail: 'Appointment and payment reminders' },
+  { key: 'marketing', label: 'Marketing', detail: 'Offers and announcements (needs consent)' },
+]
 
 /* ---------------- badges ---------------- */
 
@@ -162,6 +178,17 @@ function ViewCustomerDialog({
                     : <Badge variant="outline" className="bg-muted text-muted-foreground">no</Badge>}
                 </p>
               </div>
+              <p className="flex flex-wrap items-center gap-1.5">
+                <span className="text-muted-foreground">Channels:</span>
+                {(['email', 'sms', 'whatsapp'] as const).map((key) => {
+                  const enabled = detail.customer.commPrefs?.[key] !== false
+                  return (
+                    <Badge key={key} variant="outline" className={enabled ? 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-muted text-muted-foreground'}>
+                      {enabled ? `${key} on` : `${key} off`}
+                    </Badge>
+                  )
+                })}
+              </p>
               {detail.customer.tags.length > 0 && (
                 <p className="flex flex-wrap items-center gap-1.5">
                   <span className="text-muted-foreground">Tags:</span>
@@ -295,6 +322,7 @@ function EditCustomerDialog({
   const [tags, setTags] = useState('')
   const [consentContact, setConsentContact] = useState(true)
   const [optOut, setOptOut] = useState(false)
+  const [commPrefs, setCommPrefs] = useState<CustomerCommPrefs>(DEFAULT_COMM_PREFS)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -307,6 +335,7 @@ function EditCustomerDialog({
       setTags(customer.tags.join(', '))
       setConsentContact(customer.consentContact)
       setOptOut(customer.optOut)
+      setCommPrefs({ ...DEFAULT_COMM_PREFS, ...customer.commPrefs })
       setError('')
     }
   }, [customer])
@@ -325,6 +354,7 @@ function EditCustomerDialog({
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         consentContact,
         optOut,
+        commPrefs,
       })
       toast({ title: 'Customer updated', description: name })
       onChanged()
@@ -381,6 +411,30 @@ function EditCustomerDialog({
             </div>
             <Switch id="ec-optout" checked={optOut} onCheckedChange={setOptOut} aria-label="Toggle opt out of all messages" />
           </div>
+
+          <fieldset className={cn('space-y-2 rounded-lg border p-3', optOut && 'opacity-60')} disabled={optOut}>
+            <legend className="px-1 text-sm font-medium">Message preferences</legend>
+            <p className="text-xs text-muted-foreground">Org routing rules are applied first; these preferences apply on top. Opt-out above always wins.</p>
+            <div className="max-h-64 overflow-y-auto divide-y rounded-md border">
+              {PREF_LABELS.map((pref) => (
+                <div key={pref.key} className="flex items-center justify-between gap-3 p-2.5">
+                  <div className="min-w-0">
+                    <Label htmlFor={`ec-pref-${pref.key}`} className="text-sm">{pref.label}</Label>
+                    <p className="text-xs text-muted-foreground">{pref.detail}</p>
+                  </div>
+                  <Switch
+                    id={`ec-pref-${pref.key}`}
+                    checked={commPrefs[pref.key]}
+                    onCheckedChange={(checked) => setCommPrefs((p) => ({ ...p, [pref.key]: checked }))}
+                    aria-label={`Toggle ${pref.label} messages`}
+                  />
+                </div>
+              ))}
+            </div>
+            {commPrefs.marketing && !consentContact && (
+              <p className="text-xs text-amber-800 dark:text-amber-300">Marketing stays blocked until contact consent is given.</p>
+            )}
+          </fieldset>
           <DialogFooter>
             <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose}>Cancel</Button>
             <Button type="submit" className="min-h-[44px]" disabled={busy}>

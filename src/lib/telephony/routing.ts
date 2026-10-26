@@ -4,6 +4,16 @@
  * accepting calls) and the active call load, pick the right agent line.
  */
 
+export type RoutingStrategy = 'receptionist' | 'least_busy' | 'round_robin' | 'redirect' | 'simultaneous'
+
+export const ROUTING_STRATEGIES: RoutingStrategy[] = ['receptionist', 'least_busy', 'round_robin', 'redirect', 'simultaneous']
+
+export function normalizeRoutingStrategy(value: unknown): RoutingStrategy {
+  return typeof value === 'string' && (ROUTING_STRATEGIES as string[]).includes(value)
+    ? (value as RoutingStrategy)
+    : 'receptionist'
+}
+
 export type AgentLine = { number: string; label: string; enabled: boolean }
 
 export type LineStateRow = {
@@ -90,6 +100,14 @@ export function pickRoundRobin(candidates: LineCandidate[], lastIndex: number): 
 export function pickRedirect(candidates: LineCandidate[]): LineCandidate | null {
   if (candidates.length === 0) return null
   return [...candidates].sort((a, b) => a.priority - b.priority || a.index - b.index)[0]
+}
+
+/**
+ * `simultaneous` rings every eligible line at once (Twilio dials all <Number>
+ * children in parallel) and the first agent to answer wins.
+ */
+export function pickSimultaneous(candidates: LineCandidate[], max = 10): LineCandidate[] {
+  return [...candidates].sort((a, b) => a.priority - b.priority || a.index - b.index).slice(0, max)
 }
 
 /** Map Twilio call states onto our enum-like string (SQLite has no enums). */

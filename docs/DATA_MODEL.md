@@ -19,7 +19,7 @@ Conventions: IDs are `String @id @default(cuid())`; business tables carry `orgId
 | `Session` | Hashed session token, expiry, `revokedAt`. |
 | `AppSetting` | Org key/value JSON (webhook secret, wizard state, channels, CalDAV sync summary). |
 | `WorkerLease` | Single-flight lease for automation/outbox/data-source workers (TTL recovery). |
-| `Customer` | End customer: contact, tags, `consentContact`, absolute `optOut`, external ref. |
+| `Customer` | End customer: contact, tags, `consentContact`, absolute `optOut`, per-channel `commPrefs`, external ref. |
 | `Service` | Bookable service: duration, buffers, capacity, price/deposit cents, active. |
 | `Staff` | Staff/practitioner/crew member. |
 | `StaffService` | Staff ↔ service join (`@@id([staffId, serviceId])`). |
@@ -102,7 +102,8 @@ at a reversal row; they are never updated or deleted.
 
 ### Customer
 `name`, `email`, `phone`, notes, JSON `tags`, `consentContact` (service communications),
-`optOut` (absolute outbound block), `externalRef`.
+`optOut` (absolute outbound block), JSON `commPrefs` (per-channel opt-ins for service, booking,
+invoice, reminder and marketing messages; marketing defaults off), `externalRef`.
 
 ### Service / Staff / WorkingHour
 - `Service`: `durationMin`, `bufferBeforeMin`/`bufferAfterMin`, `maxPerSlot`,

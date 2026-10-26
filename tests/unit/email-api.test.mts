@@ -9,12 +9,15 @@ import {
   mailgunRequest,
   resendRequest,
   sendgridRequest,
+  mailjetRequest,
+  sparkpostRequest,
+  elasticEmailRequest,
 } from '../../src/lib/integrations/emailApi.ts'
 
 const message = { to: 'customer@example.com', subject: 'Your invoice', text: 'Amount due: $50', html: '<p>Amount due: $50</p>' }
 
 test('provider ids are closed and labelled', () => {
-  assert.deepEqual(EMAIL_API_PROVIDER_IDS, ['sendgrid', 'mailgun', 'postmark', 'resend', 'brevo'])
+  assert.deepEqual(EMAIL_API_PROVIDER_IDS, ['sendgrid', 'mailgun', 'postmark', 'resend', 'brevo', 'mailjet', 'sparkpost', 'elasticemail'])
   assert.equal(isEmailApiProviderId('sendgrid'), true)
   assert.equal(isEmailApiProviderId('smtp'), false)
 })
@@ -72,4 +75,34 @@ test('extractEmailMessageId prefers the header then common body keys', () => {
   assert.equal(extractEmailMessageId('postmark', { MessageID: 'pm-1' }), 'pm-1')
   assert.equal(extractEmailMessageId('brevo', { messageId: '<abc@example.com>' }), '<abc@example.com>')
   assert.equal(extractEmailMessageId('sendgrid', null), '')
+})
+
+
+test('mailjetRequest uses basic auth with key and secret', () => {
+  const req = mailjetRequest({ from: 'billing@example.com', fromName: 'Acme' }, 'key', 'secret', message)
+  assert.equal(req.url, 'https://api.mailjet.com/v3.1/send')
+  assert.equal(Buffer.from(req.headers.authorization.slice(6), 'base64').toString(), 'key:secret')
+  const body = JSON.parse(req.body!)
+  assert.equal(body.Messages[0].From.Email, 'billing@example.com')
+  assert.equal(body.Messages[0].HTMLPart, '<p>Amount due: $50</p>')
+  assert.throws(() => mailjetRequest({ from: 'a@b.co' }, 'key', '', message), /secret/)
+})
+
+test('sparkpostRequest posts a transmission with the raw API key header', () => {
+  const req = sparkpostRequest({ from: 'billing@example.com', fromName: 'Acme' }, 'sp-key', message)
+  assert.equal(req.url, 'https://api.sparkpost.com/api/v1/transmissions')
+  assert.equal(req.headers.authorization, 'sp-key')
+  const body = JSON.parse(req.body!)
+  assert.deepEqual(body.recipients, [{ address: 'customer@example.com' }])
+  assert.equal(body.content.from, 'Acme <billing@example.com>')
+  assert.equal(body.content.html, '<p>Amount due: $50</p>')
+})
+
+test('elasticEmailRequest uses the v4 API key header and content parts', () => {
+  const req = elasticEmailRequest({ from: 'billing@example.com' }, 'ee-key', message)
+  assert.equal(req.url, 'https://api.elasticemail.com/v4/emails')
+  assert.equal(req.headers['x-elasticemail-apikey'], 'ee-key')
+  const body = JSON.parse(req.body!)
+  assert.deepEqual(body.Recipients, [{ Email: 'customer@example.com' }])
+  assert.equal(body.Content.Body[1].ContentType, 'HTML')
 })

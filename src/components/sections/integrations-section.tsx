@@ -25,6 +25,8 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -38,8 +40,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  BookOpen, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
-  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Search, Send, Smartphone, Trash2, Users, Webhook as WebhookIcon, XCircle,
+  Bell, BookOpen, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, KeyRound, Loader2,
+  Mail, MessageSquare, Phone, PhoneCall, Plug, RefreshCw, Save, Search, Send, Smartphone, Trash2, Users, Webhook as WebhookIcon, XCircle,
 } from 'lucide-react'
 import { BrandLogo } from '@/components/brand-logo'
 import {
@@ -201,7 +203,9 @@ function GoogleCalendarBox({ connected, canManage, onChanged }: { connected: boo
 type ConfigDraft = {
   host: string; port: string; secure: boolean; from: string; fromName: string; domain: string; region: string; messageStream: string
   url: string; username: string; language: string; voiceName: string; transferNumber: string; publicBaseUrl: string; provider: string
-  baseUrl: string; deviceId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean
+  routingStrategy: string; agentLines: string; ringTimeoutSec: string; voicemailEnabled: boolean; voicemailGreeting: string
+  missedCallFollowUp: boolean; missedCallSms: string; afterHoursAction: string; afterHoursTransferNumber: string
+  baseUrl: string; deviceId: string; servicePlanId: string; method: string; authHeaderName: string; bodyTemplate: string; testRecipient: string; allowPrivate: boolean
   calendarId: string; redirectUri: string; tenant: string; calendarEmail: string
   locationId: string; environment: string; notificationUrl: string
   realmId: string; tenantId: string; companyFileId: string; salesAccountCode: string
@@ -218,7 +222,9 @@ type SecretsDraft = {
 const EMPTY_CONFIG: ConfigDraft = {
   host: '', port: '', secure: false, from: '', fromName: '', domain: '', region: 'us', messageStream: '',
   url: '', username: '', language: '', voiceName: '', transferNumber: '', publicBaseUrl: '', provider: 'textbee',
-  baseUrl: '', deviceId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false,
+  routingStrategy: 'receptionist', agentLines: '', ringTimeoutSec: '25', voicemailEnabled: true, voicemailGreeting: '',
+  missedCallFollowUp: true, missedCallSms: '', afterHoursAction: 'voicemail', afterHoursTransferNumber: '',
+  baseUrl: '', deviceId: '', servicePlanId: '', method: 'POST', authHeaderName: '', bodyTemplate: '', testRecipient: '', allowPrivate: false,
   calendarId: 'primary', redirectUri: '', tenant: 'common', calendarEmail: '',
   locationId: '', environment: 'production', notificationUrl: '',
   realmId: '', tenantId: '', companyFileId: '', salesAccountCode: '',
@@ -230,6 +236,40 @@ const EMPTY_SECRETS: SecretsDraft = {
   apiKey: '', apiSecret: '', accountId: '', username: '', passwordGw: '', token: '', authValue: '',
   clientId: '', clientSecret: '', accessToken: '', webhookSignatureKey: '', refreshToken: '',
   consumerKey: '', consumerSecret: '',
+}
+
+/** "Maya, +15551234567" per line; a bare number gets the number as its label. */
+function parseAgentLines(raw: string): Array<{ number: string; label: string }> {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const comma = line.lastIndexOf(',')
+      if (comma > 0) {
+        const label = line.slice(0, comma).trim()
+        const number = line.slice(comma + 1).trim()
+        return number ? { number, label: label || number } : null
+      }
+      return { number: line, label: line }
+    })
+    .filter((line): line is { number: string; label: string } => line !== null)
+    .slice(0, 20)
+}
+
+function agentLinesToText(raw: unknown): string {
+  if (!Array.isArray(raw)) return ''
+  return raw
+    .map((line) => {
+      if (!line || typeof line !== 'object') return ''
+      const row = line as Record<string, unknown>
+      const number = str(row.number)
+      if (!number) return ''
+      const label = str(row.label)
+      return label && label !== number ? `${label}, ${number}` : number
+    })
+    .filter(Boolean)
+    .join('\n')
 }
 
 function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
@@ -253,6 +293,16 @@ function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
     if (d.voiceName.trim()) out.voiceName = d.voiceName.trim()
     if (d.transferNumber.trim()) out.transferNumber = d.transferNumber.trim()
     if (d.publicBaseUrl.trim()) out.publicBaseUrl = d.publicBaseUrl.trim()
+    out.routingStrategy = d.routingStrategy || 'receptionist'
+    const agentLines = parseAgentLines(d.agentLines)
+    if (agentLines.length > 0) out.agentLines = agentLines
+    out.ringTimeoutSec = Math.min(60, Math.max(5, Number.parseInt(d.ringTimeoutSec, 10) || 25))
+    out.voicemailEnabled = d.voicemailEnabled
+    if (d.voicemailGreeting.trim()) out.voicemailGreeting = d.voicemailGreeting.trim()
+    out.missedCallFollowUp = d.missedCallFollowUp
+    if (d.missedCallSms.trim()) out.missedCallSms = d.missedCallSms.trim()
+    out.afterHoursAction = d.afterHoursAction || 'voicemail'
+    if (d.afterHoursTransferNumber.trim()) out.afterHoursTransferNumber = d.afterHoursTransferNumber.trim()
     return out
   }
   if (kind === 'sms_gateway') {
@@ -341,6 +391,7 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
     if (d.authToken) out.authToken = d.authToken
   } else if (kind === 'email_api') {
     if (d.apiKey) out.apiKey = d.apiKey
+    if (d.apiSecret) out.apiSecret = d.apiSecret
   } else if (kind === 'sms_gateway') {
     if (d.apiKey) out.apiKey = d.apiKey
     if (d.apiSecret) out.apiSecret = d.apiSecret
@@ -546,6 +597,7 @@ function ConnectorCard({
 }) {
   const { toast } = useToast()
   const origin = useOrigin()
+  const orgSlug = useAppStore((s) => s.session?.org?.slug ?? '')
   const meta = KIND_META[kind]
 
   const [dlgOpen, setDlgOpen] = useState(false)
@@ -566,7 +618,16 @@ function ConnectorCard({
       url: str(c.url), username: str(c.username),
       language: str(c.language), voiceName: str(c.voiceName),
       transferNumber: str(c.transferNumber), publicBaseUrl: str(c.publicBaseUrl),
-      provider: str(c.provider) || (kind === 'email_api' ? 'sendgrid' : 'textbee'), baseUrl: str(c.baseUrl), deviceId: str(c.deviceId),
+      routingStrategy: str(c.routingStrategy) || 'receptionist',
+      agentLines: agentLinesToText(c.agentLines),
+      ringTimeoutSec: c.ringTimeoutSec != null ? String(c.ringTimeoutSec) : '25',
+      voicemailEnabled: c.voicemailEnabled !== false,
+      voicemailGreeting: str(c.voicemailGreeting),
+      missedCallFollowUp: c.missedCallFollowUp !== false,
+      missedCallSms: str(c.missedCallSms),
+      afterHoursAction: str(c.afterHoursAction) || 'voicemail',
+      afterHoursTransferNumber: str(c.afterHoursTransferNumber),
+      provider: str(c.provider) || (kind === 'email_api' ? 'sendgrid' : 'textbee'), baseUrl: str(c.baseUrl), deviceId: str(c.deviceId), servicePlanId: str(c.servicePlanId),
       method: str(c.method) || 'POST', authHeaderName: str(c.authHeaderName),
       bodyTemplate: str(c.bodyTemplate), testRecipient: str(c.testRecipient),
       allowPrivate: c.allowPrivate === true,
@@ -731,6 +792,12 @@ function ConnectorCard({
                 <p className="text-xs text-muted-foreground break-all">
                   Voice number: <span className="font-medium text-foreground">{str(row.config.from) || 'not set'}</span>
                   {str(row.config.transferNumber) && <> · transfers to {str(row.config.transferNumber)}</>}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Routing: {str(row.config.routingStrategy) || 'receptionist'}
+                  {Array.isArray(row.config.agentLines) && row.config.agentLines.length > 0 ? ` · ${row.config.agentLines.length} agent line(s)` : ''}
+                  {' · '}{row.config.voicemailEnabled === false ? 'voicemail off' : 'voicemail on'}
+                  {' · after hours: '}{str(row.config.afterHoursAction) || 'voicemail'}
                 </p>
                 <div className="space-y-1.5">
                   <p className="text-xs font-medium">Webhook URLs for the Twilio console:</p>
@@ -899,6 +966,7 @@ function ConfigureDialog({
 }) {
   const { toast } = useToast()
   const origin = useOrigin()
+  const orgSlug = useAppStore((s) => s.session?.org?.slug ?? '')
   const meta = KIND_META[kind]
   const metaEntry = catalogEntry(kind)
   const [cfg, setCfg] = useState<ConfigDraft>(EMPTY_CONFIG)
@@ -1119,10 +1187,97 @@ function ConfigureDialog({
                 <Input id={`${idBase}-pub`} type="url" value={cfg.publicBaseUrl} onChange={(e) => setCfg((s) => ({ ...s, publicBaseUrl: e.target.value }))} placeholder="https://appointments.example.com" autoComplete="off" className="min-h-[44px]" />
                 <p className="text-xs text-muted-foreground">The https origin you configured in the Twilio console — used to validate webhook signatures behind proxies.</p>
               </div>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Call routing (PABX)</p>
+                  <p className="text-xs text-muted-foreground">Choose whether the AI answers or calls are routed to agent lines. Agent availability (pause/disable) is managed live.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-strategy`}>Routing strategy</Label>
+                  <select id={`${idBase}-strategy`} value={cfg.routingStrategy} onChange={(e) => setCfg((s) => ({ ...s, routingStrategy: e.target.value }))} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="receptionist">AI receptionist answers</option>
+                    <option value="least_busy">Least busy agent</option>
+                    <option value="round_robin">Round robin</option>
+                    <option value="redirect">Fixed priority redirect</option>
+                    <option value="simultaneous">Ring all agents at once (parallel)</option>
+                  </select>
+                </div>
+                {cfg.routingStrategy !== 'receptionist' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-lines`}>Agent lines (one per line: Label, +E.164)</Label>
+                    <Textarea
+                      id={`${idBase}-lines`} value={cfg.agentLines}
+                      onChange={(e) => setCfg((s) => ({ ...s, agentLines: e.target.value }))}
+                      placeholder={'Maya, +15551230001\nLeo, +15551230002'}
+                      rows={3} className="min-h-[88px]"
+                    />
+                    <p className="text-xs text-muted-foreground">Up to 20 lines. Simultaneous rings every available line and the first answer wins; the others are cancelled by Twilio.</p>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-ring`}>Ring timeout (seconds)</Label>
+                  <Input id={`${idBase}-ring`} type="number" min={5} max={60} value={cfg.ringTimeoutSec} onChange={(e) => setCfg((s) => ({ ...s, ringTimeoutSec: e.target.value }))} className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">After this time the call falls back to voicemail (when enabled).</p>
+                </div>
+              </div>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Voicemail</p>
+                    <p className="text-xs text-muted-foreground">Missed calls are recorded and surfaced to staff instead of being dropped.</p>
+                  </div>
+                  <Switch checked={cfg.voicemailEnabled} onCheckedChange={(v) => setCfg((s) => ({ ...s, voicemailEnabled: v }))} aria-label="Enable voicemail" />
+                </div>
+                {cfg.voicemailEnabled && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-vmgreeting`}>Voicemail greeting (optional)</Label>
+                      <Textarea id={`${idBase}-vmgreeting`} value={cfg.voicemailGreeting} onChange={(e) => setCfg((s) => ({ ...s, voicemailGreeting: e.target.value }))} placeholder="Leave a default greeting unless you want a custom one." rows={2} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`${idBase}-ack`}>Caller acknowledgement SMS (optional)</Label>
+                      <Input id={`${idBase}-ack`} value={cfg.missedCallSms} onChange={(e) => setCfg((s) => ({ ...s, missedCallSms: e.target.value }))} placeholder="Thanks for calling — we received your message and will call you back." className="min-h-[44px]" />
+                      <p className="text-xs text-muted-foreground">Queued through your SMS sender, never claimed as delivered. Opted-out callers are skipped.</p>
+                    </div>
+                  </>
+                )}
+                <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+                  <div>
+                    <Label htmlFor={`${idBase}-missed`}>Notify staff about missed calls</Label>
+                    <p className="text-xs text-muted-foreground">Creates an in-app notice and queues an email to the business address.</p>
+                  </div>
+                  <Switch id={`${idBase}-missed`} checked={cfg.missedCallFollowUp} onCheckedChange={(v) => setCfg((s) => ({ ...s, missedCallFollowUp: v }))} aria-label="Notify staff about missed calls" />
+                </div>
+              </div>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Outside opening hours</p>
+                  <p className="text-xs text-muted-foreground">Uses the business opening hours (Business Profile). The default takes a voicemail.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-after`}>After-hours action</Label>
+                  <select id={`${idBase}-after`} value={cfg.afterHoursAction} onChange={(e) => setCfg((s) => ({ ...s, afterHoursAction: e.target.value }))} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="voicemail">Take a voicemail</option>
+                    <option value="receptionist">Let the AI answer</option>
+                    <option value="transfer">Transfer to an on-call number</option>
+                  </select>
+                </div>
+                {cfg.afterHoursAction === 'transfer' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-afternum`}>On-call transfer number</Label>
+                    <Input id={`${idBase}-afternum`} value={cfg.afterHoursTransferNumber} onChange={(e) => setCfg((s) => ({ ...s, afterHoursTransferNumber: e.target.value }))} placeholder="+15559876543" className="min-h-[44px]" />
+                  </div>
+                )}
+              </div>
+
               <div className="rounded-md border p-3 space-y-2">
                 <p className="text-sm font-medium">Webhook URLs for the Twilio console</p>
                 <WebhookUrlRow url={`${origin}/api/telephony/voice/incoming`} label="A call comes in" />
                 <WebhookUrlRow url={`${origin}/api/telephony/voice/status`} label="Call status changes" />
+                <WebhookUrlRow url={`${origin}/api/telephony/voice/voicemail`} label="Voicemail action (automatic)" />
                 <WebhookUrlRow url={`${origin}/api/telephony/sms/incoming`} label="A message comes in" />
               </div>
             </div>
@@ -1381,6 +1536,18 @@ function ConfigureDialog({
               <p className="text-xs text-muted-foreground">
                 TextBee/httpSMS use your Android phone; Android SMS Gateway also lets you self-host the server. Telnyx, Vonage, MessageBird and Plivo are carrier APIs with their own credentials below. Custom HTTP covers anything with a documented REST endpoint.
               </p>
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-sm font-medium">Inbound SMS webhook</p>
+                <p className="text-xs text-muted-foreground">
+                  Point your gateway&apos;s inbound/received-message webhook here. Send the org webhook secret in the <code>x-webhook-secret</code> header (Integrations → Inbound webhook).
+                </p>
+                <code className="block break-all rounded bg-muted px-2 py-2 text-xs">
+                  {origin}{`/api/telephony/sms/gateway-incoming?org=${orgSlug || '<org-slug>'}`}
+                </code>
+                <p className="text-xs text-muted-foreground">
+                  JSON keys accepted: <code>from</code>/<code>sender</code>, <code>to</code>, <code>body</code>/<code>message</code>/<code>text</code>, <code>id</code>. STOP and START keywords update consent automatically.
+                </p>
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor={`${idBase}-base`}>Base URL (optional override)</Label>
                 <Input id={`${idBase}-base`} value={cfg.baseUrl} onChange={(e) => setCfg((s) => ({ ...s, baseUrl: e.target.value }))} placeholder="https://api.textbee.dev/api/v1" autoComplete="off" className="min-h-[44px]" />
@@ -1393,6 +1560,12 @@ function ConfigureDialog({
                 <Label htmlFor={`${idBase}-device`}>Device ID (optional, TextBee multi-device)</Label>
                 <Input id={`${idBase}-device`} value={cfg.deviceId} onChange={(e) => setCfg((s) => ({ ...s, deviceId: e.target.value }))} placeholder="leave empty for default device" autoComplete="off" className="min-h-[44px]" />
               </div>
+              {cfg.provider === 'sinch' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-serviceplan`}>Sinch service plan ID</Label>
+                  <Input id={`${idBase}-serviceplan`} value={cfg.servicePlanId} onChange={(e) => setCfg((s) => ({ ...s, servicePlanId: e.target.value }))} placeholder="Service plan ID from the Sinch dashboard" autoComplete="off" className="min-h-[44px]" />
+                </div>
+              )}
               {cfg.provider === 'generic_http' && (
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="space-y-1.5">
@@ -1452,19 +1625,34 @@ function ConfigureDialog({
             )}
 
             {kind === 'email_api' && (
-              <div className="space-y-1.5">
-                <Label htmlFor={`${idBase}-emailkey`}>API key</Label>
-                <Input id={`${idBase}-emailkey`} type="password" value={sec.apiKey} onChange={(e) => setSec((s) => ({ ...s, apiKey: e.target.value }))} placeholder={cfg.provider === 'sendgrid' ? 'SG.…' : cfg.provider === 'resend' ? 're_…' : 'provider API key'} autoComplete="new-password" className="min-h-[44px]" />
-                <p className="text-xs text-muted-foreground">Stored encrypted and never returned. The read-only connection test verifies it with the provider.</p>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-emailkey`}>API key</Label>
+                  <Input id={`${idBase}-emailkey`} type="password" value={sec.apiKey} onChange={(e) => setSec((s) => ({ ...s, apiKey: e.target.value }))} placeholder={cfg.provider === 'sendgrid' ? 'SG.…' : cfg.provider === 'resend' ? 're_…' : 'provider API key'} autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">Stored encrypted and never returned. The read-only connection test verifies it with the provider.</p>
+                </div>
+                {cfg.provider === 'mailjet' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-emailsecret`}>API secret</Label>
+                    <Input id={`${idBase}-emailsecret`} type="password" value={sec.apiSecret} onChange={(e) => setSec((s) => ({ ...s, apiSecret: e.target.value }))} placeholder="Mailjet API secret" autoComplete="new-password" className="min-h-[44px]" />
+                    <p className="text-xs text-muted-foreground">Mailjet authenticates with the API key and secret pair.</p>
+                  </div>
+                )}
               </div>
             )}
 
             {kind === 'sms_gateway' && (
               <>
-                {(cfg.provider === 'textbee' || cfg.provider === 'httpsms' || cfg.provider === 'telnyx' || cfg.provider === 'messagebird') && (
+                {(cfg.provider === 'textbee' || cfg.provider === 'httpsms' || cfg.provider === 'telnyx' || cfg.provider === 'messagebird' || cfg.provider === 'sinch' || cfg.provider === 'infobip' || cfg.provider === 'clicksend') && (
                   <div className="space-y-1.5">
-                    <Label htmlFor={`${idBase}-gwkey`}>API key</Label>
+                    <Label htmlFor={`${idBase}-gwkey`}>API key{cfg.provider === 'sinch' ? ' / access token' : ''}</Label>
                     <Input id={`${idBase}-gwkey`} type="password" value={sec.apiKey} onChange={(e) => setSec((s) => ({ ...s, apiKey: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                  </div>
+                )}
+                {cfg.provider === 'clicksend' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${idBase}-csuser`}>ClickSend username</Label>
+                    <Input id={`${idBase}-csuser`} value={sec.username} onChange={(e) => setSec((s) => ({ ...s, username: e.target.value }))} autoComplete="off" className="min-h-[44px]" />
                   </div>
                 )}
                 {cfg.provider === 'vonage' && (
@@ -1943,7 +2131,7 @@ function OutboxTab({ canManage }: { canManage: boolean }) {
       const s = r.stats
       toast({
         title: 'Outbox dispatched',
-        description: `${s.processed} processed · ${s.sent} sent · ${s.failed} failed · ${s.waiting} waiting`,
+        description: `${s.processed} processed · ${s.sent} sent · ${s.failed} failed · ${s.waiting} waiting · ${s.skipped} skipped`,
       })
       await load()
     } catch (err) {
@@ -2148,6 +2336,218 @@ function InboundWebhookTab({ canManage }: { canManage: boolean }) {
   )
 }
 
+/* ------------------------------ notification settings ------------------------------ */
+
+type NotificationRule = { enabled: boolean; channels: string[] }
+type NotificationConfig = {
+  customer: Record<string, NotificationRule>
+  staff: Record<string, NotificationRule>
+  quietHours: { start: string; end: string }
+  consent: { requireForMarketing: boolean; requireForReminders: boolean }
+}
+
+type NotificationSettings = {
+  config: NotificationConfig
+  defaults: NotificationConfig
+  channels: string[]
+  customerEvents: Array<{ id: string; label: string }>
+  staffEvents: Array<{ id: string; label: string }>
+}
+
+function RuleRow({
+  label, rule, channels, disabled, onChange,
+}: {
+  label: string
+  rule: NotificationRule
+  channels: string[]
+  disabled: boolean
+  onChange: (next: NotificationRule) => void
+}) {
+  return (
+    <div className="flex flex-col gap-2 border-b p-3 last:border-b-0 sm:flex-row sm:items-center">
+      <div className="flex items-center gap-3 sm:w-52">
+        <Switch
+          checked={rule.enabled}
+          onCheckedChange={(enabled) => onChange({ ...rule, enabled })}
+          disabled={disabled}
+          aria-label={`Toggle ${label} notifications`}
+        />
+        <span className={cn('text-sm', !rule.enabled && 'text-muted-foreground')}>{rule.enabled ? 'On' : 'Off'}</span>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        {channels.map((channel) => {
+          const checked = rule.channels.includes(channel)
+          return (
+            <Label key={channel} className="flex min-h-[32px] items-center gap-1.5 text-xs font-normal capitalize">
+              <Checkbox
+                checked={checked}
+                disabled={disabled || !rule.enabled}
+                onCheckedChange={(value) => {
+                  const next = value === true ? Array.from(new Set([...rule.channels, channel])) : rule.channels.filter((c) => c !== channel)
+                  onChange({ ...rule, channels: next })
+                }}
+                aria-label={`${checked ? 'Disable' : 'Enable'} ${channel}`}
+              />
+              {channel}
+            </Label>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function NotificationsTab({ canManage }: { canManage: boolean }) {
+  const { toast } = useToast()
+  const [data, setData] = useState<NotificationSettings | null>(null)
+  const [config, setConfig] = useState<NotificationConfig | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const d = await api.get<NotificationSettings>('/api/settings/notifications')
+      setData(d)
+      setConfig(d.config)
+      setError('')
+    } catch (err) {
+      setError(friendlyApiErrorLocal(err, 'Could not load notification settings'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  const save = async () => {
+    if (!config) return
+    setSaving(true)
+    try {
+      const d = await api.put<{ config: NotificationConfig }>('/api/settings/notifications', config)
+      setConfig(d.config)
+      await load()
+      toast({ title: 'Notification routing saved', description: 'New outbound messages follow these rules immediately.' })
+    } catch (err) {
+      toast({ title: 'Could not save notification settings', description: friendlyApiErrorLocal(err, 'Unknown error'), variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <div className="space-y-2" aria-busy="true">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
+  }
+  if (error || !data || !config) {
+    return (
+      <Alert variant="destructive" role="alert">
+        <AlertDescription className="space-y-2">
+          <p>{error || 'Notification settings are unavailable.'}</p>
+          <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  const customerRows = data.customerEvents
+  const staffRows = data.staffEvents
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm text-muted-foreground mr-auto">
+          Delivery rules for every automated message. Opt-out and per-customer preferences always override these settings.
+        </p>
+        <Button variant="outline" onClick={() => setConfig(data.defaults)} disabled={!canManage || saving} className="min-h-[44px]">
+          Reset to defaults
+        </Button>
+        <Button onClick={() => void save()} disabled={!canManage || saving} className="min-h-[44px]">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
+          Save routing
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Bell className="h-4 w-4" aria-hidden /> Customer messages</CardTitle>
+          <CardDescription>Choose which channels may carry each message type. Suppressed messages stay visible in the outbox as skipped.</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {customerRows.map((event) => (
+            <div key={event.id} className="border-b last:border-b-0">
+              <div className="flex items-center justify-between gap-2 px-3 pt-3">
+                <p className="text-sm font-medium">{event.label}</p>
+                {event.id === 'marketing' && <Badge variant="outline" className="text-[10px]">needs consent</Badge>}
+              </div>
+              <RuleRow
+                label={event.label}
+                rule={config.customer[event.id] ?? { enabled: false, channels: [] }}
+                channels={data.channels.filter((channel) => channel !== 'inapp')}
+                disabled={!canManage}
+                onChange={(rule) => setConfig((c) => c ? ({ ...c, customer: { ...c.customer, [event.id]: rule } }) : c)}
+              />
+            </div>
+          ))}
+        </CardContent>
+        <CardContent className="border-t pt-4 space-y-3">
+          <p className="text-sm font-medium">Quiet hours</p>
+          <p className="text-xs text-muted-foreground">Reminders and marketing are deferred to the end of quiet hours; transactional messages are not delayed.</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="quiet-start">Start</Label>
+              <Input id="quiet-start" type="time" value={config.quietHours.start} disabled={!canManage} onChange={(e) => setConfig({ ...config, quietHours: { ...config.quietHours, start: e.target.value } })} className="min-h-[44px] w-[130px]" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="quiet-end">End</Label>
+              <Input id="quiet-end" type="time" value={config.quietHours.end} disabled={!canManage} onChange={(e) => setConfig({ ...config, quietHours: { ...config.quietHours, end: e.target.value } })} className="min-h-[44px] w-[130px]" />
+            </div>
+          </div>
+          <div className="space-y-2 rounded-md border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label htmlFor="consent-marketing" className="text-sm">Require consent for marketing</Label>
+                <p className="text-xs text-muted-foreground">Marketing is skipped unless the customer has contact consent.</p>
+              </div>
+              <Switch id="consent-marketing" checked={config.consent.requireForMarketing} disabled={!canManage} onCheckedChange={(v) => setConfig({ ...config, consent: { ...config.consent, requireForMarketing: v } })} aria-label="Require consent for marketing" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label htmlFor="consent-reminders" className="text-sm">Require consent for reminders</Label>
+                <p className="text-xs text-muted-foreground">Reminders are skipped when a customer has not consented.</p>
+              </div>
+              <Switch id="consent-reminders" checked={config.consent.requireForReminders} disabled={!canManage} onCheckedChange={(v) => setConfig({ ...config, consent: { ...config.consent, requireForReminders: v } })} aria-label="Require consent for reminders" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Users className="h-4 w-4" aria-hidden /> Staff alerts</CardTitle>
+          <CardDescription>Missed calls, voicemail and escalations are sent to your team, never blocked by customer preferences.</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {staffRows.map((event) => (
+            <div key={event.id} className="border-b last:border-b-0">
+              <p className="px-3 pt-3 text-sm font-medium">{event.label}</p>
+              <RuleRow
+                label={event.label}
+                rule={config.staff[event.id] ?? { enabled: false, channels: [] }}
+                channels={data.channels}
+                disabled={!canManage}
+                onChange={(rule) => setConfig((c) => c ? ({ ...c, staff: { ...c.staff, [event.id]: rule } }) : c)}
+              />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {!canManage && <p className="text-xs text-muted-foreground">Read-only — owner/admin can change notification routing.</p>}
+    </div>
+  )
+}
+
 /* ------------------------------ section ------------------------------ */
 
 export function IntegrationsSection() {
@@ -2301,12 +2701,17 @@ export function IntegrationsSection() {
       <Tabs defaultValue="outbox">
         <TabsList aria-label="Integration tools">
           <TabsTrigger value="outbox" className="min-h-[44px]"><Send className="h-4 w-4 mr-1.5" aria-hidden /> Outbox</TabsTrigger>
+          <TabsTrigger value="notifications" className="min-h-[44px]"><Bell className="h-4 w-4 mr-1.5" aria-hidden /> Notifications</TabsTrigger>
           <TabsTrigger value="calendar" className="min-h-[44px]"><CalendarDays className="h-4 w-4 mr-1.5" aria-hidden /> Calendar</TabsTrigger>
           <TabsTrigger value="inbound" className="min-h-[44px]"><WebhookIcon className="h-4 w-4 mr-1.5" aria-hidden /> Inbound webhook</TabsTrigger>
         </TabsList>
 
         <TabsContent value="outbox" className="mt-4">
           <OutboxTab canManage={canManage} />
+        </TabsContent>
+
+        <TabsContent value="notifications" className="mt-4">
+          <NotificationsTab canManage={canManage} />
         </TabsContent>
 
         <TabsContent value="calendar" className="mt-4">

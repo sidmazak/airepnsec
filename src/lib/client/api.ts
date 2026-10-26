@@ -150,9 +150,14 @@ export type SessionInfo = {
   demoAvailable?: boolean
 }
 
+export type CustomerCommPrefs = {
+  email: boolean; sms: boolean; whatsapp: boolean
+  service: boolean; booking: boolean; invoice: boolean; reminder: boolean; marketing: boolean
+}
+
 export type Customer = {
   id: string; name: string; email: string; phone: string; notes: string
-  tags: string[]; optOut: boolean; consentContact: boolean; createdAt: string
+  tags: string[]; optOut: boolean; consentContact: boolean; commPrefs?: CustomerCommPrefs; createdAt: string
 }
 
 /** A catalog entry from the hardware/model probe. */
@@ -273,7 +278,7 @@ export type IntegrationInfo = {
 }
 
 export type OutboxDispatchStats = {
-  processed: number; sent: number; failed: number; waiting: number
+  processed: number; sent: number; failed: number; waiting: number; skipped: number
 }
 
 export type IntegrationTestResult = { ok: boolean; detail: string }

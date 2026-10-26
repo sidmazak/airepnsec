@@ -109,3 +109,11 @@ credential tests. Docker rebuild verification completed 2026-10-22.
 ### Blocked (external)
 Real Ollama/OpenAI-compatible endpoints, pg/mysql servers, SIP/PSTN and SMS hardware, Docker daemon —
 not available here; behavior is documented, not faked.
+
+## 2026-10-26 — Phase 21: PABX/voicemail, notification routing, inbound SMS
+- Added Twilio voice PABX strategies (incl. simultaneous ring), ring timeout, after-hours actions, voicemail `<Record>` + transcript callback, missed-call staff alerts and caller ack SMS.
+- Added org notification routing (`/api/settings/notifications`) with customer event × channel matrix, staff alerts, quiet hours/deferral and consent requirements; dispatcher now records `skipped` honestly.
+- Added `Customer.commPrefs` per-channel preferences (API + customer dialog + detail badges); bumped Prisma client version to 7.
+- Added inbound SMS for all `sms_gateway` providers via signed `/api/telephony/sms/gateway-incoming`; shared STOP/START consent pipeline with Twilio inbound.
+- Added email providers Mailjet/SparkPost/Elastic Email and SMS providers Sinch/Infobip/ClickSend (builders, tests, credential UI, readiness).
+- Updated demo seed, docs and backlog. Verification: tsc clean, lint clean, 177/177 unit tests.

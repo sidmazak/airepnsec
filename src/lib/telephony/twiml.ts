@@ -27,6 +27,24 @@ export function verifyTwilioSignature(authToken: string, url: string, params: Re
  * publicBaseUrl first (what the operator told Twilio to call), then PUBLIC_BASE_URL
  * env, then the forwarded request URL. Any match = authentic request.
  */
+/** The best public origin for absolute callback URLs (Twilio transcribe callbacks require one). */
+export function publicOrigin(req: { headers: Headers; url: string }, config: Record<string, unknown>): string {
+  const cfgBase = str(config, 'publicBaseUrl').replace(/\/$/, '')
+  if (/^https?:\/\//.test(cfgBase)) return cfgBase
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/$/, '')
+  const forwardedHost = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
+  if (forwardedHost) {
+    const proto = req.headers.get('x-forwarded-proto') ?? (forwardedHost.startsWith('localhost') || forwardedHost.startsWith('127.') ? 'http' : 'https')
+    return `${proto}://${forwardedHost}`
+  }
+  try {
+    const url = new URL(req.url)
+    return `${url.protocol}//${url.host}`
+  } catch {
+    return ''
+  }
+}
+
 export function candidateWebhookUrls(req: { headers: Headers; url: string }, config: Record<string, unknown>, pathname: string): string[] {
   const out: string[] = []
   const push = (base: string) => {
@@ -124,8 +142,41 @@ export function gatherSpeech(actionPath: string, opts: { sayText?: string; voice
   return `<Gather ${attrs}>${inner}</Gather>`
 }
 
-export function dialNumber(number: string, opts: { ringTimeoutSec?: number } = {}): string {
-  return `<Dial timeout="${opts.ringTimeoutSec ?? 25}">${esc(number)}</Dial>`
+export function dialNumber(number: string, opts: { ringTimeoutSec?: number; actionPath?: string } = {}): string {
+  const action = opts.actionPath ? ` action="${esc(opts.actionPath)}" method="POST"` : ''
+  return `<Dial timeout="${opts.ringTimeoutSec ?? 25}"${action}>${esc(number)}</Dial>`
+}
+
+/** Ring several agents at once (parallel PABX). The first to answer wins. */
+export function dialNumbers(numbers: string[], opts: { ringTimeoutSec?: number; actionPath?: string } = {}): string {
+  const action = opts.actionPath ? ` action="${esc(opts.actionPath)}" method="POST"` : ''
+  const inner = numbers.map((number) => `<Number>${esc(number)}</Number>`).join('')
+  return `<Dial timeout="${opts.ringTimeoutSec ?? 25}"${action}>${inner}</Dial>`
+}
+
+/**
+ * Voicemail prompt + recording. The action URL receives RecordingUrl,
+ * RecordingDuration and caller metadata; the route persists the message and
+ * notifies staff. `transcribeCallback` (absolute) asks Twilio for a transcript.
+ */
+export function voicemailRecord(opts: {
+  actionPath: string
+  greeting: string
+  voice?: string
+  language?: string
+  maxLengthSec?: number
+  transcribeCallback?: string
+}): string {
+  const attrs = [
+    `action="${esc(opts.actionPath)}"`,
+    'method="POST"',
+    `maxLength="${opts.maxLengthSec ?? 120}"`,
+    'playBeep="true"',
+    'trim="trim-silence"',
+    'transcribe="true"',
+    opts.transcribeCallback ? `transcribeCallback="${esc(opts.transcribeCallback)}"` : '',
+  ].filter(Boolean).join(' ')
+  return say(opts.greeting, { voice: opts.voice, language: opts.language }) + `<Record ${attrs}/>`
 }
 
 export const hangup = '<Hangup/>'

@@ -8,6 +8,7 @@ import {
 } from '@/lib/telephony/twiml'
 import { resetNoInput } from '@/lib/telephony/no-input'
 import { normalizeCallStatus } from '@/lib/telephony/routing'
+import { notifyMissedCall, voicemailEnabled, voicemailResponse } from '@/lib/telephony/voicemail'
 
 export const pathname = '/api/telephony/voice/status'
 
@@ -83,13 +84,22 @@ export const POST = withPublic(async (req: NextRequest) => {
   }
   const voiceName = (typeof config.voiceName === 'string' && config.voiceName) || 'alice'
   const language = (typeof config.language === 'string' && config.language) || 'en-US'
-  if (params.routed === '1' && ['no_answer', 'missed', 'failed'].includes(status)) {
+  const missed = ['no_answer', 'missed', 'failed', 'cancelled', 'canceled', 'busy'].includes(status)
+
+  if (params.routed === '1' && missed) {
+    if (voicemailEnabled(config)) {
+      const org = await db.organization.findUnique({ where: { id: route.orgId }, select: { name: true } })
+      return voicemailResponse(req, config, org?.name ?? 'the business')
+    }
+    await notifyMissedCall({ orgId: route.orgId, callSid, from: params.From ?? '', to, reason: status })
     return twiml(
-      say('Our team is unavailable right now. Please leave a brief message after the tone, or call back shortly.', { voice: voiceName, language }) +
-        '<Record maxLength="60" playBeep="true"/>' +
-        say('Goodbye.', { voice: voiceName, language }) +
+      say('Our team is unavailable right now. Please call back shortly.', { voice: voiceName, language }) +
         hangup
     )
+  }
+
+  if (missed && !params.routed) {
+    await notifyMissedCall({ orgId: route.orgId, callSid, from: params.From ?? '', to, reason: status })
   }
   return plainResponse(204, '')
 }, { rateLimit: { limit: 600 } })

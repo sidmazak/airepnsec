@@ -216,6 +216,7 @@ model Customer {
   tags            String   @default("[]") // JSON string[]
   consentContact  Boolean  @default(true) // consent for service communications
   optOut          Boolean  @default(false) // explicit opt-out of outbound messaging
+  commPrefs       String   @default("{}") // JSON per-channel/event preferences
   externalRef     String   @default("")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

@@ -18,20 +18,39 @@ export const twilioConfigSchema = z.object({
   from: z.string().min(3, 'from is required (e.g. +15551234567 or whatsapp:+15551234567)'),
 })
 
+export const twilioVoiceAgentLineSchema = z.object({
+  number: z.string().min(3, 'agent line number is required').max(20),
+  label: z.string().max(80).optional(),
+  enabled: z.boolean().optional(),
+})
+
 export const twilioVoiceConfigSchema = z.object({
   from: z.string().min(6, 'from is required — the Twilio voice-capable number in E.164 format (e.g. +15551234567)'),
   language: z.string().max(10).optional(), // e.g. en-US
   voiceName: z.string().max(40).optional(), // Twilio <Say> voice, e.g. alice / Polly.Joanna
   transferNumber: z.string().max(20).optional(), // where <Dial> sends escalated calls
   publicBaseUrl: z.string().url().optional(), // the https base URL configured in the Twilio console (used for webhook signature validation)
+  // ---- PABX / call routing ----
+  routingStrategy: z.enum(['receptionist', 'least_busy', 'round_robin', 'redirect', 'simultaneous']).optional(),
+  agentLines: z.array(twilioVoiceAgentLineSchema).max(20).optional(),
+  ringTimeoutSec: z.coerce.number().int().min(5).max(60).optional(),
+  // ---- missed calls / voicemail ----
+  voicemailEnabled: z.boolean().optional(),
+  voicemailGreeting: z.string().max(500).optional(),
+  missedCallFollowUp: z.boolean().optional(), // notify staff in-app/email when a call is missed
+  missedCallSms: z.string().max(500).optional(), // optional acknowledgement texted to the caller
+  // ---- outside opening hours ----
+  afterHoursAction: z.enum(['receptionist', 'voicemail', 'transfer']).optional(),
+  afterHoursTransferNumber: z.string().max(20).optional(),
 })
 
 export const smsGatewayConfigSchema = z
   .object({
-    provider: z.enum(['textbee', 'httpsms', 'android_sms_gateway', 'telnyx', 'vonage', 'messagebird', 'plivo', 'generic_http']),
+    provider: z.enum(['textbee', 'httpsms', 'android_sms_gateway', 'telnyx', 'vonage', 'messagebird', 'plivo', 'sinch', 'infobip', 'clicksend', 'generic_http']),
     baseUrl: z.string().url('baseUrl must be a valid http(s) URL').optional(),
     from: z.string().max(40).optional(),
     deviceId: z.string().max(200).optional(),
+    servicePlanId: z.string().max(200).optional(), // Sinch
     // generic_http only:
     url: z.string().url('url must be a valid http(s) URL').optional(),
     method: z.enum(['POST', 'PUT']).optional(),
@@ -55,7 +74,7 @@ export const smsGatewayConfigSchema = z
 
 export const emailApiConfigSchema = z
   .object({
-    provider: z.enum(['sendgrid', 'mailgun', 'postmark', 'resend', 'brevo']),
+    provider: z.enum(['sendgrid', 'mailgun', 'postmark', 'resend', 'brevo', 'mailjet', 'sparkpost', 'elasticemail']),
     from: z.string().email('from must be the sender email address'),
     fromName: z.string().max(120).optional(),
     domain: z.string().max(200).optional(), // Mailgun sending domain
@@ -161,7 +180,7 @@ export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
     apiSecret: z.string().optional(), // vonage (API secret), plivo (auth token fallback)
     accountId: z.string().optional(), // plivo Auth ID
   }),
-  email_api: z.object({ apiKey: z.string().min(1, 'apiKey is required') }),
+  email_api: z.object({ apiKey: z.string().min(1, 'apiKey is required'), apiSecret: z.string().optional() }),
   caldav: z.object({ password: z.string().optional() }),
   google_calendar: z.object({
     clientId: z.string().min(1, 'clientId is required'),

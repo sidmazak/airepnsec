@@ -3,6 +3,7 @@ import { withAuth, json, parseBody } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { parseJson } from '@/lib/org'
+import { parseCustomerPrefs } from '@/lib/notifications/policy'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -50,6 +51,7 @@ export const GET = withAuth(async (req, ctx) => {
     tags: parseJson<string[]>(c.tags, []),
     optOut: c.optOut,
     consentContact: c.consentContact,
+    commPrefs: parseCustomerPrefs(c.commPrefs),
     createdAt: c.createdAt,
   }))
 

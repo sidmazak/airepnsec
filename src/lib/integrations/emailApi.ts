@@ -7,9 +7,9 @@
  * provider's message id. A 2xx means "accepted by the provider", not "opened".
  */
 
-export type EmailApiProviderId = 'sendgrid' | 'mailgun' | 'postmark' | 'resend' | 'brevo'
+export type EmailApiProviderId = 'sendgrid' | 'mailgun' | 'postmark' | 'resend' | 'brevo' | 'mailjet' | 'sparkpost' | 'elasticemail'
 
-export const EMAIL_API_PROVIDER_IDS: EmailApiProviderId[] = ['sendgrid', 'mailgun', 'postmark', 'resend', 'brevo']
+export const EMAIL_API_PROVIDER_IDS: EmailApiProviderId[] = ['sendgrid', 'mailgun', 'postmark', 'resend', 'brevo', 'mailjet', 'sparkpost', 'elasticemail']
 
 export function isEmailApiProviderId(value: unknown): value is EmailApiProviderId {
   return typeof value === 'string' && (EMAIL_API_PROVIDER_IDS as string[]).includes(value)
@@ -21,6 +21,9 @@ export const EMAIL_API_LABELS: Record<EmailApiProviderId, string> = {
   postmark: 'Postmark',
   resend: 'Resend',
   brevo: 'Brevo',
+  mailjet: 'Mailjet',
+  sparkpost: 'SparkPost',
+  elasticemail: 'Elastic Email',
 }
 
 export type EmailMessage = { to: string; subject: string; text: string; html?: string }
@@ -126,6 +129,72 @@ export function brevoRequest(config: EmailApiConfig, apiKey: string, message: Em
   }
 }
 
+export function mailjetRequest(config: EmailApiConfig, apiKey: string, apiSecret: string, message: EmailMessage): EmailApiRequest {
+  const from = str(config, 'from')
+  if (!from) throw new Error('Mailjet config needs a "from" email address')
+  if (!apiSecret) throw new Error('Mailjet needs both an API key and an API secret')
+  const fromName = str(config, 'fromName')
+  return {
+    url: 'https://api.mailjet.com/v3.1/send',
+    method: 'POST',
+    headers: {
+      authorization: `Basic ${Buffer.from(`${apiKey}:${apiSecret}`).toString('base64')}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      Messages: [{
+        From: { Email: from, ...(fromName ? { Name: fromName } : {}) },
+        To: [{ Email: message.to }],
+        Subject: message.subject,
+        TextPart: message.text,
+        ...(message.html ? { HTMLPart: message.html } : {}),
+      }],
+    }),
+  }
+}
+
+export function sparkpostRequest(config: EmailApiConfig, apiKey: string, message: EmailMessage): EmailApiRequest {
+  const from = str(config, 'from')
+  if (!from) throw new Error('SparkPost config needs a "from" email address')
+  const fromName = str(config, 'fromName')
+  return {
+    url: 'https://api.sparkpost.com/api/v1/transmissions',
+    method: 'POST',
+    headers: { authorization: apiKey, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      recipients: [{ address: message.to }],
+      content: {
+        from: fromName ? `${fromName} <${from}>` : from,
+        subject: message.subject,
+        text: message.text,
+        ...(message.html ? { html: message.html } : {}),
+      },
+    }),
+  }
+}
+
+export function elasticEmailRequest(config: EmailApiConfig, apiKey: string, message: EmailMessage): EmailApiRequest {
+  const from = str(config, 'from')
+  if (!from) throw new Error('Elastic Email config needs a "from" email address')
+  const fromName = str(config, 'fromName')
+  return {
+    url: 'https://api.elasticemail.com/v4/emails',
+    method: 'POST',
+    headers: { 'x-elasticemail-apikey': apiKey, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      Recipients: [{ Email: message.to }],
+      Content: {
+        From: fromName ? `${fromName} <${from}>` : from,
+        Subject: message.subject,
+        Body: [
+          { ContentType: 'PlainText', Content: message.text },
+          ...(message.html ? [{ ContentType: 'HTML', Content: message.html }] : []),
+        ],
+      },
+    }),
+  }
+}
+
 export function buildEmailApiRequest(provider: string, config: EmailApiConfig, secrets: EmailApiSecrets, message: EmailMessage): EmailApiRequest {
   if (!isEmailApiProviderId(provider)) throw new Error(`Unknown email API provider "${provider}"`)
   const apiKey = str(secrets, 'apiKey')
@@ -137,6 +206,9 @@ export function buildEmailApiRequest(provider: string, config: EmailApiConfig, s
     case 'postmark': return postmarkRequest(config, apiKey, message)
     case 'resend': return resendRequest(config, apiKey, message)
     case 'brevo': return brevoRequest(config, apiKey, message)
+    case 'mailjet': return mailjetRequest(config, apiKey, str(secrets, 'apiSecret'), message)
+    case 'sparkpost': return sparkpostRequest(config, apiKey, message)
+    case 'elasticemail': return elasticEmailRequest(config, apiKey, message)
   }
 }
 
@@ -158,6 +230,16 @@ export function buildEmailApiTestRequest(provider: string, config: EmailApiConfi
       return { url: 'https://api.resend.com/domains', method: 'GET', headers: { authorization: `Bearer ${apiKey}` } }
     case 'brevo':
       return { url: 'https://api.brevo.com/v3/account', method: 'GET', headers: { 'api-key': apiKey, accept: 'application/json' } }
+    case 'mailjet':
+      return {
+        url: 'https://api.mailjet.com/v3/REST/apikey?limit=1',
+        method: 'GET',
+        headers: { authorization: `Basic ${Buffer.from(`${apiKey}:${str(secrets, 'apiSecret')}`).toString('base64')}`, accept: 'application/json' },
+      }
+    case 'sparkpost':
+      return { url: 'https://api.sparkpost.com/api/v1/account', method: 'GET', headers: { authorization: apiKey, accept: 'application/json' } }
+    case 'elasticemail':
+      return { url: 'https://api.elasticemail.com/v4/domains', method: 'GET', headers: { 'x-elasticemail-apikey': apiKey, accept: 'application/json' } }
   }
 }
 

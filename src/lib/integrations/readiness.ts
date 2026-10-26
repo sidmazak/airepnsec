@@ -65,7 +65,10 @@ function usable(row: IntegrationRow): boolean {
     case 'smtp':
       return Boolean(str(config, 'host') && str(config, 'from'))
     case 'email_api':
-      return Boolean(secrets.apiKey && str(config, 'provider') && str(config, 'from'))
+      return Boolean(
+        secrets.apiKey && str(config, 'provider') && str(config, 'from') &&
+        (str(config, 'provider') !== 'mailjet' || secrets.apiSecret)
+      )
     case 'twilio_sms':
     case 'twilio_whatsapp':
     case 'twilio_voice':

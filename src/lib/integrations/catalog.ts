@@ -61,6 +61,9 @@ const EMAIL_PROVIDERS: IntegrationProviderOption[] = [
   { id: 'postmark', label: 'Postmark', brand: 'postmark' },
   { id: 'resend', label: 'Resend', brand: 'resend' },
   { id: 'brevo', label: 'Brevo', brand: 'brevo' },
+  { id: 'mailjet', label: 'Mailjet', brand: 'mailjet' },
+  { id: 'sparkpost', label: 'SparkPost', brand: 'sparkpost' },
+  { id: 'elasticemail', label: 'Elastic Email', brand: 'elasticemail' },
 ]
 
 const SMS_PROVIDERS: IntegrationProviderOption[] = [
@@ -71,6 +74,9 @@ const SMS_PROVIDERS: IntegrationProviderOption[] = [
   { id: 'vonage', label: 'Vonage', brand: 'vonage' },
   { id: 'messagebird', label: 'MessageBird', brand: 'messagebird' },
   { id: 'plivo', label: 'Plivo', brand: 'plivo' },
+  { id: 'sinch', label: 'Sinch', brand: 'sinch' },
+  { id: 'infobip', label: 'Infobip', brand: 'infobip' },
+  { id: 'clicksend', label: 'ClickSend', brand: 'clicksend' },
   { id: 'generic_http', label: 'Generic HTTP', brand: 'generic_http' },
 ]
 
@@ -87,7 +93,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   {
     kind: 'email_api',
     title: 'Email (provider API)',
-    blurb: 'Send through SendGrid, Mailgun, Postmark, Resend or Brevo — no SMTP server needed.',
+    blurb: 'Send through SendGrid, Mailgun, Postmark, Resend, Brevo, Mailjet, SparkPost or Elastic Email — no SMTP server needed.',
     category: 'communication',
     brand: 'email',
     needsCredentials: true,
@@ -136,7 +142,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   {
     kind: 'sms_gateway',
     title: 'SMS Gateway (bring your own)',
-    blurb: 'Use a phone/modem bridge or carrier API: TextBee, httpSMS, Android SMS Gateway, Telnyx, Vonage, MessageBird, Plivo or any HTTP gateway.',
+    blurb: 'Use a phone/modem bridge or carrier API: TextBee, httpSMS, Android SMS Gateway, Telnyx, Vonage, MessageBird, Plivo, Sinch, Infobip, ClickSend or any HTTP gateway.',
     category: 'communication',
     brand: 'httpsms',
     needsCredentials: false,

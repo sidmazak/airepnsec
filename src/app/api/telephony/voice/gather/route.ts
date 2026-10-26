@@ -10,6 +10,7 @@ import {
 } from '@/lib/telephony/twiml'
 import { bumpNoInput, resetNoInput } from '@/lib/telephony/no-input'
 import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { voicemailEnabled, voicemailResponse } from '@/lib/telephony/voicemail'
 
 export const pathname = '/api/telephony/voice/gather'
 
@@ -61,6 +62,7 @@ export const POST = withPublic(async (req: NextRequest) => {
   if (receptionistStatus !== 'running') {
     await db.message.create({ data: { conversationId: conversation.id, orgId: org.id, role: 'customer', content: speech || '(no speech)', meta: JSON.stringify({ source: 'phone', callSid, receptionistStatus }) } }).catch(() => {})
     await audit({ orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice', action: 'telephony.call_not_answered', entity: 'conversation', entityId: conversation.id, meta: { callSid, receptionistStatus } })
+    if (voicemailEnabled(config)) return voicemailResponse(req, config, org.name)
     const notice = receptionistStatus === 'paused'
       ? 'Our assistant is taking a break right now. Please call back later or leave a message on our website.'
       : 'This line is currently unavailable. Please try our website instead.'
@@ -79,6 +81,7 @@ export const POST = withPublic(async (req: NextRequest) => {
       resetNoInput(callSid)
       await db.conversation.update({ where: { id: conversation.id }, data: { status: 'closed' } })
       await audit({ orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice', action: 'telephony.call_ended', entity: 'conversation', entityId: conversation.id, meta: { callSid, reason: 'no_input' } })
+      if (voicemailEnabled(config)) return voicemailResponse(req, config, org.name)
       return twiml(say('It seems we got disconnected. Do give us a call back — goodbye.', { voice: voiceName, language }) + hangup)
     }
     return twiml(gatherSpeech('/api/telephony/voice/gather', {

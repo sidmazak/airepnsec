@@ -72,6 +72,21 @@ test('buildSendRequest telnyx, vonage, messagebird and plivo shapes', () => {
   assert.equal(plivo.url, 'https://api.plivo.com/v1/Account/MA123/Message/')
   assert.match(String(plivo.headers.Authorization), /^Basic /)
   assert.deepEqual(JSON.parse(plivo.body!), { src: '+15550001111', dst: '+15552223333', text: 'hi' })
+
+  const sinch = sms.buildSendRequest('sinch', { from: '+15550001111', servicePlanId: 'sp-1' }, { apiKey: 'sk' }, { to: '+1 555 222 3333', body: 'hi' })
+  assert.equal(sinch.url, 'https://us.sms.api.sinch.com/xms/v1/sp-1/batches')
+  assert.equal(sinch.headers.Authorization, 'Bearer sk')
+  assert.deepEqual(JSON.parse(sinch.body!), { from: '+15550001111', to: ['15552223333'], body: 'hi' })
+
+  const infobip = sms.buildSendRequest('infobip', { from: 'AI' }, { apiKey: 'ik' }, { to: '+1 555 222 3333', body: 'hi' })
+  assert.equal(infobip.url, 'https://api.infobip.com/sms/2/text/advanced')
+  assert.equal(infobip.headers.Authorization, 'App ik')
+  assert.deepEqual(JSON.parse(infobip.body!), { messages: [{ destinations: [{ to: '+15552223333' }], from: 'AI', text: 'hi' }] })
+
+  const click = sms.buildSendRequest('clicksend', { from: 'AI' }, { username: 'u', apiKey: 'ck' }, { to: '+1 555 222 3333', body: 'hi' })
+  assert.equal(click.url, 'https://rest.clicksend.com/v3/sms/send')
+  assert.match(String(click.headers.Authorization), /^Basic /)
+  assert.equal(JSON.parse(click.body!).messages[0].to, '+15552223333')
 })
 
 test('buildSendRequest new providers require their sender', () => {
@@ -80,6 +95,9 @@ test('buildSendRequest new providers require their sender', () => {
   assert.throws(() => sms.buildSendRequest('vonage', { from: 'AI' }, {}, { to: '1', body: 'hi' }), /apiKey/)
   assert.throws(() => sms.buildSendRequest('messagebird', {}, { apiKey: 'k' }, { to: '1', body: 'hi' }), /from/)
   assert.throws(() => sms.buildSendRequest('plivo', { from: '+1' }, {}, { to: '1', body: 'hi' }), /accountId/)
+  assert.throws(() => sms.buildSendRequest('sinch', { servicePlanId: 'sp' }, { apiKey: 'k' }, { to: '1', body: 'hi' }), /from/)
+  assert.throws(() => sms.buildSendRequest('sinch', { from: '+1' }, { apiKey: 'k' }, { to: '1', body: 'hi' }), /servicePlanId/)
+  assert.throws(() => sms.buildSendRequest('infobip', {}, { apiKey: 'k' }, { to: '1', body: 'hi' }), /from/)
 })
 
 test('extractMessageId finds common ids', () => {
@@ -87,6 +105,9 @@ test('extractMessageId finds common ids', () => {
   assert.equal(sms.extractMessageId('x', { data: { id: 'nested' } }), 'nested')
   assert.equal(sms.extractMessageId('plivo', { message_uuid: 'uuid-1' }), 'uuid-1')
   assert.equal(sms.extractMessageId('vonage', { messages: [{ 'message-id': 'v-1', status: '0' }] }), 'v-1')
+  assert.equal(sms.extractMessageId('sinch', { id: 'batch-1' }), 'batch-1')
+  assert.equal(sms.extractMessageId('infobip', { messages: [{ messageId: 'ib-1' }] }), 'ib-1')
+  assert.equal(sms.extractMessageId('clicksend', { data: { messages: [{ message_id: 'cs-1' }] } }), 'cs-1')
   assert.equal(sms.extractMessageId('x', null), '')
 })
 
@@ -115,5 +136,8 @@ test('buildTestRequest probes the new providers read-only', () => {
   assert.match(sms.buildTestRequest('messagebird', {}, { apiKey: 'k' })!.url, /\/messages\?limit=1/)
   assert.match(sms.buildTestRequest('vonage', {}, { apiKey: 'k', apiSecret: 's' })!.url, /get-balance/)
   assert.match(sms.buildTestRequest('plivo', {}, { accountId: 'MA1', apiSecret: 's' })!.url, /\/Account\/MA1\//)
+  assert.match(sms.buildTestRequest('sinch', { servicePlanId: 'sp' }, { apiKey: 'k' })!.url, /\/sp\/batches/)
+  assert.match(sms.buildTestRequest('infobip', {}, { apiKey: 'k' })!.url, /\/sms\/1\/reports/)
+  assert.match(sms.buildTestRequest('clicksend', {}, { username: 'u', apiKey: 'k' })!.url, /\/account$/)
   assert.equal(sms.buildTestRequest('vonage', {}, {}), null)
 })

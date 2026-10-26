@@ -3,6 +3,7 @@ import { withAuth, json, parseBody, ApiError, requireCustomer } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { parseJson } from '@/lib/org'
+import { normalizeCustomerPrefs, parseCustomerPrefs } from '@/lib/notifications/policy'
 import { invoiceOutstanding } from '@/lib/business/invoice'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -16,6 +17,11 @@ const patchSchema = z
     tags: z.array(z.string().trim().min(1).max(40)).max(24),
     optOut: z.boolean(),
     consentContact: z.boolean(),
+    commPrefs: z.object({
+      email: z.boolean(), sms: z.boolean(), whatsapp: z.boolean(),
+      service: z.boolean(), booking: z.boolean(), invoice: z.boolean(),
+      reminder: z.boolean(), marketing: z.boolean(),
+    }).partial(),
     externalRef: z.string().max(120),
   })
   .partial()
@@ -58,7 +64,7 @@ export const GET = withAuth(async (req, ctx, params) => {
   )
 
   return json({
-    customer: { ...customer, tags: parseJson<string[]>(customer.tags, []) },
+    customer: { ...customer, tags: parseJson<string[]>(customer.tags, []), commPrefs: parseCustomerPrefs(customer.commPrefs) },
     bookings,
     invoices: invoices.map((inv) => ({ ...inv, outstandingCents: invoiceOutstanding(inv.totalCents, inv.paidCents) })),
     summary: {
@@ -82,6 +88,9 @@ export const PATCH = withAuth(async (req, ctx, params) => {
   if (body.tags !== undefined) data.tags = JSON.stringify(body.tags)
   if (body.optOut !== undefined) data.optOut = body.optOut
   if (body.consentContact !== undefined) data.consentContact = body.consentContact
+  if (body.commPrefs !== undefined) {
+    data.commPrefs = JSON.stringify(normalizeCustomerPrefs({ ...parseCustomerPrefs(customer.commPrefs), ...body.commPrefs }))
+  }
   if (body.externalRef !== undefined) data.externalRef = body.externalRef
 
   const updated = await db.customer.update({ where: { id: customer.id }, data })
@@ -96,7 +105,7 @@ export const PATCH = withAuth(async (req, ctx, params) => {
     meta: { fields: Object.keys(data) },
   })
 
-  return json({ ...updated, tags: parseJson<string[]>(updated.tags, []) })
+  return json({ ...updated, tags: parseJson<string[]>(updated.tags, []), commPrefs: parseCustomerPrefs(updated.commPrefs) })
 }, { roles: ['owner', 'admin', 'agent'] })
 
 /**

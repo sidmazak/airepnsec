@@ -22,7 +22,9 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Security | `/api/auth/2fa/*`, `/api/auth/sessions/revoke-all` | DONE | TOTP enrollment/disable; revoke other sessions. |
 | Team | `/api/users*` | DONE | Members, invitations, roles, deactivation, session revocation, password reset; owner/admin only. |
 | Business Profile | `/api/setup`, `/api/settings/*` | DONE | Profile, hours, policies, AI identity, collections config. |
-| Integrations | `/api/integrations/*` | DONE | SMTP + 5 email APIs, Twilio, 8 SMS gateways, Stripe/Square, QuickBooks/Xero/MYB, Shopify/WooCommerce/Wix/Mailchimp, CalDAV, Google/Microsoft calendars, outbound webhooks; per-kind tests + contact sync. |
+| Integrations | `/api/integrations/*` | DONE | SMTP + 8 email APIs, Twilio (voice/voicemail/SMS/WhatsApp), 11 SMS gateways, Stripe/Square, QuickBooks/Xero/MYB, Shopify/WooCommerce/Wix/Mailchimp, CalDAV, Google/Microsoft calendars, outbound webhooks; per-kind tests + contact sync. |
+| Notification routing / consent | `/api/settings/notifications`, `/api/customers*` | DONE | Customer event × channel matrix, staff alerts, quiet hours with deferral, consent requirements, per-customer `commPrefs`, honest `skipped` outbox rows. |
+| Telephony PABX / voicemail | `/api/telephony/voice/*` | DONE | least-busy/round-robin/redirect/simultaneous, ring timeout, after-hours actions, voicemail recording + transcript, staff alerts, caller ack SMS. |
 | Diagnostics | `/api/health/detail` | DONE | DB tuning, worker leases, heartbeat, providers, counts. |
 | Setup Wizard | `/api/setup*` | DONE | Autosave/resume; readiness checks; end-to-end test. |
 | Auth screen | `/api/auth/*`, `/api/session` | DONE | scrypt passwords, hashed sessions, optional TOTP. |
@@ -41,9 +43,9 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Real-time voice | DONE | WebRTC via OpenAI-compatible realtime endpoint; no local/browser realtime implementation. |
 | Streaming token output | DONE | `POST /api/ai/stream` — SSE (`delta`/`tool`/`done`/`error`); non-streaming providers answer in one `delta` + `done`. |
 | Native tool-calling | DONE | Provider function-calling when the endpoint supports `tools`; automatic fallback to the strict JSON tool loop otherwise. |
-| SMS | DONE | Twilio plus `sms_gateway` adapters: TextBee, httpSMS, android-sms-gateway, Telnyx, Vonage, MessageBird, Plivo, generic HTTP. |
+| SMS | DONE | Twilio plus `sms_gateway` adapters: TextBee, httpSMS, android-sms-gateway, Telnyx, Vonage, MessageBird, Plivo, Sinch, Infobip, ClickSend, generic HTTP. Inbound SMS (Twilio + generic signed webhook), STOP/START consent. Delivery receipts are not ingested. |
 | WhatsApp | DONE | Twilio inbound/outbound; inbound webhook signature-verified. |
-| Outbound email | DONE | SMTP via nodemailer or `email_api` (SendGrid/Mailgun/Postmark/Resend/Brevo); invoice HTML/text templates; dispatcher prefers the API and never double-sends. |
+| Outbound email | DONE | SMTP via nodemailer or `email_api` (SendGrid/Mailgun/Postmark/Resend/Brevo/Mailjet/SparkPost/Elastic Email); invoice HTML/text templates; dispatcher prefers the API and never double-sends. |
 | Inbound email | **DONE** | IMAP polling + signed webhook ingest; per-folder config, MIME parsing, SSRF guard, AI reply queued to the outbox. |
 | Calendar | DONE | ICS feed + per-booking `.ics` + two-way CalDAV push/pull + Google Calendar OAuth sync + Microsoft 365 Graph OAuth sync. External busy times become `CalendarBlock` rows, so a busy diary removes slots from availability and blocks new bookings. |
 | Payments online | DONE | Stripe + Square Payment Links, signature-verified webhooks, generic webhook; Stripe preferred when both are enabled. |
@@ -59,7 +61,8 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | 2FA / session revocation | DONE | TOTP RFC 6238; DB sessions with `revokedAt`; revoke-all endpoint. |
 | Worker single-flight | DONE | `WorkerLease` + TTL recovery; manual endpoints return 409 while busy. |
 | Conversation turn serialization | DONE | DB lock + token; stale-lock takeover; 409 `conversation_busy`. |
-| PABX routing | DONE | least-busy/round-robin/redirect, line pause/disable, real load, call records. |
+| PABX routing | DONE | least-busy/round-robin/redirect/simultaneous, ring timeout, line pause/disable, real load, call records. |
+| Voicemail / after-hours | DONE | TwiML `<Record>` + transcript callback, staff in-app/email alerts, caller acknowledgement SMS, paused/no-input/missed-call fallback. |
 | Receptionist runtime switch | DONE | Org-wide `running \| paused \| stopped` (`Organization.receptionistStatus`): dashboard control, audited changes, gates inbound SMS/WhatsApp/voice/web chat and realtime sessions. |
 | SSO (SAML/OIDC) | DONE | SAML 2.0 + OIDC (PKCE) + SCIM 2.0; encrypted IdP/client secrets; audited. |
 | Team user management | DONE | `/api/users*`: members, one-time invitations (7-day TTL, hashed token, emailed via the outbox), invitation revocation, role changes, deactivation, session revocation, password reset; Team section in the SPA + public Join/Reset screens. Owners manage owners, admins manage agents/viewers, the last active owner is protected. |

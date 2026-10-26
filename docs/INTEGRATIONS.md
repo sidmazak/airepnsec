@@ -1,6 +1,6 @@
 # Integrations — AI Secretary
 
-How the app talks to third-party services: email (SMTP or SendGrid/Mailgun/Postmark/Resend/Brevo), SMS/WhatsApp (Twilio or a self-hosted/carrier SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), inbound email (IMAP), Stripe/Square payments, QuickBooks/Xero/MYB accounting, Shopify/WooCommerce/Wix/Mailchimp contact sync, CalDAV calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
+How the app talks to third-party services: email (SMTP or SendGrid/Mailgun/Postmark/Resend/Brevo/Mailjet/SparkPost/Elastic Email), SMS/WhatsApp (Twilio or a self-hosted/carrier SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), inbound email (IMAP), Stripe/Square payments, QuickBooks/Xero/MYB accounting, Shopify/WooCommerce/Wix/Mailchimp contact sync, CalDAV calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
 browser **Voice Console** is not an integration row — it rides the AI provider layer (capabilities
 `stt`/`tts`, same BYOK + data-mode policy as chat; see [ARCHITECTURE.md](./ARCHITECTURE.md) §9).
 Everything here is **BYOK (bring your own key)** — the app ships with zero third-party accounts and
@@ -96,11 +96,12 @@ already_configured`.
 
 | | |
 |---|---|
-| Config | `provider` (required): `textbee`, `httpsms`, `android_sms_gateway`, `telnyx`, `vonage`, `messagebird`, `plivo`, or `generic_http`; `baseUrl?` (override the provider default); `from?` (required for httpSMS and the carrier APIs); `deviceId?` (TextBee); generic_http: `url` (required), `method` (`POST`/`PUT`), `authHeaderName?`, `bodyTemplate?`, `testRecipient?`, `allowPrivate?` |
-| Secrets | Provider-dependent: `apiKey?` (TextBee/httpSMS/Telnyx/MessageBird), `apiKey`+`apiSecret` (Vonage), `accountId`+`apiSecret` (Plivo auth id/token), `token?` or `username`+`password?` (android-sms-gateway; local mode may need none), `authValue?` (generic custom header). Absent credentials are legitimate; sends/tests fail honestly. |
-| Test routine | Read-only probe: TextBee `GET /gateway/devices`, httpSMS `GET /v1/messages?limit=1`, android-sms-gateway `GET /3rdparty/v1/messages?limit=1`, Telnyx `GET /messages?page[size]=1`, Vonage `GET /account/get-balance`, MessageBird `GET /messages?limit=1`, Plivo `GET /Account/{authId}/` (10 s). `generic_http` has no standard probe — it **sends a real SMS** to `testRecipient` if set, otherwise returns an explicit "set a testRecipient" failure. |
-| Delivery | `sendOrgSms()` prefers an enabled `twilio_sms` row; otherwise the enabled `sms_gateway`. Requests: TextBee `POST /gateway/send-sms`, httpSMS `POST /v1/messages/send`, android-sms-gateway `POST /3rdparty/v1/messages`, Telnyx `POST /messages`, Vonage `POST /sms/json`, MessageBird `POST /messages`, Plivo `POST /Account/{authId}/Message/`, generic template with `{{to}}`/`{{message}}`/`{{from}}`. |
+| Config | `provider` (required): `textbee`, `httpsms`, `android_sms_gateway`, `telnyx`, `vonage`, `messagebird`, `plivo`, `sinch`, `infobip`, `clicksend`, or `generic_http`; `baseUrl?` (override the provider default); `from?` (required for httpSMS and the carrier APIs); `deviceId?` (TextBee); `servicePlanId?` (Sinch); generic_http: `url` (required), `method` (`POST`/`PUT`), `authHeaderName?`, `bodyTemplate?`, `testRecipient?`, `allowPrivate?` |
+| Secrets | Provider-dependent: `apiKey?` (TextBee/httpSMS/Telnyx/MessageBird/Sinch/Infobip/ClickSend), `apiKey`+`apiSecret` (Vonage), `accountId`+`apiSecret` (Plivo auth id/token), `username`+`apiKey` (ClickSend basic auth), `token?` or `username`+`password?` (android-sms-gateway; local mode may need none), `authValue?` (generic custom header). Absent credentials are legitimate; sends/tests fail honestly. |
+| Test routine | Read-only probe: TextBee `GET /gateway/devices`, httpSMS `GET /v1/messages?limit=1`, android-sms-gateway `GET /3rdparty/v1/messages?limit=1`, Telnyx `GET /messages?page[size]=1`, Vonage `GET /account/get-balance`, MessageBird `GET /messages?limit=1`, Plivo `GET /Account/{authId}/`, Sinch `GET /xms/v1/{servicePlanId}/batches`, Infobip `GET /sms/1/reports`, ClickSend `GET /account` (10 s). `generic_http` has no standard probe — it **sends a real SMS** to `testRecipient` if set, otherwise returns an explicit "set a testRecipient" failure. |
+| Delivery | `sendOrgSms()` prefers an enabled `twilio_sms` row; otherwise the enabled `sms_gateway`. Requests: TextBee `POST /gateway/send-sms`, httpSMS `POST /v1/messages/send`, android-sms-gateway `POST /3rdparty/v1/messages`, Telnyx `POST /messages`, Vonage `POST /sms/json`, MessageBird `POST /messages`, Plivo `POST /Account/{authId}/Message/`, Sinch `POST /xms/v1/{servicePlanId}/batches`, Infobip `POST /sms/2/text/advanced`, ClickSend `POST /sms/send`, generic template with `{{to}}`/`{{message}}`/`{{from}}`. |
 | Honesty | HTTP 2xx means **accepted by the gateway**, not delivered to a handset. `statusReason` says "awaiting handset delivery"; delivery receipts require separate gateway webhooks (not implemented). Errors are sanitized/redacted. |
+| Inbound | Point the gateway's received-message webhook at `POST /api/telephony/sms/gateway-incoming?org=<org-slug>` with the org webhook secret in `x-webhook-secret`. JSON keys accepted: `from`/`sender`, `to`, `body`/`message`/`text`, `id`. STOP/START/UNSTOP keywords update `Customer.optOut`; the AI reply is sent through whichever SMS sender is enabled. |
 | Wiring | Create the row, add credentials, click **Test**, enable it. Pending SMS outbox rows are nudged and retried on the next 30 s tick. |
 
 `generic_http` SSRF note: private/LAN addresses are intentionally allowed here because a
@@ -111,9 +112,9 @@ admin-supplied and never customer-controlled.
 
 | | |
 |---|---|
-| Config | `provider` (`sendgrid`, `mailgun`, `postmark`, `resend`, `brevo`), `from`, `fromName?`, `domain?` (Mailgun), `region?` (`us`/`eu`, Mailgun), `messageStream?` (Postmark, default `outbound`) |
-| Secrets | `apiKey` |
-| Test routine | Read-only provider probe: SendGrid scopes, Mailgun domains, Postmark server, Resend domains, Brevo account. Never sends an email. |
+| Config | `provider` (`sendgrid`, `mailgun`, `postmark`, `resend`, `brevo`, `mailjet`, `sparkpost`, `elasticemail`), `from`, `fromName?`, `domain?` (Mailgun), `region?` (`us`/`eu`, Mailgun), `messageStream?` (Postmark, default `outbound`) |
+| Secrets | `apiKey`; `apiSecret` additionally required for Mailjet |
+| Test routine | Read-only provider probe: SendGrid scopes, Mailgun domains, Postmark server, Resend domains, Brevo account, Mailjet API keys, SparkPost account, Elastic Email domains. Never sends an email. |
 | Delivery | Raw HTTP to the provider API; the dispatcher prefers `email_api` over SMTP. A 2xx means the provider accepted the message; delivery receipts depend on the provider. |
 | Failure handling | Provider errors are sanitized/redacted. The dispatcher does not fall back to SMTP after an API failure, so an invoice is never sent twice. |
 
@@ -185,10 +186,10 @@ receivers get `x-signature: none` and can distinguish it from a real signature).
 
 | | |
 |---|---|
-| Config | `from` (required — the voice-capable Twilio number, E.164, e.g. `+15551234567`), `language?` (TwiML speech language, default `en-US`), `voiceName?` (Twilio `<Say>` voice, default `alice`), `transferNumber?` (where escalated calls are `<Dial>`ed — without it escalation takes a message and hangs up), `publicBaseUrl?` (the exact https base URL you configure in the Twilio console — used for webhook signature validation) |
+| Config | `from` (required — the voice-capable Twilio number, E.164, e.g. `+15551234567`), `language?`, `voiceName?`, `transferNumber?` (escalation target), `publicBaseUrl?`, `routingStrategy?` (`receptionist`, `least_busy`, `round_robin`, `redirect`, `simultaneous`), `agentLines?` (up to 20 `{label, number}`), `ringTimeoutSec?` (5–60), `voicemailEnabled?`, `voicemailGreeting?`, `missedCallFollowUp?`, `missedCallSms?`, `afterHoursAction?` (`receptionist`, `voicemail`, `transfer`), `afterHoursTransferNumber?` |
 | Secrets | `accountSid`, `authToken` (both required) |
 | Test routine | Same real authenticated Twilio account fetch as `twilio_sms`, reported as `Twilio Phone (voice) verified — account "…" (active), number +1555…`. |
-| Behavior | Inbound calls: signature-verified webhook opens a `phone` conversation keyed by CallSid, greets, then runs the FULL AI receptionist turn per spoken utterance (`<Gather input="speech">` — Twilio does the speech recognition and its `<Say>` voices the reply; no audio is stored, only the text transcript in `Conversation`/`Message` rows). Escalation → `<Dial> transferNumber` or a message-taken hangup; status callbacks close the call and audit. Inbound SMS threads per sender and answers asynchronously via the Twilio Messages API (§3 outbox honesty applies). |
+| Behavior | Inbound calls: signature-verified webhook opens a `phone` conversation keyed by CallSid, greets, then runs the FULL AI receptionist turn per spoken utterance (`<Gather input="speech">` — Twilio does the speech recognition and its `<Say>` voices the reply). Escalation → `<Dial> transferNumber`, voicemail, or a message-taken hangup. Outside opening hours the configured action applies (voicemail by default). PABX strategies ring one agent or every available line at once (`simultaneous`); disabled/paused lines are excluded and `ringTimeoutSec` bounds the ring. Missed/voicemail calls persist the recording and transcript, notify staff, and can queue a caller acknowledgement SMS. Inbound SMS threads per sender and answers asynchronously via the enabled SMS sender (§3 outbox honesty applies). |
 
 **Wiring the Twilio console** (Phone Numbers → your number → Voice & Messaging; all three URLs
 are shown copyable on the integration card):
@@ -196,6 +197,10 @@ are shown copyable on the integration card):
 1. **A call comes in** → `POST <public-base-url>/api/telephony/voice/incoming`
 2. **Call status changes** → `POST <public-base-url>/api/telephony/voice/status`
 3. **A message comes in** → `POST <public-base-url>/api/telephony/sms/incoming`
+
+The voicemail `<Record>` action posts to `/api/telephony/voice/voicemail` (signature-verified);
+the recording/transcript is stored on the conversation and surfaced to staff. No extra console
+configuration is required for it.
 
 The Gather step is wired by the TwiML itself (action `/api/telephony/voice/gather`) — no console
 configuration needed.
@@ -521,3 +526,207 @@ unauthenticated listener.
   `X-Twilio-Signature` (HMAC-SHA1, timing-safe) — see §2 for the candidate-URL
   scheme and proxy notes. Phone/SMS audio never reaches the server: only Twilio's
   text transcription and the reply text are stored.
+
+## Notes for 3rd Party Providers
+
+### Third-Party Documentation References
+
+**Twilio**
+- Voice/SMS API docs: https://www.twilio.com/docs/voice
+- Video/webinars: https://www.twilio.com/video
+- Pricing: https://www.twilio.com/pricing
+- Account management: https://www.twilio.com/console
+
+**SendGrid**
+- API docs: https://sendgrid.com/docs/api-reference
+- SMTP docs: https://sendgrid.com/docs/smtp-api
+- Marketing API: https://sendgrid.com/docs/for-developers/sending-email/api-v3
+- Developer guide: https://sendgrid.com/docs/for-developers
+
+**Mailgun**
+- API docs: https://www.mailgun.com/docs/api
+- SMTP docs: https://www.mailgun.com/docs/smtp
+- Webhook docs: https://www.mailgun.com/docs/technical-webhooks
+- Getting started: https://www.mailgun.com/getting-started
+
+**Postmark**
+- API docs: https://postmarkapp.com/developer/api
+- SMTP docs: https://postmarkapp.com/developer/smtp-api
+- Outbound email: https://postmarkapp.com/developer/outbound-email
+- API documentation: https://postmarkapp.com/developer/api/api-overview
+
+**Resend**
+- API docs: https://resend.com/docs
+- Email send API: https://resend.com/docs/api-reference/emails
+- Email create API: https://resend.com/docs/api-reference/emails/create
+- Getting started: https://resend.com/docs/getting-started
+
+**Brevo (formerly Sendinblue)**
+- API docs: https://developers.brevo.com/docs
+- Email API: https://developers.brevo.com/docs/v2/reference/emails/post-send
+- Transactional emails: https://developers.brevo.com/docs/v2/transactional-emails
+- SMS API: https://developers.brevo.com/docs/v2/sms
+
+**Mailjet**
+- API docs: https://docs.mailjet.com
+- Transactional emails: https://docs.mailjet.com/docs/transactional
+- SMS API: https://docs.mailjet.com/docs/sms
+- Getting started: https://docs.mailjet.com/getting-started.html
+
+**SparkPost**
+- API docs: https://developers.sparkpost.com/api/v1
+- Sending: https://developers.sparkpost.com/api/v1/sending.html
+- Transmission API: https://developers.sparkpost.com/api/v1/transmissions.html
+- Guides: https://developers.sparkpost.com/guides.html
+
+**Elastic Email**
+- API docs: https://www.elasticemail.com/docs
+- Email API: https://www.elasticemail.com/docs/api/REST/send
+- Contacts API: https://www.elasticemail.com/docs/api/REST/contacts
+- Getting started: https://www.elasticemail.com/getting-started
+
+**TextBee**
+- API docs: https://www.textbee.io/api-docs
+- Getting started: https://www.textbee.io/getting-started
+
+**httpSMS**
+- API docs: https://docs.httpsms.io
+- Getting started: https://docs.httpsms.io/getting-started
+
+**Android SMS Gateway**
+- GitHub: https://github.com/android-sms-gateway
+- Documentation: https://github.com/android-sms-gateway/android-sms-gateway/wiki
+
+**Telnyx**
+- API docs: https://developers.telnyx.com
+- SMS API: https://developers.telnyx.com/reference/sms
+- Voice API: https://developers.telnyx.com/reference/voice
+- Getting started: https://developers.telnyx.com/guides/getting-started
+
+**Vonage (Nexmo)**
+- API docs: https://developers.vonage.com
+- SMS API: https://developers.vonage.com/messaging-api/messages
+- Voice API: https://developers.vonage.com/voice-api/api-documentation
+- Getting started: https://developers.vonage.com/messaging-api/get-started
+
+**MessageBird**
+- API docs: https://developers.messagebird.com
+- SMS API: https://developers.messagebird.com/sms-api/messages
+- Voice API: https://developers.messagebird.com/voice-api
+- Getting started: https://developers.messagebird.com/getting-started
+
+**Plivo**
+- API docs: https://developers.plivo.com
+- SMS API: https://developers.plivo.com/api-reference/sms/
+- Voice API: https://developers.plivo.com/api-reference/voice/
+- Getting started: https://developers.plivo.com/getting-started
+
+**Sinch**
+- API docs: https://developer.sinch.com
+- SMS API: https://developer.sinch.com/en/api/sms
+- Voice API: https://developer.sinch.com/en/api/voice
+- Getting started: https://developer.sinch.com/getting-started
+
+**Infobip**
+- API docs: https://www.infobip.com/docs
+- SMS API: https://www.infobip.com/docs/api/sms
+- Voice API: https://www.infobip.com/docs/api/voice
+- Getting started: https://www.infobip.com/getting-started
+
+**ClickSend**
+- API docs: https://www.clicksend.com/docs
+- SMS API: https://www.clicksend.com/docs/sms-api/send-sms
+- Getting started: https://www.clicksend.com/getting-started
+
+**Google Calendar API**
+- Official docs: https://developers.google.com/calendar/api/v3/reference
+- Quickstart: https://developers.google.com/calendar/quickstart
+- OAuth 2.0: https://developers.google.com/identity/protocols/oauth2
+
+**Microsoft Graph API**
+- Docs: https://learn.microsoft.com/en-us/graph/api/overview
+- Calendar API: https://learn.microsoft.com/en-us/graph/api/resources/calendar
+- Getting started: https://learn.microsoft.com/en-us/graph/get-started
+
+**Google OAuth**
+- Authorization: https://developers.google.com/identity/protocols/oauth2
+- Consent screen: https://console.cloud.google.com/apis/credentials
+
+**Microsoft OAuth**
+- Docs: https://learn.microsoft.com/en-us/azure/active-directory/develop/
+- Registration: https://learn.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app
+
+**Stripe**
+- API docs: https://stripe.com/docs/api
+- Payment Links: https://stripe.com/docs/payment-links
+- Webhooks: https://stripe.com/docs/webhooks
+- Getting started: https://stripe.com/docs/quickstart
+
+**Square**
+- API docs: https://developer.squareup.com/docs/api
+- Payments API: https://developer.squareup.com/docs/api/order-payment
+- Webhooks: https://developer.squareup.com/docs/webhooks
+- Getting started: https://developer.squareup.com/docs/get-started
+
+**QuickBooks Online**
+- API docs: https://developer.intuit.com/v2/api/documentation/quickbooks-2021.2.0
+- OAuth 2.0: https://developer.intuit.com/v2/api/oauth
+- Get started: https://developer.intuit.com/v2/api/getting-started
+
+**Xero**
+- API docs: https://developer.xero.com/documentation/api/v2
+- OAuth 2.0: https://developer.xero.com/documentation/oauth-2/
+- Getting started: https://developer.xero.com/documentation/getting-started/
+
+**MYOB (Australian Financial Services)**
+- API docs: https://api.myob.com/developer
+- OAuth 2.0: https://api.myob.com/developer/oauth/authorize
+- Getting started: https://api.myob.com/developer/getting-started
+
+**Shopify**
+- REST API: https://shopify.dev/api/admin-rest
+- GraphQL: https://shopify.dev/api/admin-graphql
+- OAuth: https://shopify.dev/apps/auth
+- Getting started: https://shopify.dev/apps/quickstart
+
+**WooCommerce**
+- REST API: https://woocommerce.com/docs/woocommerce-rest-api
+- OAuth: https://docs.woocommerce.com/documentation/plugins/rest-api/oauth/
+- Getting started: https://docs.woocommerce.com/documentation/plugins/rest-api/getting-started
+
+**Wix Stores**
+- REST API: https://dev.wix.com/docs/rest/api
+- Getting started: https://dev.wix.com/docs/start/quickstart
+
+**Mailchimp**
+- API docs: https://mailchimp.com/developer
+- Campaigns: https://mailchimp.com/developer/marketing-api/campaigns
+- Lists: https://mailchimp.com/developer/marketing-api/lists
+- Getting started: https://mailchimp.com/developer/get-started
+
+**CalDAV**
+- RFC 4791: https://datatracker.ietf.org/doc/html/rfc4791
+- Calendar Server: https://calendarserver.org/specs/rfc6352/
+- Clients: https://webcal.io/docs/calendars/
+
+**Stripe**
+- Documentation: https://stripe.com/docs/webhooks
+- Signing: https://stripe.com/docs/webhooks/signing-requests
+- Testing: https://stripe.com/docs/webhooks/testing
+
+**Square**
+- Documentation: https://developer.squareup.com/docs/webhooks
+- Signing: https://developer.squareup.com/docs/webhooks/secure-verification
+- Testing: https://developer.squareup.com/docs/webhooks/testing
+
+**Twilio**
+- Documentation: https://www.twilio.com/docs/webhooks/webhook-events
+- Signing: https://www.twilio.com/docs/webhooks/security
+- Testing: https://www.twilio.com/docs/webhooks/testing
+
+**Generic HTTP / SSRF**
+- Security notes are detailed in `docs/INTEGRATIONS.md` §9, with guidance on: private network risk, certificate validation bypass, timeout and size limits, request/response redaction, and recursion prevention.
+
+### Pricing and Account Setup
+
+All integrations are **BYOK** — you will need accounts wi

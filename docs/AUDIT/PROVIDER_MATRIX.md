@@ -35,9 +35,9 @@ Results are stored in `lastTestAt/lastTestOk/lastTestError`; responses never inc
 |---|---|---|---|
 | `smtp` | nodemailer | `transport.verify()` | Anonymous relay allowed. |
 | `twilio_sms` | Twilio Messages API | account fetch | First-choice SMS sender. |
-| `sms_gateway` | adapter per `config.provider` | provider-specific probe (or a real test SMS for generic HTTP with `testRecipient`) | TextBee, httpSMS, android-sms-gateway, generic HTTP. |
+| `sms_gateway` | adapter per `config.provider` | provider-specific probe (or a real test SMS for generic HTTP with `testRecipient`) | TextBee, httpSMS, android-sms-gateway, Telnyx, Vonage, MessageBird, Plivo, Sinch, Infobip, ClickSend, generic HTTP. Inbound via signed `/api/telephony/sms/gateway-incoming` (org slug + webhook secret). |
 | `twilio_whatsapp` | Twilio Messages API | account fetch | `whatsapp:` normalization; inbound webhook. |
-| `twilio_voice` | Twilio Messages API (SMS fallback) | account fetch | Inbound calls via TwiML; PABX line routing; can send SMS. |
+| `twilio_voice` | Twilio Messages API (SMS fallback) | account fetch | Inbound calls via TwiML; PABX line routing (incl. simultaneous); after-hours; voicemail recording/transcription; can send SMS. |
 | `caldav` | PUT/DELETE events | PROPFIND | Two-way sync (push + pull) via `/api/integrations/caldav-sync`. |
 | `stripe` | Payment Links | `/v1/account` | Payment links + signature-verified webhook. |
 | `webhook_out` | signed POST | real signed test POST | HMAC-SHA256; one row per destination. |
