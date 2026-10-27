@@ -22,7 +22,7 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Security | `/api/auth/2fa/*`, `/api/auth/sessions/revoke-all` | DONE | TOTP enrollment/disable; revoke other sessions. |
 | Team | `/api/users*` | DONE | Members, invitations, roles, deactivation, session revocation, password reset; owner/admin only. |
 | Business Profile | `/api/setup`, `/api/settings/*` | DONE | Profile, hours, policies, AI identity, collections config. |
-| Integrations | `/api/integrations/*` | DONE | SMTP + 8 email APIs, Twilio (voice/voicemail/SMS/WhatsApp), direct Meta WhatsApp Cloud API, 11 SMS gateways, Stripe/Square, QuickBooks/Xero/MYB, Shopify/WooCommerce/Wix/Mailchimp, CalDAV, Google/Microsoft calendars, outbound webhooks; per-kind tests + contact sync + per-provider setup docs. |
+| Integrations | `/api/integrations/*` | DONE | SMTP + 8 email APIs, Twilio (voice/voicemail/SMS/WhatsApp), direct Meta WhatsApp Cloud API, 11 SMS gateways, Stripe/Square, QuickBooks/Xero/MYB, Shopify/WooCommerce/Wix/Mailchimp, CalDAV, Google/Microsoft calendars, outbound webhooks; per-kind tests + contact sync + per-provider setup docs + delivery receipts. |
 | Notification routing / consent | `/api/settings/notifications`, `/api/customers*` | DONE | Customer event × channel matrix, staff alerts, quiet hours with deferral, consent requirements, per-customer `commPrefs`, honest `skipped` outbox rows. |
 | Telephony PABX / voicemail | `/api/telephony/voice/*` | DONE | least-busy/round-robin/redirect/simultaneous, ring timeout, after-hours actions, voicemail recording + transcript, staff alerts, caller ack SMS. |
 | Receptionist schedule | `/api/settings/receptionist` | DONE | Weekly windows in the org fixed-offset timezone, overnight support, effective paused state, next-open time; dashboard editor and session bootstrap. |
@@ -44,8 +44,8 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Real-time voice | DONE | WebRTC via OpenAI-compatible realtime endpoint; no local/browser realtime implementation. |
 | Streaming token output | DONE | `POST /api/ai/stream` — SSE (`delta`/`tool`/`done`/`error`); non-streaming providers answer in one `delta` + `done`. |
 | Native tool-calling | DONE | Provider function-calling when the endpoint supports `tools`; automatic fallback to the strict JSON tool loop otherwise. |
-| SMS | DONE | Twilio plus `sms_gateway` adapters: TextBee, httpSMS, android-sms-gateway, Telnyx, Vonage, MessageBird, Plivo, Sinch, Infobip, ClickSend, generic HTTP. Inbound SMS (Twilio + generic signed webhook), STOP/START consent. Delivery receipts are not ingested. |
-| WhatsApp | DONE | Twilio inbound/outbound; inbound webhook signature-verified. |
+| SMS | DONE | Twilio plus `sms_gateway` adapters: TextBee, httpSMS, android-sms-gateway, Telnyx, Vonage, MessageBird, Plivo, Sinch, Infobip, ClickSend, generic HTTP. Inbound SMS (Twilio + generic signed webhook), STOP/START consent. Twilio status callbacks and generic carrier DLRs update outbox delivery states (`delivered`/`read`/`failed`). |
+| WhatsApp | DONE | Twilio + direct Meta Cloud API inbound/outbound, signature-verified webhooks, and delivery statuses applied to the outbox. |
 | Outbound email | DONE | SMTP via nodemailer or `email_api` (SendGrid/Mailgun/Postmark/Resend/Brevo/Mailjet/SparkPost/Elastic Email); invoice HTML/text templates; dispatcher prefers the API and never double-sends. |
 | Inbound email | **DONE** | IMAP polling + signed webhook ingest; per-folder config, MIME parsing, SSRF guard, AI reply queued to the outbox. |
 | Calendar | DONE | ICS feed + per-booking `.ics` + two-way CalDAV push/pull + Google Calendar OAuth sync + Microsoft 365 Graph OAuth sync. External busy times become `CalendarBlock` rows, so a busy diary removes slots from availability and blocks new bookings. |
@@ -54,7 +54,7 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Commerce/CRM sync | DONE | Shopify, WooCommerce, Wix, Mailchimp contact import; match by external ref/email/phone; SSRF guard. |
 | Website → knowledge | DONE | Same-origin crawler, SSRF validation, optional AI cleanup, deterministic fallback; requires an active LLM. |
 | Automations | DONE | 60s lease-protected worker tick; manual run shares the lease. |
-| Outbox delivery | DONE | 30s lease-protected dispatcher; backoff and honest statuses. |
+| Outbox delivery | DONE | 30s lease-protected dispatcher; backoff and honest statuses; provider ids + monotonic DLR states (`accepted/delivered/read/failed`). |
 | Hardware detection / model catalog | DONE | `GET /api/system/hardware` — CPU/RAM/GPU/disk probe plus a model catalog with fit reasons. |
 | Audit log | DONE | `src/lib/audit.ts`; append-only rows. |
 | Rate limiting / CSRF | DONE | In-memory sliding window per route plus a DB-backed `RateBucket` limiter for login; `x-requested-with: ais` on mutations. |

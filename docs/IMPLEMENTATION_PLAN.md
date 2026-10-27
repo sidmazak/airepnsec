@@ -152,3 +152,12 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Provider docs in the UI**: every catalog kind has an official documentation URL, and email/SMS dialogs link to the selected provider's setup docs (SendGrid, Mailgun, Postmark, Resend, Brevo, Mailjet, SparkPost, Elastic Email, TextBee, httpSMS, Android SMS Gateway, Telnyx, Vonage, MessageBird, Plivo, Sinch, Infobip, ClickSend, generic HTTP).
 ✅ **Seed**: demo org writes the disabled default weekly schedule alongside notification routing and customer preferences.
 ✅ **Verification**: tsc clean, lint clean, 187/187 unit tests (10 new schedule tests), 44/44 smoke checks.
+
+## Phase 23 — Delivery receipts (DLR) for SMS and WhatsApp (2026-10-27)
+✅ **Provider message ids**: the dispatcher stores `providerKind` + `providerMessageId` (Twilio `sid`, Meta message id, SMS-gateway id) on every sent outbox row and starts it at `deliveryStatus:'accepted'`. Direct AI replies and consent acknowledgements are recorded as sent delivery rows so later callbacks can resolve them.
+✅ **Twilio status callbacks**: `POST /api/telephony/sms/status` resolves the owning SMS/WhatsApp integration, verifies `X-Twilio-Signature` against the candidate-URL list, dedupes `MessageSid + status` in `WebhookEvent`, and applies `delivered`/`read`/`failed` with error detail.
+✅ **Meta WhatsApp statuses**: the existing signed Meta webhook now consumes `statuses[]` and applies them to outbox rows by Meta message id.
+✅ **Carrier DLRs**: `POST /api/telephony/sms/dlr?org=<slug>&provider=<name>` authenticates with the org webhook secret and parses Infobip `results[]`, ClickSend, Sinch and generic payloads. Unknown ids are reported as ignored, never invented.
+✅ **Monotonic states**: `delivery-protocol.ts` normalizes provider vocabulary and refuses regressions (`accepted → delivered → read`, `failed` terminal), unit-tested without touching the DB.
+✅ **UI/docs**: delivery badges and provider detail in the dashboard/outbox, Twilio status-callback and DLR URLs in integration cards, plus API/INTEGRATIONS/DATA_MODEL/AUDIT updates.
+✅ **Verification**: tsc clean, lint clean, 193/193 unit tests, 44/44 smoke checks.

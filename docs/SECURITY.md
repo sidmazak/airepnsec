@@ -101,6 +101,10 @@ HSTS/CSP but must not weaken these.
 - **Meta WhatsApp Cloud API:** `x-hub-signature-256` HMAC-SHA256 over the raw body using the integration's app secret (required); GET `hub.verify_token` handshake; message-id dedupe.
 - **Twilio Voice/SMS/WhatsApp:** `X-Twilio-Signature` HMAC-SHA1 over the full URL + sorted params;
   candidate URL list handles proxies; every attempt persisted in `WebhookEvent` with `signatureValid`.
+  This includes the SMS/WhatsApp message-status callback (`/api/telephony/sms/status`).
+- **Carrier SMS DLR:** `/api/telephony/sms/dlr?org=<slug>` requires the org webhook secret
+  (`x-webhook-secret` or `&secret=`, timing-safe) and only updates outbox delivery state by exact
+  provider message id; unknown ids are ignored and every event is deduped in `WebhookEvent`.
 - **Outbound webhooks:** hex HMAC-SHA256 (`x-signature`) when a secret is configured; literal `none`
   otherwise, so receivers can tell signed from unsigned.
 

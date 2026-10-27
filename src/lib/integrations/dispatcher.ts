@@ -213,9 +213,8 @@ async function deliverEmail(message: OutboxMessage): Promise<Outcome> {
       text: message.body,
       ...(message.html ? { html: message.html } : {}),
     }
-    if (api) await sendEmailViaApi(api, input)
-    else await sendEmail(integration, input)
-    await markSent(message)
+    const sent = api ? await sendEmailViaApi(api, input) : await sendEmail(integration, input)
+    await markSent(message, { kind: api ? 'email_api' : 'smtp', id: sent.messageId })
     return 'sent'
   } catch (err) {
     return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), integration))
@@ -231,8 +230,8 @@ async function deliverSms(message: OutboxMessage): Promise<Outcome> {
   const twilio = await getEnabledIntegration(message.orgId, 'twilio_sms')
   if (twilio) {
     try {
-      await sendTwilio(twilio, { to: message.recipient, body: message.body })
-      await markSent(message)
+      const { sid } = await sendTwilio(twilio, { to: message.recipient, body: message.body })
+      await markSent(message, { kind: 'twilio_sms', id: sid })
       return 'sent'
     } catch (err) {
       return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), twilio))
@@ -245,8 +244,8 @@ async function deliverSms(message: OutboxMessage): Promise<Outcome> {
 
   const config = integrationConfig(gateway)
   try {
-    await sendSmsGateway(str(config, 'provider'), config, decryptSecrets(gateway), { to: message.recipient, body: message.body })
-    await markSent(message)
+    const sent = await sendSmsGateway(str(config, 'provider'), config, decryptSecrets(gateway), { to: message.recipient, body: message.body })
+    await markSent(message, { kind: sent.providerId, id: sent.messageId })
     return 'sent'
   } catch (err) {
     return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), gateway))
@@ -257,8 +256,8 @@ async function deliverWhatsApp(message: OutboxMessage): Promise<Outcome> {
   const twilio = await getEnabledIntegration(message.orgId, 'twilio_whatsapp')
   if (twilio) {
     try {
-      await sendTwilio(twilio, { to: message.recipient, body: message.body })
-      await markSent(message)
+      const { sid } = await sendTwilio(twilio, { to: message.recipient, body: message.body })
+      await markSent(message, { kind: 'twilio_whatsapp', id: sid })
       return 'sent'
     } catch (err) {
       return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), twilio))
@@ -268,27 +267,14 @@ async function deliverWhatsApp(message: OutboxMessage): Promise<Outcome> {
   if (meta) {
     try {
       const { sendMetaWhatsApp } = await import('@/lib/integrations/connectors')
-      await sendMetaWhatsApp(meta, { to: message.recipient, body: message.body })
-      await markSent(message)
+      const { messageId } = await sendMetaWhatsApp(meta, { to: message.recipient, body: message.body })
+      await markSent(message, { kind: 'meta_whatsapp', id: messageId })
       return 'sent'
     } catch (err) {
       return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), meta))
     }
   }
   return await waitForIntegration(message, 'whatsapp')
-}
-
-async function deliverTwilio(message: OutboxMessage, kind: 'twilio_sms' | 'twilio_whatsapp'): Promise<Outcome> {
-  const integration = await getEnabledIntegration(message.orgId, kind)
-  if (!integration) return await waitForIntegration(message, message.channel)
-
-  try {
-    await sendTwilio(integration, { to: message.recipient, body: message.body })
-    await markSent(message)
-    return 'sent'
-  } catch (err) {
-    return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), integration))
-  }
 }
 
 /**
@@ -352,10 +338,22 @@ async function waitForIntegration(message: OutboxMessage, channel: string): Prom
   return 'waiting'
 }
 
-async function markSent(message: OutboxMessage): Promise<void> {
+async function markSent(message: OutboxMessage, provider?: { kind: string; id: string }): Promise<void> {
   await db.outboxMessage.update({
     where: { id: message.id },
-    data: { status: 'sent', sentAt: new Date(), statusReason: '' },
+    data: {
+      status: 'sent',
+      sentAt: new Date(),
+      statusReason: '',
+      ...(provider?.id
+        ? {
+            providerKind: provider.kind,
+            providerMessageId: provider.id,
+            deliveryStatus: 'accepted',
+            deliveryUpdatedAt: new Date(),
+          }
+        : {}),
+    },
   })
 }
 

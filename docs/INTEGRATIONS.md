@@ -27,7 +27,10 @@ connection test exposed at `POST /api/integrations/[id]/test` (results stored in
 - **Honest delivery states.** Every outbound message is an `OutboxMessage` row
   with `status` (`queued | sent | failed | skipped`), an `attempts` counter,
   and a plain-language `statusReason`. Nothing is reported as sent that did not
-  reach a real provider; nothing is silently dropped.
+  reach a real provider; nothing is silently dropped. Provider message ids and
+  DLR callbacks fill `providerKind`/`providerMessageId`/`deliveryStatus`
+  (`accepted | delivered | read | failed`), and delivery states only move
+  forward — a late "sent" cannot erase "delivered".
 - **The outbox is the single outbound path.** Invoice emails, reminders,
   automation sends and webhook deliveries are all rows in `outbox`, delivered
   by one dispatcher with one retry policy.
@@ -89,7 +92,8 @@ already_configured`.
 | Config | `from` (required): sender number, e.g. `+15551234567`; for WhatsApp it **must** be `whatsapp:+1555…` (validated at test time) |
 | Secrets | `accountSid`, `authToken` (both required) |
 | Test routine | Real authenticated `GET https://api.twilio.com/2010-04-01/Accounts/<sid>.json` (10 s timeout). Success: `Twilio SMS verified — account "My Co" (active), sender +15551234567`. |
-| Delivery | `POST …/Messages.json` (form: `To`, `From`, `Body`), Basic auth, 15 s timeout; for `twilio_whatsapp` the destination is normalized to `whatsapp:+…`. Returns the Twilio message `sid` into the audit trail. |
+| Delivery | `POST …/Messages.json` (form: `To`, `From`, `Body`), Basic auth, 15 s timeout; for `twilio_whatsapp` the destination is normalized to `whatsapp:+…`. The Twilio message `sid` is stored on the outbox row for delivery receipts. |
+| Receipts | Configure the Twilio **status callback** to `POST /api/telephony/sms/status` for SMS and WhatsApp. Each status is signature-verified, deduped, and applied by `MessageSid`; failure codes/messages are kept in `deliveryDetail`. |
 | Failure examples | `Twilio API rejected the credentials (HTTP 401): Authenticate` (bad authToken) · `Twilio error 400: Unable to create record: The 'To' number is not a valid phone number` · `From` number not WhatsApp-enabled → Twilio 400/401 on send. |
 
 ### `meta_whatsapp` — WhatsApp Cloud API (direct with Meta)
@@ -101,6 +105,7 @@ already_configured`.
 | Test routine | Real authenticated `GET https://graph.facebook.com/<version>/<phoneNumberId>?fields=id,display_phone_number,verified_name` (10 s timeout). Success reports the verified business name and display number. |
 | Delivery | `POST https://graph.facebook.com/<version>/<phoneNumberId>/messages` JSON `{messaging_product:'whatsapp', to, type:'text', text:{body, preview_url:false}}` with a bearer token; 15 s timeout. The Meta message id is returned and used for dedupe. |
 | Inbound | `GET /api/telephony/whatsapp/meta` answers Meta's `hub.challenge` handshake; `POST /api/telephony/whatsapp/meta` verifies the HMAC-SHA256 signature, dedupes by message id, persists inbound text, then runs the AI receptionist and replies through Meta. Non-text messages are audited as unsupported. |
+| Receipts | `value.statuses[]` events (`sent/delivered/read/failed`) are applied to the matching outbox row by Meta message id; error titles/messages/codes are stored in `deliveryDetail`. |
 | Failure examples | `Meta Graph API rejected the credentials (HTTP 401): Invalid OAuth access token` · `Meta WhatsApp error 400: Recipient phone number not in allowed list` (test-number mode) · webhook with a wrong app secret → `403 Invalid signature` and a rejected `WebhookEvent`. |
 
 The outbox `whatsapp` channel resolves an enabled Twilio WhatsApp integration first, then Meta.
@@ -114,8 +119,9 @@ The UI shows the exact webhook callback URL after saving.
 | Secrets | Provider-dependent: `apiKey?` (TextBee/httpSMS/Telnyx/MessageBird/Sinch/Infobip/ClickSend), `apiKey`+`apiSecret` (Vonage), `accountId`+`apiSecret` (Plivo auth id/token), `username`+`apiKey` (ClickSend basic auth), `token?` or `username`+`password?` (android-sms-gateway; local mode may need none), `authValue?` (generic custom header). Absent credentials are legitimate; sends/tests fail honestly. |
 | Test routine | Read-only probe: TextBee `GET /gateway/devices`, httpSMS `GET /v1/messages?limit=1`, android-sms-gateway `GET /3rdparty/v1/messages?limit=1`, Telnyx `GET /messages?page[size]=1`, Vonage `GET /account/get-balance`, MessageBird `GET /messages?limit=1`, Plivo `GET /Account/{authId}/`, Sinch `GET /xms/v1/{servicePlanId}/batches`, Infobip `GET /sms/1/reports`, ClickSend `GET /account` (10 s). `generic_http` has no standard probe — it **sends a real SMS** to `testRecipient` if set, otherwise returns an explicit "set a testRecipient" failure. |
 | Delivery | `sendOrgSms()` prefers an enabled `twilio_sms` row; otherwise the enabled `sms_gateway`. Requests: TextBee `POST /gateway/send-sms`, httpSMS `POST /v1/messages/send`, android-sms-gateway `POST /3rdparty/v1/messages`, Telnyx `POST /messages`, Vonage `POST /sms/json`, MessageBird `POST /messages`, Plivo `POST /Account/{authId}/Message/`, Sinch `POST /xms/v1/{servicePlanId}/batches`, Infobip `POST /sms/2/text/advanced`, ClickSend `POST /sms/send`, generic template with `{{to}}`/`{{message}}`/`{{from}}`. |
-| Honesty | HTTP 2xx means **accepted by the gateway**, not delivered to a handset. `statusReason` says "awaiting handset delivery"; delivery receipts require separate gateway webhooks (not implemented). Errors are sanitized/redacted. |
+| Honesty | HTTP 2xx means **accepted by the gateway**, not delivered to a handset. The provider message id is stored for receipts; the outbox only says `delivered`/`read`/`failed` after a real DLR callback. Errors are sanitized/redacted. |
 | Inbound | Point the gateway's received-message webhook at `POST /api/telephony/sms/gateway-incoming?org=<org-slug>` with the org webhook secret in `x-webhook-secret`. JSON keys accepted: `from`/`sender`, `to`, `body`/`message`/`text`, `id`. STOP/START/UNSTOP keywords update `Customer.optOut`; the AI reply is sent through whichever SMS sender is enabled. |
+| Delivery reports | Point the provider's DLR/status callback at `POST /api/telephony/sms/dlr?org=<org-slug>&provider=<name>` with the same webhook secret (`x-webhook-secret` or `&secret=`). Parses Infobip `results[]`, ClickSend `message_id/status`, Sinch `messageId/status` and generic `id|messageId|sid` + `status`. Unknown/duplicate rows are reported as ignored; failure detail is stored honestly. |
 | Wiring | Create the row, add credentials, click **Test**, enable it. Pending SMS outbox rows are nudged and retried on the next 30 s tick. |
 
 `generic_http` SSRF note: private/LAN addresses are intentionally allowed here because a

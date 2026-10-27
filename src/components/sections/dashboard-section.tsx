@@ -168,6 +168,25 @@ function StatCard({
   )
 }
 
+function ProviderLabel({ kind }: { kind: string }) {
+  const labels: Record<string, string> = {
+    twilio_sms: 'Twilio SMS', twilio_whatsapp: 'Twilio WhatsApp', meta_whatsapp: 'Meta WhatsApp',
+    sinch: 'Sinch', infobip: 'Infobip', clicksend: 'ClickSend', vonage: 'Vonage',
+    messagebird: 'MessageBird', plivo: 'Plivo', telnyx: 'Telnyx', textbee: 'TextBee',
+    httpsms: 'httpSMS', android_sms_gateway: 'Android SMS Gateway',
+    email_api: 'Email API', smtp: 'SMTP',
+  }
+  return <>{labels[kind] ?? kind}</>
+}
+
+function deliveryLabel(status?: string): string {
+  if (!status || status === 'accepted') return ''
+  if (status === 'failed') return 'not delivered'
+  if (status === 'delivered') return 'delivered'
+  if (status === 'read') return 'read'
+  return status
+}
+
 type ReceptionistStatus = 'running' | 'paused' | 'stopped'
 
 type DayWindow = { start: string; end: string }
@@ -800,6 +819,15 @@ export function DashboardSection() {
                       <div className="flex items-center gap-2">
                         <ChannelIcon channel={m.channel} />
                         <p className="min-w-0 flex-1 truncate text-sm font-medium">{m.subject || '(no subject)'}</p>
+                        {m.deliveryStatus && m.deliveryStatus !== 'accepted' && (
+                          <Badge
+                            variant={m.deliveryStatus === 'failed' ? 'destructive' : 'secondary'}
+                            className="text-[10px]"
+                            title={m.deliveryDetail || undefined}
+                          >
+                            {m.deliveryStatus}
+                          </Badge>
+                        )}
                         <OutboxStatusBadge status={m.status} />
                       </div>
                       {(m.status === 'queued' || m.status === 'failed') && m.statusReason && (
@@ -811,8 +839,8 @@ export function DashboardSection() {
                 </ul>
               )}
               <p className="mt-3 text-xs text-muted-foreground">
-                This build has no email/SMS sender wired in — messages stay honestly &ldquo;queued&rdquo; here instead of
-                pretending to send. Configure channels under Settings when a sender is available.
+                &ldquo;Sent&rdquo; means the provider accepted the message. Twilio, Meta and carrier delivery receipts
+                upgrade rows to &ldquo;delivered&rdquo; or &ldquo;failed&rdquo; when the handset result arrives.
               </p>
             </CardContent>
           </Card>

@@ -153,7 +153,10 @@ Append-only by code; corrections reference the original row.
 ### OutboxMessage
 `channel` (`email|sms|whatsapp|webhook|inapp`), `recipient`, `subject`, `body`, optional `html`,
 `status` (`queued|sent|failed|skipped`), `statusReason`, `attempts`, `relatedType/relatedId`,
-unique nullable `dedupeKey`, `scheduledFor`, `sentAt`.
+unique nullable `dedupeKey`, `scheduledFor`, `sentAt`. Delivery receipts: `providerKind`,
+`providerMessageId`, `deliveryStatus` (`accepted|delivered|read|failed`), `deliveryDetail`,
+`deliveryUpdatedAt`; indexed by `(orgId, providerKind, providerMessageId)`. `sent` means provider
+acceptance — only a later DLR callback sets `delivered`/`read`/`failed` (states never regress).
 
 ### ProviderConfig
 `capability` (`llm|embedding|stt|tts|realtime|rerank|vision`), `provider`
@@ -168,7 +171,7 @@ unique nullable `dedupeKey`, `scheduledFor`, `sentAt`.
   input/output/error JSON, `scheduledFor`/`startedAt`/`finishedAt`; unique `(automationId, dedupeKey)`.
 
 ### Integration
-`kind` (`smtp|twilio_sms|twilio_whatsapp|twilio_voice|sms_gateway|caldav|stripe|webhook_out`),
+`kind` (`smtp|email_api|twilio_sms|twilio_whatsapp|meta_whatsapp|twilio_voice|sms_gateway|caldav|google_calendar|microsoft_calendar|stripe|square|quickbooks|xero|myob|shopify|woocommerce|wix|mailchimp|webhook_out|imap`),
 non-secret `configJson`, encrypted `secretsEnc`, `enabled`, last test state. Singleton kinds are
 enforced in code; `webhook_out` allows multiple destinations.
 

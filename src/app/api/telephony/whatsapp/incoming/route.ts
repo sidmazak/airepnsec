@@ -6,6 +6,7 @@ import { withPublic } from '@/lib/api'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
 import { getEnabledIntegration, sendTwilio, sanitizeMessage } from '@/lib/integrations/connectors'
+import { recordDirectDelivery } from '@/lib/integrations/delivery'
 import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams,
@@ -124,7 +125,12 @@ export const POST = withPublic(async (req: NextRequest) => {
         return
       }
       try {
-        await sendTwilio(sender, { to: from, body: result.reply })
+        const sent = await sendTwilio(sender, { to: from, body: result.reply })
+        await recordDirectDelivery({
+          orgId: org.id, channel: 'whatsapp', recipient: from, body: result.reply,
+          providerKind: 'twilio_whatsapp', providerMessageId: sent.sid,
+          relatedType: 'conversation', relatedId: conversationId,
+        })
         await audit({ orgId: org.id, actorType: 'system', actorId: 'whatsapp-receptionist', action: 'telephony.whatsapp_reply_sent', entity: 'conversation', entityId: conversationId, meta: { to: from, chars: result.reply.length } })
       } catch (sendErr) {
         await db.outboxMessage.create({

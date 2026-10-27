@@ -787,10 +787,13 @@ function ConnectorCard({
               <p className="text-xs text-muted-foreground break-all">Phone number ID: {str(row.config.phoneNumberId) || 'not set'} · {str(row.config.apiVersion) || 'v21.0'}</p>
             )}
 
-            {kind === 'twilio_whatsapp' && (
+            {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
               <div className="space-y-1.5">
-                <p className="text-xs font-medium">Webhook URL for the Twilio console:</p>
-                <WebhookUrlRow url={`${origin}/api/telephony/whatsapp/incoming`} label="A message comes in" />
+                <p className="text-xs font-medium">Webhook URLs for the Twilio console:</p>
+                {kind === 'twilio_whatsapp' && (
+                  <WebhookUrlRow url={`${origin}/api/telephony/whatsapp/incoming`} label="A message comes in" />
+                )}
+                <WebhookUrlRow url={`${origin}/api/telephony/sms/status`} label="Message status callback" />
               </div>
             )}
 
@@ -798,7 +801,7 @@ function ConnectorCard({
               <div className="space-y-1.5">
                 <p className="text-xs font-medium">Webhook callback URL for the Meta App Dashboard:</p>
                 <WebhookUrlRow url={`${origin}/api/telephony/whatsapp/meta`} label="Webhook callback URL (subscribe to messages)" />
-                <p className="text-xs text-muted-foreground">The verify token is the one saved in this form. Meta signs every delivery with the app secret.</p>
+                <p className="text-xs text-muted-foreground">The verify token is the one saved in this form. Meta signs every delivery with the app secret; `statuses[]` delivery receipts are applied automatically.</p>
               </div>
             )}
 
@@ -828,6 +831,7 @@ function ConnectorCard({
                   <WebhookUrlRow url={`${origin}/api/telephony/voice/incoming`} label="A call comes in" />
                   <WebhookUrlRow url={`${origin}/api/telephony/voice/status`} label="Call status changes" />
                   <WebhookUrlRow url={`${origin}/api/telephony/sms/incoming`} label="A message comes in" />
+                  <WebhookUrlRow url={`${origin}/api/telephony/sms/status`} label="Message status callback (SMS/WhatsApp)" />
                 </div>
               </div>
             )}
@@ -1204,14 +1208,21 @@ function ConfigureDialog({
           )}
 
           {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
-            <div className="space-y-1.5">
-              <Label htmlFor={`${idBase}-from`}>From {kind === 'twilio_whatsapp' ? '(whatsapp:+E.164)' : '(+E.164)'}</Label>
-              <Input
-                id={`${idBase}-from`} value={cfg.from}
-                onChange={(e) => setCfg((s) => ({ ...s, from: e.target.value }))}
-                placeholder={kind === 'twilio_whatsapp' ? 'whatsapp:+15551234567' : '+15551234567'}
-                autoComplete="off" className="min-h-[44px]"
-              />
+            <div className="space-y-2">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-from`}>From {kind === 'twilio_whatsapp' ? '(whatsapp:+E.164)' : '(+E.164)'}</Label>
+                <Input
+                  id={`${idBase}-from`} value={cfg.from}
+                  onChange={(e) => setCfg((s) => ({ ...s, from: e.target.value }))}
+                  placeholder={kind === 'twilio_whatsapp' ? 'whatsapp:+15551234567' : '+15551234567'}
+                  autoComplete="off" className="min-h-[44px]"
+                />
+              </div>
+              <div className="rounded-md border p-3 space-y-2">
+                <p className="text-sm font-medium">Message status callback</p>
+                <WebhookUrlRow url={`${origin}/api/telephony/sms/status`} label="Set as the Twilio status callback URL" />
+                <p className="text-xs text-muted-foreground">Twilio signs each status; the outbox shows delivered/read/failed with the real handset outcome.</p>
+              </div>
             </div>
           )}
 
@@ -1333,6 +1344,7 @@ function ConfigureDialog({
                 <WebhookUrlRow url={`${origin}/api/telephony/voice/status`} label="Call status changes" />
                 <WebhookUrlRow url={`${origin}/api/telephony/voice/voicemail`} label="Voicemail action (automatic)" />
                 <WebhookUrlRow url={`${origin}/api/telephony/sms/incoming`} label="A message comes in" />
+                <WebhookUrlRow url={`${origin}/api/telephony/sms/status`} label="Message status callback (SMS/WhatsApp)" />
               </div>
             </div>
           )}
@@ -1600,6 +1612,18 @@ function ConfigureDialog({
                 </code>
                 <p className="text-xs text-muted-foreground">
                   JSON keys accepted: <code>from</code>/<code>sender</code>, <code>to</code>, <code>body</code>/<code>message</code>/<code>text</code>, <code>id</code>. STOP and START keywords update consent automatically.
+                </p>
+              </div>
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-sm font-medium">Delivery report (DLR) webhook</p>
+                <p className="text-xs text-muted-foreground">
+                  Optional. Point the provider&apos;s delivery-report callback here to move messages from &ldquo;sent&rdquo; to delivered/read/failed with the real handset outcome.
+                </p>
+                <code className="block break-all rounded bg-muted px-2 py-2 text-xs">
+                  {origin}{`/api/telephony/sms/dlr?org=${orgSlug || '<org-slug>'}&provider=${cfg.provider || '<provider>'}`}
+                </code>
+                <p className="text-xs text-muted-foreground">
+                  Authenticates with the same <code>x-webhook-secret</code> header. Accepts Infobip <code>results[]</code>, ClickSend <code>message_id/status</code>, Sinch <code>messageId/status</code> and generic <code>id/messageId + status</code> payloads.
                 </p>
               </div>
               <div className="space-y-1.5">
@@ -2266,6 +2290,11 @@ function OutboxTab({ canManage }: { canManage: boolean }) {
                       <TableCell className="hidden sm:table-cell text-sm max-w-[240px]"><p className="truncate" title={m.subject}>{m.subject || '—'}</p></TableCell>
                       <TableCell>
                         <Badge className={cn('text-[10px] px-1.5', OUTBOX_STATUS_CLASS[m.status] ?? 'bg-muted')}>{m.status}</Badge>
+                        {m.deliveryStatus && m.deliveryStatus !== 'accepted' && (
+                          <p className={cn('text-[10px] mt-1', m.deliveryStatus === 'failed' ? 'text-destructive' : 'text-emerald-700 dark:text-emerald-400')}>
+                            provider: {m.deliveryStatus}{m.deliveryDetail ? ` — ${m.deliveryDetail}` : ''}
+                          </p>
+                        )}
                         {typeof m.attempts === 'number' && m.attempts > 0 && (
                           <p className="text-[10px] text-muted-foreground mt-1">attempt {m.attempts}</p>
                         )}
@@ -2358,10 +2387,20 @@ function InboundWebhookTab({ canManage }: { canManage: boolean }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2"><WebhookIcon className="h-4 w-4" aria-hidden /> Inbound payment webhook</CardTitle>
-        <CardDescription>Receive signed payment events from any provider into your ledger.</CardDescription>
+        <CardTitle className="text-base flex items-center gap-2"><WebhookIcon className="h-4 w-4" aria-hidden /> Inbound webhooks &amp; delivery reports</CardTitle>
+        <CardDescription>Receive signed payment events and SMS carrier delivery receipts.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-2 rounded-md border p-3">
+          <Label>SMS delivery report (DLR) URL template</Label>
+          <code className="block break-all rounded bg-muted px-2 py-2 text-xs">
+            {origin}/api/telephony/sms/dlr?org=&lt;org-slug&gt;&amp;provider=&lt;sinch|infobip|clicksend|...&gt;
+          </code>
+          <p className="text-xs text-muted-foreground">
+            Point your SMS provider&apos;s delivery-report callback here. It uses the same <code>x-webhook-secret</code> below (or <code>?secret=</code>).
+            Twilio status callbacks use <code>/api/telephony/sms/status</code> and Meta WhatsApp statuses arrive on the existing Meta webhook.
+          </p>
+        </div>
         <div className="space-y-2">
           <Label>Webhook URL</Label>
           <div className="flex flex-wrap items-center gap-2">

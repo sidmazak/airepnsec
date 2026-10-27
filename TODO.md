@@ -36,14 +36,15 @@ Federated sign-in is implemented with full SAML 2.0 (SP-initiated Web Browser SS
   stored encrypted (never returned after save).
 - Audit logging for config changes, sign-ins, provisioning events.
 
-## 3. SMS delivery receipts — not implemented
+## 3. SMS delivery receipts — DONE
 
-Outbound SMS is honest about acceptance only: a 2xx means the gateway/provider accepted the
-message, not that a handset received it. Inbound SMS (including STOP/START) is implemented, but
-per-message DLR/status callbacks (`delivered`/`failed`) are not ingested, so `OutboxMessage` can
-stay at "accepted" forever. To close this: add a signed status-callback route per carrier
-(Twilio `MessageStatus`, Meta WhatsApp `statuses`, Sinch/Infobip/ClickSend DLRs, generic gateway
-webhook) and update the outbox/delivery history from the provider's event id.
+Twilio `MessageStatus`, Meta WhatsApp `statuses`, and carrier DLRs from Sinch/Infobip/ClickSend
+plus a generic gateway payload are now ingested and matched to `OutboxMessage` by provider message
+id. Outbox rows move `accepted → delivered/read/failed` monotonically (a late "sent" cannot erase
+"delivered"), with the provider detail shown in the UI. Signed endpoints:
+`/api/telephony/sms/status` (Twilio) and `/api/telephony/sms/dlr?org=<slug>&provider=<name>`
+(org webhook secret). See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) and
+[docs/API.md](docs/API.md). Remaining external gap: live carrier E2E (item 1).
 
 ## 4. Local speech models — Kokoro / Piper voices
 

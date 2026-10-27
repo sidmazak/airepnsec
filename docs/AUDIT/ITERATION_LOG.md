@@ -125,3 +125,10 @@ not available here; behavior is documented, not faked.
 - Added official documentation links for every catalog kind and each email/SMS provider in the configuration dialog.
 - Demo seed writes the default schedule; docs (API, integrations, data model, matrices, plan) updated.
 - Verification: tsc clean, lint clean, 187/187 unit tests, 44/44 smoke checks.
+
+## 2026-10-27 — Phase 23: delivery receipts (DLR)
+- Added `OutboxMessage` provider/delivery fields (`providerKind`, `providerMessageId`, `deliveryStatus`, `deliveryDetail`, `deliveryUpdatedAt`) with an org/provider/message-id index; bumped the Prisma global client to v9.
+- Stored Twilio `sid`, Meta message ids and SMS-gateway ids when sending; direct AI replies and consent acks are recorded as sent delivery rows.
+- Added signature-verified Twilio status callbacks (`/api/telephony/sms/status`) and signed carrier DLRs (`/api/telephony/sms/dlr`) parsing Infobip/ClickSend/Sinch/generic payloads; Meta `statuses[]` handled in the existing webhook.
+- Delivery states are monotonic and honest: `accepted → delivered → read`, `failed` terminal; a late lower-rank receipt cannot regress a row. UI shows provider delivery detail; docs/API/integration matrices updated.
+- Verification: tsc clean, lint clean, 193/193 unit tests (6 new delivery-receipt tests), 44/44 smoke checks.

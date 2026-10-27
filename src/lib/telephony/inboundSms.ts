@@ -3,6 +3,7 @@ import { audit } from '@/lib/audit'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
 import { sendOrgSms } from '@/lib/integrations/connectors'
+import { recordDirectDelivery } from '@/lib/integrations/delivery'
 import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import { matchCustomerByPhone } from '@/lib/telephony/twiml'
 import { consentKeyword, type ConsentKeyword } from '@/lib/telephony/sms-keywords'
@@ -30,7 +31,13 @@ async function findOrCreateConversation(orgId: string, from: string, contactName
 
 async function sendConsentAck(orgId: string, to: string, text: string): Promise<void> {
   try {
-    await sendOrgSms(orgId, { to, body: text })
+    const sent = await sendOrgSms(orgId, { to, body: text })
+    await recordDirectDelivery({
+      orgId, channel: 'sms', recipient: to, body: text,
+      providerKind: sent.provider === 'twilio' ? 'twilio_sms' : sent.provider,
+      providerMessageId: sent.messageId,
+      relatedType: 'conversation',
+    })
   } catch (err) {
     await db.outboxMessage.create({
       data: {
@@ -127,6 +134,12 @@ export async function replyToInboundSms(input: {
 
   try {
     const sent = await sendOrgSms(org.id, { to: from, body: result.reply })
+    await recordDirectDelivery({
+      orgId: org.id, channel: 'sms', recipient: from, body: result.reply,
+      providerKind: sent.provider === 'twilio' ? 'twilio_sms' : sent.provider,
+      providerMessageId: sent.messageId,
+      relatedType: 'conversation', relatedId: conversationId,
+    })
     await audit({
       orgId: org.id, actorType: 'system', actorId: 'sms-receptionist', action: 'telephony.sms_reply_sent',
       entity: 'conversation', entityId: conversationId,

@@ -7,6 +7,7 @@ import { withPublic } from '@/lib/api'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
 import { integrationConfig, decryptSecrets, str, sendMetaWhatsApp, sanitizeMessage } from '@/lib/integrations/connectors'
+import { applyDeliveryReceipt, recordDirectDelivery } from '@/lib/integrations/delivery'
 import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import { matchCustomerByPhone, logWebhook, plainResponse } from '@/lib/telephony/twiml'
 
@@ -19,6 +20,13 @@ type MetaMessage = {
   text?: { body?: string }
 }
 
+type MetaStatus = {
+  id?: string
+  status?: string
+  timestamp?: string
+  errors?: Array<{ code?: number; title?: string; message?: string; error_data?: { details?: string } }>
+}
+
 type MetaPayload = {
   object?: string
   entry?: Array<{
@@ -28,6 +36,7 @@ type MetaPayload = {
         metadata?: { phone_number_id?: string; display_phone_number?: string }
         contacts?: Array<{ profile?: { name?: string }; wa_id?: string }>
         messages?: MetaMessage[]
+        statuses?: MetaStatus[]
       }
     }>
   }>
@@ -118,7 +127,12 @@ async function ingest(
       if (!result.reply) return
 
       try {
-        await sendMetaWhatsApp(integration, { to: from, body: result.reply })
+        const sent = await sendMetaWhatsApp(integration, { to: from, body: result.reply })
+        await recordDirectDelivery({
+          orgId: org.id, channel: 'whatsapp', recipient: from, body: result.reply,
+          providerKind: 'meta_whatsapp', providerMessageId: sent.messageId,
+          relatedType: 'conversation', relatedId: conversationId,
+        })
         await audit({ orgId: org.id, actorType: 'system', actorId: 'whatsapp-receptionist', action: 'telephony.whatsapp_reply_sent', entity: 'conversation', entityId: conversationId, meta: { to: from, provider: 'meta', chars: result.reply.length } })
       } catch (sendErr) {
         await db.outboxMessage.create({
@@ -216,6 +230,39 @@ export const POST = withPublic(async (req: NextRequest) => {
         } catch (err) {
           console.error('[telephony] Meta WhatsApp ingest failed:', err instanceof Error ? err.message : err)
         }
+      }
+
+      for (const delivery of value?.statuses ?? []) {
+        const id = delivery.id ?? ''
+        const status = delivery.status ?? ''
+        if (!id || !status) continue
+        const eventId = `meta-status:${id}:${status}`.slice(0, 180)
+        const { duplicate } = await logWebhook({
+          orgId: org.id, provider: 'meta_whatsapp', eventId,
+          payload: { id, status, timestamp: delivery.timestamp ?? '' },
+          signatureValid: true, result: 'received',
+        })
+        if (duplicate) continue
+        const detail = (delivery.errors ?? [])
+          .map((e) => [e.title, e.message, e.error_data?.details, e.code ? `code ${e.code}` : ''].filter(Boolean).join(' — '))
+          .filter(Boolean)
+          .join('; ')
+          .slice(0, 300)
+        const result = await applyDeliveryReceipt({
+          orgId: org.id, providerKind: 'meta_whatsapp', providerMessageId: id,
+          rawStatus: status, detail,
+        })
+        if (result.state === 'failed') {
+          await audit({
+            orgId: org.id, actorType: 'webhook', actorId: 'meta_whatsapp',
+            action: 'telephony.delivery_failed', entity: 'outbox_message', entityId: id,
+            meta: { status, detail },
+          })
+        }
+        await db.webhookEvent.updateMany({
+          where: { orgId: org.id, provider: 'meta_whatsapp', eventId },
+          data: { result: 'processed', processedAt: new Date() },
+        })
       }
     }
   }

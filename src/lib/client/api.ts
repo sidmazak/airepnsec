@@ -267,6 +267,8 @@ export type OutboxRow = {
   id: string; channel: string; recipient: string; subject: string; body: string
   status: string; statusReason: string; relatedType: string; createdAt: string; sentAt: string | null
   html?: string; attempts?: number; relatedId?: string
+  providerKind?: string; providerMessageId?: string
+  deliveryStatus?: string; deliveryDetail?: string; deliveryUpdatedAt?: string | null
 }
 
 /**

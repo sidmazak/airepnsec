@@ -558,9 +558,16 @@ model OutboxMessage {
   dedupeKey    String?  @unique
   scheduledFor DateTime @default(now())
   sentAt       DateTime?
+  // ---- provider delivery receipts (DLR) ----
+  providerKind       String   @default("") // twilio_sms | twilio_whatsapp | meta_whatsapp | sinch | infobip | clicksend | ...
+  providerMessageId  String   @default("") // provider-assigned id, used to match status callbacks
+  deliveryStatus     String   @default("") // accepted | delivered | read | failed
+  deliveryDetail     String   @default("") // provider's own failure description, sanitized/truncated
+  deliveryUpdatedAt  DateTime?
   createdAt    DateTime @default(now())
   organization Organization @relation(fields: [orgId], references: [id])
   @@index([orgId, status])
+  @@index([orgId, providerKind, providerMessageId])
 }
 
 model ProviderConfig {
