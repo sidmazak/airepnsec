@@ -13,6 +13,10 @@ import {
   type SessionInfo,
 } from '@/lib/client/api'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -42,6 +46,8 @@ import {
   PauseCircle,
   PlayCircle,
   StopCircle,
+  Clock3,
+  Save,
 } from 'lucide-react'
 
 type OverdueRow = {
@@ -164,6 +170,23 @@ function StatCard({
 
 type ReceptionistStatus = 'running' | 'paused' | 'stopped'
 
+type DayWindow = { start: string; end: string }
+type ReceptionistSchedule = {
+  enabled: boolean
+  days: Record<string, DayWindow | null>
+  timezone?: string
+}
+
+const DAY_ROWS: Array<{ key: string; label: string }> = [
+  { key: '1', label: 'Monday' },
+  { key: '2', label: 'Tuesday' },
+  { key: '3', label: 'Wednesday' },
+  { key: '4', label: 'Thursday' },
+  { key: '5', label: 'Friday' },
+  { key: '6', label: 'Saturday' },
+  { key: '0', label: 'Sunday' },
+]
+
 const RECEPTIONIST_OPTIONS: Array<{
   status: ReceptionistStatus
   label: string
@@ -197,10 +220,20 @@ const RECEPTIONIST_OPTIONS: Array<{
 function ReceptionistControl() {
   const session = useAppStore((s) => s.session)
   const setSession = useAppStore((s) => s.setSession)
+  const { toast } = useToast()
   const canManage = session?.user?.role === 'owner' || session?.user?.role === 'admin'
   const [status, setStatus] = useState<ReceptionistStatus>(
+    ((session?.org?.receptionistBaseStatus ?? session?.org?.receptionistStatus) as ReceptionistStatus) || 'running',
+  )
+  const [effectiveStatus, setEffectiveStatus] = useState<ReceptionistStatus>(
     (session?.org?.receptionistStatus as ReceptionistStatus) || 'running',
   )
+  const [schedule, setSchedule] = useState<ReceptionistSchedule | null>(
+    session?.org?.receptionistSchedule ?? null,
+  )
+  const [scheduledOff, setScheduledOff] = useState(Boolean(session?.org?.receptionistScheduledOff))
+  const [savingSchedule, setSavingSchedule] = useState(false)
+  const [scheduleError, setScheduleError] = useState('')
   const [pending, setPending] = useState<ReceptionistStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -208,9 +241,18 @@ function ReceptionistControl() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ status: ReceptionistStatus }>('/api/settings/receptionist')
+      .get<{
+        status: ReceptionistStatus
+        baseStatus: ReceptionistStatus
+        scheduledOff: boolean
+        schedule: ReceptionistSchedule
+      }>('/api/settings/receptionist')
       .then((d) => {
-        if (!cancelled) setStatus(d.status)
+        if (cancelled) return
+        setStatus(d.baseStatus)
+        setEffectiveStatus(d.status)
+        setScheduledOff(d.scheduledOff)
+        setSchedule(d.schedule)
       })
       .catch(() => undefined)
     return () => {
@@ -222,8 +264,16 @@ function ReceptionistControl() {
     setBusy(true)
     setError('')
     try {
-      const r = await api.patch<{ status: ReceptionistStatus }>('/api/settings/receptionist', { status: next })
-      setStatus(r.status)
+      const r = await api.patch<{
+        status: ReceptionistStatus
+        baseStatus: ReceptionistStatus
+        scheduledOff: boolean
+        schedule: ReceptionistSchedule
+      }>('/api/settings/receptionist', { status: next })
+      setStatus(r.baseStatus)
+      setEffectiveStatus(r.status)
+      setScheduledOff(r.scheduledOff)
+      setSchedule(r.schedule)
       const s = await api.get<SessionInfo>('/api/session')
       setSession(s)
     } catch (err) {
@@ -234,8 +284,39 @@ function ReceptionistControl() {
     }
   }
 
-  const current = RECEPTIONIST_OPTIONS.find((o) => o.status === status) ?? RECEPTIONIST_OPTIONS[0]
+  const updateDay = (key: string, window: DayWindow | null) => {
+    setSchedule((current) => current ? { ...current, days: { ...current.days, [key]: window } } : current)
+  }
+
+  const saveSchedule = async () => {
+    if (!schedule) return
+    setSavingSchedule(true)
+    setScheduleError('')
+    try {
+      const r = await api.patch<{
+        status: ReceptionistStatus
+        baseStatus: ReceptionistStatus
+        scheduledOff: boolean
+        schedule: ReceptionistSchedule
+      }>('/api/settings/receptionist', { schedule })
+      setStatus(r.baseStatus)
+      setEffectiveStatus(r.status)
+      setScheduledOff(r.scheduledOff)
+      setSchedule(r.schedule)
+      const s = await api.get<SessionInfo>('/api/session')
+      setSession(s)
+      toast({ title: r.schedule.enabled ? 'Receptionist schedule saved' : 'Schedule disabled', description: r.schedule.enabled ? 'The assistant follows these weekly hours.' : 'The assistant now follows the running/paused switch around the clock.' })
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : 'Could not save the schedule')
+    } finally {
+      setSavingSchedule(false)
+    }
+  }
+
+  const displayStatus = scheduledOff ? 'paused' : effectiveStatus
+  const current = RECEPTIONIST_OPTIONS.find((o) => o.status === displayStatus) ?? RECEPTIONIST_OPTIONS[0]
   const CurrentIcon = current.icon
+  const timezone = schedule?.timezone || session?.org?.timezone || 'UTC+00:00'
 
   return (
     <Card>
@@ -246,17 +327,21 @@ function ReceptionistControl() {
           </CardTitle>
           <Badge
             className={
-              status === 'running'
+              displayStatus === 'running'
                 ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300'
-                : status === 'paused'
+                : displayStatus === 'paused'
                   ? 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300'
                   : 'bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-300'
             }
           >
-            {current.label}
+            {scheduledOff ? 'Paused · off schedule' : current.label}
           </Badge>
         </div>
-        <CardDescription>{current.detail}</CardDescription>
+        <CardDescription>
+          {scheduledOff
+            ? `Outside the configured schedule (${timezone}). Inbound is recorded for staff, but the assistant does not reply.`
+            : current.detail}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {error && <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
@@ -296,6 +381,77 @@ function ReceptionistControl() {
           <PhoneCall className="h-3.5 w-3.5" aria-hidden />
           Calls routed to a human agent line are not affected. Scheduled reminders and automations keep running.
         </p>
+
+        <Separator />
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-medium">
+                <Clock3 className="h-4 w-4" aria-hidden /> Weekly schedule
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {timezone} · outside these hours the assistant pauses (inbound is still recorded for staff).
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="receptionist-schedule-enabled" className="text-xs">Run on schedule</Label>
+              <Switch
+                id="receptionist-schedule-enabled"
+                checked={Boolean(schedule?.enabled)}
+                disabled={!canManage || !schedule}
+                onCheckedChange={(enabled) => setSchedule((current) => current ? { ...current, enabled } : current)}
+                aria-label="Run the receptionist on a weekly schedule"
+              />
+            </div>
+          </div>
+          {scheduleError && <Alert variant="destructive" role="alert"><AlertDescription>{scheduleError}</AlertDescription></Alert>}
+          <div className="space-y-1.5">
+            {DAY_ROWS.map((day) => {
+              const window = schedule?.days?.[day.key] ?? null
+              const open = Boolean(window)
+              return (
+                <div key={day.key} className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2">
+                  <Switch
+                    checked={open}
+                    disabled={!canManage || !schedule}
+                    onCheckedChange={(next) => updateDay(day.key, next ? { start: window?.start ?? '09:00', end: window?.end ?? '17:00' } : null)}
+                    aria-label={`${day.label} open`}
+                  />
+                  <span className={cn('w-24 text-sm', !open && 'text-muted-foreground')}>{day.label}</span>
+                  <Input
+                    type="time"
+                    value={window?.start ?? ''}
+                    disabled={!canManage || !open}
+                    onChange={(e) => updateDay(day.key, { start: e.target.value, end: window?.end ?? '17:00' })}
+                    aria-label={`${day.label} opening time`}
+                    className="min-h-[40px] w-[120px]"
+                  />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <Input
+                    type="time"
+                    value={window?.end ?? ''}
+                    disabled={!canManage || !open}
+                    onChange={(e) => updateDay(day.key, { start: window?.start ?? '09:00', end: e.target.value })}
+                    aria-label={`${day.label} closing time`}
+                    className="min-h-[40px] w-[120px]"
+                  />
+                  {!open && <Badge variant="outline" className="text-[10px]">closed</Badge>}
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">The running/paused switch above always wins over the schedule.</p>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void saveSchedule()}
+              disabled={!canManage || !schedule || savingSchedule}
+            >
+              <Save className="mr-1.5 h-4 w-4" aria-hidden /> {savingSchedule ? 'Saving…' : 'Save schedule'}
+            </Button>
+          </div>
+        </div>
 
         <AlertDialog open={pending !== null} onOpenChange={(open) => { if (!open) setPending(null) }}>
           <AlertDialogContent>

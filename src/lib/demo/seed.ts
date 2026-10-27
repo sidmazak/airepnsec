@@ -6,6 +6,7 @@ import { recordVerifiedPayment, recordPaymentClaim } from '@/lib/business/paymen
 import { indexDocument } from '@/lib/ai/embeddings'
 import { setSetting } from '@/lib/org'
 import { DEFAULT_NOTIFICATION_CONFIG, NOTIFICATION_SETTING_KEY } from '@/lib/notifications/policy'
+import { DEFAULT_RECEPTIONIST_SCHEDULE, SCHEDULE_SETTING_KEY } from '@/lib/receptionist/schedule'
 
 export const DEMO_ORG_SLUG = 'demo'
 export const DEMO_OWNER_EMAIL = 'demo@aisecretary.local'
@@ -77,6 +78,7 @@ export async function seedDemo(): Promise<{ orgId: string; email: string; passwo
   })
 
   await setSetting(org.id, NOTIFICATION_SETTING_KEY, DEFAULT_NOTIFICATION_CONFIG)
+  await setSetting(org.id, SCHEDULE_SETTING_KEY, DEFAULT_RECEPTIONIST_SCHEDULE)
 
   // staff
   const maya = await db.staff.create({ data: { orgId: org.id, name: 'Maya Chen', role: 'Senior Stylist', email: 'maya@harborview.example' } })

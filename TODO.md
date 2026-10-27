@@ -13,7 +13,7 @@ provider. What cannot be done in this environment is signing up for third-party 
 user's behalf (Twilio, Stripe, Google Cloud, an SMTP relay, a CalDAV server). Those tests are
 honest: they report the provider's real answer instead of a fake success.
 
-This now covers Twilio (voice/voicemail/SMS), Stripe, Square, SMTP, email provider APIs (SendGrid/Mailgun/Postmark/Resend/Brevo/Mailjet/SparkPost/Elastic Email), IMAP mailboxes, SMS gateways (TextBee/httpSMS/Android/Telnyx/Vonage/MessageBird/Plivo/Sinch/Infobip/ClickSend), CalDAV, Google/Microsoft calendars, QuickBooks/Xero/MYOB, Shopify/WooCommerce/Wix/Mailchimp, and any OpenAI-compatible AI endpoint.
+This now covers Twilio (voice/voicemail/SMS/WhatsApp), Meta WhatsApp Cloud API, Stripe, Square, SMTP, email provider APIs (SendGrid/Mailgun/Postmark/Resend/Brevo/Mailjet/SparkPost/Elastic Email), IMAP mailboxes, SMS gateways (TextBee/httpSMS/Android/Telnyx/Vonage/MessageBird/Plivo/Sinch/Infobip/ClickSend), CalDAV, Google/Microsoft calendars, QuickBooks/Xero/MYOB, Shopify/WooCommerce/Wix/Mailchimp, and any OpenAI-compatible AI endpoint.
 
 To close this: run the app against real credentials and record the results in
 [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
@@ -42,8 +42,8 @@ Outbound SMS is honest about acceptance only: a 2xx means the gateway/provider a
 message, not that a handset received it. Inbound SMS (including STOP/START) is implemented, but
 per-message DLR/status callbacks (`delivered`/`failed`) are not ingested, so `OutboxMessage` can
 stay at "accepted" forever. To close this: add a signed status-callback route per carrier
-(Twilio `MessageStatus`, Sinch/Infobip/ClickSend DLRs, generic gateway webhook) and update the
-outbox/delivery history from the provider's event id.
+(Twilio `MessageStatus`, Meta WhatsApp `statuses`, Sinch/Infobip/ClickSend DLRs, generic gateway
+webhook) and update the outbox/delivery history from the provider's event id.
 
 ## 4. Local speech models — Kokoro / Piper voices
 
@@ -69,6 +69,9 @@ flow end to end, but there is still no automated per-role sweep over every endpo
 - ~~Additional SMS carriers~~ — implemented (`sms_gateway`: Telnyx, Vonage, MessageBird, Plivo, Sinch, Infobip, ClickSend).
 - ~~Notification routing and consent~~ — implemented (org event × channel matrix, quiet hours, staff alerts, per-customer channel prefs, quiet-hours deferral, honest `skipped` outbox state).
 - ~~Inbound SMS + STOP/START~~ — implemented for Twilio and every `sms_gateway` provider (shared consent/conversation/AI-reply pipeline, signed generic webhook).
+- ~~Direct Meta WhatsApp Cloud API~~ — implemented (`meta_whatsapp`: Graph send/test, HMAC webhook handshake, idempotent inbound ingestion, AI replies, outbox fallback).
+- ~~Receptionist weekly schedule~~ — implemented (per-day windows incl. overnight, org fixed-offset timezone, effective paused state, dashboard editor).
+- ~~Staff notification wiring~~ — implemented (missed call, voicemail, escalation and permanent delivery failure alerts honour the staff channel matrix).
 - ~~PABX routing, voicemail and after-hours~~ — implemented (least-busy/round-robin/redirect/simultaneous, recording + transcript, staff alerts, caller acknowledgement SMS).
 - ~~Square payments~~ — implemented (payment links + signature-verified webhook recording verified payments).
 - ~~Accounting push~~ — implemented (QuickBooks Online, Xero, MYOB AccountRight invoice/customer push with refresh-token OAuth2).

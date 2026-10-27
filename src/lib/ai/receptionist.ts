@@ -8,7 +8,7 @@ import { recordPaymentClaim } from '@/lib/business/payments'
 import { computeSlots } from '@/lib/business/availability'
 import { invoiceOutstanding } from '@/lib/business/invoice'
 import { parseJson, type OrgPolicies } from '@/lib/org'
-import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import { formatCents } from '@/lib/money'
 import { withConversationTurnLock } from '@/lib/concurrency'
 import {
@@ -943,7 +943,7 @@ async function runReceptionistTurn(
   // Organization-wide runtime switch: a paused/stopped assistant never talks to
   // customers on ANY channel. Defence in depth — the inbound routes check first,
   // but a turn already queued must not slip through.
-  const orgStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  const orgStatus = (await resolveReceptionistStatus(org)).status
   if (orgStatus !== 'running') {
     if (!opts.skipInboundPersist) {
       await db.message.create({ data: { conversationId, orgId: org.id, role: 'customer', content: userMessage } })

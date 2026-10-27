@@ -88,6 +88,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     category: 'communication',
     brand: 'smtp',
     needsCredentials: false,
+    docsUrl: 'https://datatracker.ietf.org/doc/html/rfc5321',
     guide: 'Host, port, TLS and sender address. Credentials are optional for anonymous relays.',
   },
   {
@@ -97,6 +98,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     category: 'communication',
     brand: 'email',
     needsCredentials: true,
+    docsUrl: 'https://www.twilio.com/docs/sendgrid/api-reference',
     guide: 'Pick a provider and paste its API key. The connection test is read-only.',
     providers: EMAIL_PROVIDERS,
   },
@@ -107,6 +109,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     category: 'communication',
     brand: 'imap',
     needsCredentials: true,
+    docsUrl: 'https://datatracker.ietf.org/doc/html/rfc3501',
     guide: 'Mailbox host, username, app password and folders. Replies are queued in the outbox.',
   },
   {
@@ -128,6 +131,16 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     needsCredentials: true,
     docsUrl: 'https://www.twilio.com/docs/whatsapp',
     guide: 'Same credentials as Twilio; the sender must be WhatsApp-enabled (whatsapp:+…).',
+  },
+  {
+    kind: 'meta_whatsapp',
+    title: 'WhatsApp (Meta Cloud API)',
+    blurb: 'WhatsApp conversations directly through Meta — no Twilio markup or extra vendor.',
+    category: 'communication',
+    brand: 'whatsapp',
+    needsCredentials: true,
+    docsUrl: 'https://developers.facebook.com/docs/whatsapp/cloud-api',
+    guide: 'From Meta App Dashboard: WhatsApp phone number ID, a permanent access token, the app secret, and a verify token for the webhook handshake.',
   },
   {
     kind: 'twilio_voice',
@@ -277,6 +290,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     category: 'automation',
     brand: 'webhook',
     needsCredentials: false,
+    docsUrl: 'https://www.rfc-editor.org/rfc/rfc9110',
     guide: 'Destination URL + optional HMAC signing secret. One row per URL.',
   },
 ]
@@ -294,4 +308,35 @@ export function providerLabel(entry: IntegrationCatalogEntry | undefined, provid
 
 export function providerBrand(entry: IntegrationCatalogEntry | undefined, providerId: string): string {
   return entry?.providers?.find((provider) => provider.id === providerId)?.brand ?? entry?.brand ?? 'generic'
+}
+
+/**
+ * Official setup documentation for the concrete provider selected inside a
+ * generic integration kind (email API, SMS gateway). The UI links to this so
+ * operators land on the right page instead of a generic vendor homepage.
+ */
+export const PROVIDER_DOCUMENTATION: Record<string, string> = {
+  sendgrid: 'https://www.twilio.com/docs/sendgrid/api-reference',
+  mailgun: 'https://documentation.mailgun.com/docs/mailgun/api-reference/',
+  postmark: 'https://postmarkapp.com/developer/api/overview',
+  resend: 'https://resend.com/docs/api-reference/introduction',
+  brevo: 'https://developers.brevo.com/reference',
+  mailjet: 'https://dev.mailjet.com/email/guides/',
+  sparkpost: 'https://developers.sparkpost.com/api/',
+  elasticemail: 'https://elasticemail.com/developers/api-documentation',
+  textbee: 'https://docs.textbee.dev/',
+  httpsms: 'https://docs.httpsms.com/',
+  android_sms_gateway: 'https://github.com/capcom6/android-sms-gateway',
+  telnyx: 'https://developers.telnyx.com/docs/messaging/messages/send-message',
+  vonage: 'https://developer.vonage.com/en/messaging/sms/overview',
+  messagebird: 'https://developers.messagebird.com/api/sms-messaging/',
+  plivo: 'https://www.plivo.com/docs/sms/api/message/',
+  sinch: 'https://developers.sinch.com/docs/sms/api-reference/',
+  infobip: 'https://www.infobip.com/docs/api/channels/sms/sms-messaging/outbound-sms',
+  clicksend: 'https://developers.clicksend.com/docs/rest/v3/',
+  generic_http: 'https://www.rfc-editor.org/rfc/rfc9110',
+}
+
+export function providerDocumentation(providerId: string): string | undefined {
+  return PROVIDER_DOCUMENTATION[providerId]
 }

@@ -17,7 +17,7 @@ Conventions: IDs are `String @id @default(cuid())`; business tables carry `orgId
 | `User` | Login identity; unique `email`, scrypt `passwordHash`, `role` (`owner|admin|agent|viewer`),
   encrypted TOTP secret, `active`, `twoFactorLastCounter`, `lastLoginAt`. |
 | `Session` | Hashed session token, expiry, `revokedAt`. |
-| `AppSetting` | Org key/value JSON (webhook secret, wizard state, channels, CalDAV sync summary). |
+| `AppSetting` | Org key/value JSON (webhook secret, wizard state, channels, CalDAV sync summary, `notification_routing`, `receptionist_schedule`, `backup_schedule`). |
 | `WorkerLease` | Single-flight lease for automation/outbox/data-source workers (TTL recovery). |
 | `Customer` | End customer: contact, tags, `consentContact`, absolute `optOut`, per-channel `commPrefs`, external ref. |
 | `Service` | Bookable service: duration, buffers, capacity, price/deposit cents, active. |

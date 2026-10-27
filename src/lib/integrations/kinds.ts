@@ -18,6 +18,13 @@ export const twilioConfigSchema = z.object({
   from: z.string().min(3, 'from is required (e.g. +15551234567 or whatsapp:+15551234567)'),
 })
 
+export const metaWhatsAppConfigSchema = z.object({
+  phoneNumberId: z.string().min(1, 'phoneNumberId is required (Meta WhatsApp phone number ID)'),
+  verifyToken: z.string().min(8, 'verifyToken must be at least 8 characters (used for the Meta webhook handshake)'),
+  apiVersion: z.string().max(12).optional(), // Graph API version, defaults to v21.0
+  publicBaseUrl: z.string().url().optional(),
+})
+
 export const twilioVoiceAgentLineSchema = z.object({
   number: z.string().min(3, 'agent line number is required').max(20),
   label: z.string().max(80).optional(),
@@ -170,6 +177,10 @@ export const secretsSchemaFor: Record<string, z.ZodTypeAny> = {
   smtp: z.object({ user: z.string().optional(), pass: z.string().optional() }),
   twilio_sms: z.object({ accountSid: z.string().min(1, 'accountSid is required'), authToken: z.string().min(1, 'authToken is required') }),
   twilio_whatsapp: z.object({ accountSid: z.string().min(1, 'accountSid is required'), authToken: z.string().min(1, 'authToken is required') }),
+  meta_whatsapp: z.object({
+    accessToken: z.string().min(1, 'accessToken is required (Meta system-user access token)'),
+    appSecret: z.string().min(1, 'appSecret is required (Meta app secret, used to verify webhook signatures)'),
+  }),
   twilio_voice: z.object({ accountSid: z.string().min(1, 'accountSid is required'), authToken: z.string().min(1, 'authToken is required') }),
   sms_gateway: z.object({
     apiKey: z.string().optional(), // TextBee / httpSMS
@@ -236,6 +247,7 @@ export const configSchemaFor: Record<string, z.ZodTypeAny> = {
   smtp: smtpConfigSchema,
   twilio_sms: twilioConfigSchema,
   twilio_whatsapp: twilioConfigSchema,
+  meta_whatsapp: metaWhatsAppConfigSchema,
   twilio_voice: twilioVoiceConfigSchema,
   sms_gateway: smsGatewayConfigSchema,
   email_api: emailApiConfigSchema,
@@ -264,6 +276,8 @@ export function secretsAreSufficient(kind: string, secrets: Record<string, unkno
     case 'twilio_whatsapp':
     case 'twilio_voice':
       return Boolean(secrets.accountSid && secrets.authToken)
+    case 'meta_whatsapp':
+      return Boolean(secrets.accessToken && secrets.appSecret)
     case 'sms_gateway':
       // Credentials are provider-dependent and often legitimately absent
       // (android-sms-gateway local mode, an unauthenticated LAN/iOS bridge).

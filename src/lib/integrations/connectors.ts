@@ -14,6 +14,7 @@ export type IntegrationKind =
   | 'email_api'
   | 'twilio_sms'
   | 'twilio_whatsapp'
+  | 'meta_whatsapp'
   | 'twilio_voice'
   | 'sms_gateway'
   | 'caldav'
@@ -32,14 +33,14 @@ export type IntegrationKind =
   | 'imap'
 
 export const INTEGRATION_KINDS: IntegrationKind[] = [
-  'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
+  'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'meta_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
   'google_calendar', 'microsoft_calendar', 'stripe', 'square', 'quickbooks', 'xero', 'myob',
   'shopify', 'woocommerce', 'wix', 'mailchimp', 'webhook_out', 'imap',
 ]
 
 /** Kinds that allow only one row per org (enforced at create time). */
 export const SINGLETON_KINDS: IntegrationKind[] = [
-  'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
+  'smtp', 'email_api', 'twilio_sms', 'twilio_whatsapp', 'meta_whatsapp', 'twilio_voice', 'sms_gateway', 'caldav',
   'google_calendar', 'microsoft_calendar', 'stripe', 'square', 'quickbooks', 'xero', 'myob',
   'shopify', 'woocommerce', 'wix', 'mailchimp', 'imap',
 ]
@@ -222,6 +223,69 @@ async function testWebhookOut(orgId: string, integration: { configJson: string; 
   }
 }
 
+export async function sendMetaWhatsApp(
+  integration: { kind: string; configJson: string; secretsEnc: string },
+  input: { to: string; body: string },
+): Promise<{ messageId: string }> {
+  if (integration.kind !== 'meta_whatsapp') throw new Error('sendMetaWhatsApp requires a meta_whatsapp integration')
+  const config = integrationConfig(integration)
+  const secrets = decryptSecrets(integration)
+  const accessToken = str(secrets, 'accessToken')
+  const phoneNumberId = str(config, 'phoneNumberId')
+  const apiVersion = str(config, 'apiVersion') || 'v21.0'
+  if (!accessToken) throw new Error('Meta WhatsApp integration is missing the access token')
+  if (!phoneNumberId) throw new Error('Meta WhatsApp integration is missing the phone number ID')
+  const to = input.to.replace(/[^\d]/g, '')
+  if (!to) throw new Error('Message has no recipient address')
+
+  try {
+    const res = await fetch(`https://graph.facebook.com/${encodeURIComponent(apiVersion)}/${encodeURIComponent(phoneNumberId)}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: input.body, preview_url: false } }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    const data = (await res.json().catch(() => ({}))) as { messages?: Array<{ id?: string }>; error?: { message?: string } }
+    if (!res.ok) {
+      throw new Error(sanitizeMessage(data.error?.message ? `Meta WhatsApp error ${res.status}: ${data.error.message}` : `Meta WhatsApp HTTP ${res.status} ${res.statusText}`, integration))
+    }
+    const messageId = data.messages?.[0]?.id
+    if (!messageId) throw new Error('Meta WhatsApp accepted the message but returned no message id')
+    return { messageId }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Meta WhatsApp')) throw err
+    throw new Error(sanitizeMessage(err instanceof Error ? err.message : String(err), integration))
+  }
+}
+
+/** Meta WhatsApp Cloud API: real authenticated phone-number fetch. */
+async function testMetaWhatsApp(integration: { configJson: string; secretsEnc: string }): Promise<TestResult> {
+  const config = integrationConfig(integration)
+  const secrets = decryptSecrets(integration)
+  const phoneNumberId = str(config, 'phoneNumberId')
+  const accessToken = str(secrets, 'accessToken')
+  const apiVersion = str(config, 'apiVersion') || 'v21.0'
+  if (!phoneNumberId) return { ok: false, detail: 'Meta WhatsApp config needs the phone number ID' }
+  if (!accessToken) return { ok: false, detail: 'Meta WhatsApp secrets need an access token' }
+  try {
+    const res = await fetch(`https://graph.facebook.com/${encodeURIComponent(apiVersion)}/${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+    const data = (await res.json().catch(() => ({}))) as { id?: string; display_phone_number?: string; verified_name?: string; error?: { message?: string } }
+    if (!res.ok) {
+      return { ok: false, detail: `Meta Graph API rejected the credentials (HTTP ${res.status}): ${sanitizeMessage(data.error?.message ?? res.statusText, integration)}` }
+    }
+    return {
+      ok: true,
+      detail: `Meta WhatsApp verified — ${data.verified_name || data.id || phoneNumberId} (${data.display_phone_number || 'number hidden'})`,
+    }
+  } catch (err) {
+    return { ok: false, detail: `Meta WhatsApp test failed: ${sanitizeMessage(err instanceof Error ? err.message : String(err), integration)}` }
+  }
+}
+
 export async function testIntegration(
   orgId: string,
   integration: { id?: string; orgId?: string; kind: string; configJson: string; secretsEnc: string }
@@ -237,6 +301,8 @@ export async function testIntegration(
     case 'twilio_whatsapp':
     case 'twilio_voice':
       return testTwilio(integration.kind, integration)
+    case 'meta_whatsapp':
+      return testMetaWhatsApp(integration)
     case 'sms_gateway': {
       const { testSmsGateway } = await import('@/lib/integrations/sms')
       return testSmsGateway(str(integrationConfig(integration), 'provider'), integrationConfig(integration), decryptSecrets(integration))
@@ -441,6 +507,20 @@ export async function getEnabledSmsSender(orgId: string): Promise<SmsSenderInfo 
  * sanitized Error when none is configured or the send fails. A success means
  * "accepted by the gateway/provider for delivery", never "delivered to a handset".
  */
+export async function sendOrgWhatsApp(orgId: string, input: { to: string; body: string }): Promise<{ provider: string; messageId: string }> {
+  const twilio = await getEnabledIntegration(orgId, 'twilio_whatsapp')
+  if (twilio) {
+    const { sid } = await sendTwilio(twilio, input)
+    return { provider: 'twilio', messageId: sid }
+  }
+  const meta = await getEnabledIntegration(orgId, 'meta_whatsapp')
+  if (meta) {
+    const { messageId } = await sendMetaWhatsApp(meta, input)
+    return { provider: 'meta', messageId }
+  }
+  throw new Error('No enabled WhatsApp integration (Twilio or Meta Cloud API) is configured')
+}
+
 export async function sendOrgSms(orgId: string, input: { to: string; body: string }): Promise<{ provider: string; messageId: string }> {
   const sender = await getEnabledSmsSender(orgId)
   if (!sender) throw new Error('No enabled SMS integration (Twilio or an SMS gateway) is configured')

@@ -8,6 +8,7 @@ import { isMetadataHost, isPrivateIp } from '@/lib/security/outbound'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
 import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import type { Conversation, Integration, Organization } from '@prisma/client'
 
 interface ImapConfig {
@@ -281,7 +282,7 @@ async function processEmail(org: Organization, email: EmailMessage): Promise<{ c
     meta: { messageId: email.messageId, from: email.fromAddress, subject: email.subject },
   })
 
-  const status = normalizeReceptionistStatus(org.receptionistStatus)
+  const status = (await resolveReceptionistStatus(org)).status
   if (status !== 'running' || !conversation.aiEnabled) {
     return { created: true, reason: status === 'running' ? 'ai disabled for conversation' : `receptionist ${status}` }
   }

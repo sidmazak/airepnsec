@@ -117,3 +117,11 @@ not available here; behavior is documented, not faked.
 - Added inbound SMS for all `sms_gateway` providers via signed `/api/telephony/sms/gateway-incoming`; shared STOP/START consent pipeline with Twilio inbound.
 - Added email providers Mailjet/SparkPost/Elastic Email and SMS providers Sinch/Infobip/ClickSend (builders, tests, credential UI, readiness).
 - Updated demo seed, docs and backlog. Verification: tsc clean, lint clean, 177/177 unit tests.
+
+## 2026-10-27 — Phase 22: schedule, Meta WhatsApp, staff alert wiring
+- Added a weekly receptionist schedule stored in the `receptionist_schedule` AppSetting; every inbound channel now resolves an effective `paused` state outside hours, and `/api/session` + the dashboard expose/edit it.
+- Added direct Meta WhatsApp Cloud API (`meta_whatsapp`): Graph send/test, HMAC-verified webhook handshake, idempotent ingestion, AI replies, outbox fallback and full UI credentials.
+- Wired staff alerts for real: `notifyStaffEvent`/`notifyEscalation` honour the staff channel matrix for missed calls, voicemail, escalations and permanently failed deliveries; removed the unconditional in-app rows.
+- Added official documentation links for every catalog kind and each email/SMS provider in the configuration dialog.
+- Demo seed writes the default schedule; docs (API, integrations, data model, matrices, plan) updated.
+- Verification: tsc clean, lint clean, 187/187 unit tests, 44/44 smoke checks.

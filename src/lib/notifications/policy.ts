@@ -186,6 +186,8 @@ export function eventForOutbox(message: {
     const text = `${message.subject} ${message.dedupeKey ?? ''}`.toLowerCase()
     return { audience: 'staff', event: text.includes('voicemail') ? 'voicemail' : 'missed_call' }
   }
+  if (message.relatedType === 'staff_escalation') return { audience: 'staff', event: 'escalation' }
+  if (message.relatedType === 'integration_failure') return { audience: 'staff', event: 'integration_failure' }
   if (message.channel === 'inapp') return { audience: 'staff', event: 'escalation' }
 
   const text = `${message.subject} ${message.dedupeKey ?? ''}`.toLowerCase()

@@ -46,7 +46,7 @@ import {
 import { BrandLogo } from '@/components/brand-logo'
 import {
   CATEGORY_META, CATEGORY_ORDER, INTEGRATION_CATALOG,
-  catalogEntry, providerBrand, providerLabel, type IntegrationCatalogEntry,
+  catalogEntry, providerBrand, providerLabel, providerDocumentation, type IntegrationCatalogEntry,
 } from '@/lib/integrations/catalog'
 
 /* ------------------------------ helpers ------------------------------ */
@@ -211,6 +211,7 @@ type ConfigDraft = {
   realmId: string; tenantId: string; companyFileId: string; salesAccountCode: string
   shopDomain: string; storeUrl: string; siteId: string; serverPrefix: string; listId: string
   folders: string; pollIntervalMinutes: string; maxMessagesPerPoll: string
+  phoneNumberId: string; verifyToken: string; apiVersion: string
 }
 type SecretsDraft = {
   user: string; pass: string; accountSid: string; authToken: string; secretKey: string; webhookSecret: string; secret: string
@@ -230,6 +231,7 @@ const EMPTY_CONFIG: ConfigDraft = {
   realmId: '', tenantId: '', companyFileId: '', salesAccountCode: '',
   shopDomain: '', storeUrl: '', siteId: '', serverPrefix: '', listId: '',
   folders: 'INBOX', pollIntervalMinutes: '5', maxMessagesPerPoll: '50',
+  phoneNumberId: '', verifyToken: '', apiVersion: 'v21.0',
 }
 const EMPTY_SECRETS: SecretsDraft = {
   user: '', pass: '', accountSid: '', authToken: '', secretKey: '', webhookSecret: '', secret: '', password: '',
@@ -287,6 +289,13 @@ function buildConfig(kind: string, d: ConfigDraft): Record<string, unknown> {
     return out
   }
   if (kind === 'twilio_sms' || kind === 'twilio_whatsapp') return { from: d.from.trim() }
+  if (kind === 'meta_whatsapp') {
+    return {
+      phoneNumberId: d.phoneNumberId.trim(),
+      verifyToken: d.verifyToken.trim(),
+      apiVersion: d.apiVersion.trim() || 'v21.0',
+    }
+  }
   if (kind === 'twilio_voice') {
     const out: Record<string, unknown> = { from: d.from.trim() }
     if (d.language.trim()) out.language = d.language.trim()
@@ -389,6 +398,9 @@ function collectSecrets(kind: string, d: SecretsDraft): Record<string, string> |
   } else if (kind === 'twilio_sms' || kind === 'twilio_whatsapp' || kind === 'twilio_voice') {
     if (d.accountSid.trim()) out.accountSid = d.accountSid.trim()
     if (d.authToken) out.authToken = d.authToken
+  } else if (kind === 'meta_whatsapp') {
+    if (d.accessToken) out.accessToken = d.accessToken
+    if (d.clientSecret) out.appSecret = d.clientSecret
   } else if (kind === 'email_api') {
     if (d.apiKey) out.apiKey = d.apiKey
     if (d.apiSecret) out.apiSecret = d.apiSecret
@@ -638,6 +650,7 @@ function ConnectorCard({
       shopDomain: str(c.shopDomain), storeUrl: str(c.storeUrl), siteId: str(c.siteId),
       serverPrefix: str(c.serverPrefix), listId: str(c.listId),
       folders: str(c.folders) || 'INBOX', pollIntervalMinutes: c.pollIntervalMinutes != null ? String(c.pollIntervalMinutes) : '5', maxMessagesPerPoll: c.maxMessagesPerPoll != null ? String(c.maxMessagesPerPoll) : '50',
+      phoneNumberId: str(c.phoneNumberId), verifyToken: str(c.verifyToken), apiVersion: str(c.apiVersion) || 'v21.0',
     })
     setDlgOpen(true)
   }
@@ -770,11 +783,22 @@ function ConnectorCard({
             {(kind === 'twilio_sms' || kind === 'twilio_whatsapp') && (
               <p className="text-xs text-muted-foreground break-all">Sender: {str(row.config.from) || 'not set'}</p>
             )}
+            {kind === 'meta_whatsapp' && (
+              <p className="text-xs text-muted-foreground break-all">Phone number ID: {str(row.config.phoneNumberId) || 'not set'} · {str(row.config.apiVersion) || 'v21.0'}</p>
+            )}
 
             {kind === 'twilio_whatsapp' && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium">Webhook URL for the Twilio console:</p>
                 <WebhookUrlRow url={`${origin}/api/telephony/whatsapp/incoming`} label="A message comes in" />
+              </div>
+            )}
+
+            {kind === 'meta_whatsapp' && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium">Webhook callback URL for the Meta App Dashboard:</p>
+                <WebhookUrlRow url={`${origin}/api/telephony/whatsapp/meta`} label="Webhook callback URL (subscribe to messages)" />
+                <p className="text-xs text-muted-foreground">The verify token is the one saved in this form. Meta signs every delivery with the app secret.</p>
               </div>
             )}
 
@@ -1068,6 +1092,16 @@ function ConfigureDialog({
                   Provider documentation <ExternalLink className="h-3 w-3" aria-hidden />
                 </a>
               )}
+              {(kind === 'email_api' || kind === 'sms_gateway') && providerDocumentation(cfg.provider) && (
+                <a
+                  href={providerDocumentation(cfg.provider)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1 text-xs underline underline-offset-2 hover:text-foreground min-h-[28px]"
+                >
+                  {providerLabel(metaEntry, cfg.provider)} setup documentation <ExternalLink className="h-3 w-3" aria-hidden />
+                </a>
+              )}
             </div>
           )}
         </DialogHeader>
@@ -1145,6 +1179,26 @@ function ConfigureDialog({
               <div className="space-y-1.5">
                 <Label htmlFor={`${idBase}-from`}>From address</Label>
                 <Input id={`${idBase}-from`} type="email" value={cfg.from} onChange={(e) => setCfg((s) => ({ ...s, from: e.target.value }))} placeholder="invoices@yourdomain.com" className="min-h-[44px]" />
+              </div>
+            </div>
+          )}
+
+          {kind === 'meta_whatsapp' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${idBase}-phoneid`}>WhatsApp phone number ID</Label>
+                <Input id={`${idBase}-phoneid`} value={cfg.phoneNumberId} onChange={(e) => setCfg((s) => ({ ...s, phoneNumberId: e.target.value }))} placeholder="123456789012345" autoComplete="off" className="min-h-[44px]" />
+                <p className="text-xs text-muted-foreground">Meta App Dashboard → WhatsApp → API Setup. Not the phone number itself.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-verifytoken`}>Webhook verify token</Label>
+                  <Input id={`${idBase}-verifytoken`} value={cfg.verifyToken} onChange={(e) => setCfg((s) => ({ ...s, verifyToken: e.target.value }))} placeholder="a long random string" autoComplete="off" className="min-h-[44px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-apiversion`}>Graph API version</Label>
+                  <Input id={`${idBase}-apiversion`} value={cfg.apiVersion} onChange={(e) => setCfg((s) => ({ ...s, apiVersion: e.target.value }))} placeholder="v21.0" autoComplete="off" className="min-h-[44px]" />
+                </div>
               </div>
             </div>
           )}
@@ -1703,6 +1757,21 @@ function ConfigureDialog({
                     <p className="text-xs text-muted-foreground">Sent in the header named above (e.g. X-Api-Key).</p>
                   </div>
                 )}
+              </>
+            )}
+
+            {kind === 'meta_whatsapp' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-matauth`}>Meta access token</Label>
+                  <Input id={`${idBase}-matauth`} type="password" value={sec.accessToken} onChange={(e) => setSec((s) => ({ ...s, accessToken: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">A permanent system-user token with whatsapp_business_messaging.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idBase}-matsecret`}>Meta app secret</Label>
+                  <Input id={`${idBase}-matsecret`} type="password" value={sec.clientSecret} onChange={(e) => setSec((s) => ({ ...s, clientSecret: e.target.value }))} autoComplete="new-password" className="min-h-[44px]" />
+                  <p className="text-xs text-muted-foreground">From Meta App Dashboard → Settings → Basic. Used to verify webhook signatures.</p>
+                </div>
               </>
             )}
 

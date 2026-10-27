@@ -24,12 +24,12 @@ car rentals, and similar appointment/rental businesses.
 
 | Area | Capability |
 |---|---|
-| Receptionist | Text chat, public web chat, browser voice console, inbound SMS, WhatsApp, Twilio Voice; one validated tool loop for all channels |
+| Receptionist | Text chat, public web chat, browser voice console, inbound SMS, WhatsApp (Twilio or Meta Cloud API), Twilio Voice; one validated tool loop for all channels |
 | Bookings | Real availability engine (hours, staff, buffers, capacity, holidays), transactional conflict detection, reschedule/cancel/status |
 | Money | Invoices with line items, verified payments vs. customer claims, idempotent webhooks, append-only ledger, reversals, statements |
 | Knowledge | Approved FAQ/docs, hybrid semantic + BM25 retrieval, built-in local ONNX embeddings, BYO databases/JSON, PDF/DOCX/HTML/Markdown import, and a robots/SSRF-aware website crawler |
 | Automations | Triggers, conditions, delays, quiet hours, dedupe, retries, caps, test mode, run history, leased worker |
-| Integrations | SMTP or 5 email APIs, Twilio SMS/WhatsApp/Voice, 8 SMS gateways, Stripe/Square Payment Links + signed webhooks, QuickBooks/Xero/MYB accounting push, Shopify/WooCommerce/Wix/Mailchimp contact sync, signed outbound webhooks, CalDAV + Google Calendar + Microsoft 365 two-way sync |
+| Integrations | SMTP or 8 email APIs, Twilio SMS/WhatsApp/Voice, direct Meta WhatsApp Cloud API, 11 SMS gateways, Stripe/Square Payment Links + signed webhooks, QuickBooks/Xero/MYB accounting push, Shopify/WooCommerce/Wix/Mailchimp contact sync, signed outbound webhooks, CalDAV + Google Calendar + Microsoft 365 two-way sync |
 | Operations | Dashboard, audit trail, outbox status, AI usage/cost estimates, diagnostics, encrypted secrets, 2FA, scheduled backups with retention |
 
 ### AI providers (no proprietary SDK)
@@ -58,7 +58,7 @@ flowchart LR
   subgraph Clients
     B[Admin SPA<br/>browser]
     C[Public web chat<br/>visitor]
-    T[Twilio<br/>voice / SMS / WhatsApp]
+    T[Twilio<br/>voice / SMS / WhatsApp<br/>Meta WhatsApp Cloud API]
     P[Payment providers]
   end
 

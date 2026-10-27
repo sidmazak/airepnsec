@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { notifyEscalation } from '@/lib/notifications/staff'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { withPublic } from '@/lib/api'
@@ -9,7 +10,7 @@ import {
   logWebhook, plainResponse, twiml, gatherSpeech, say, dialNumber, hangup,
 } from '@/lib/telephony/twiml'
 import { bumpNoInput, resetNoInput } from '@/lib/telephony/no-input'
-import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import { voicemailEnabled, voicemailResponse } from '@/lib/telephony/voicemail'
 
 export const pathname = '/api/telephony/voice/gather'
@@ -58,7 +59,7 @@ export const POST = withPublic(async (req: NextRequest) => {
   const statusBefore = conversation.status
 
   // Organization-wide runtime switch — a paused/stopped assistant ends the call.
-  const receptionistStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  const receptionistStatus = (await resolveReceptionistStatus(org)).status
   if (receptionistStatus !== 'running') {
     await db.message.create({ data: { conversationId: conversation.id, orgId: org.id, role: 'customer', content: speech || '(no speech)', meta: JSON.stringify({ source: 'phone', callSid, receptionistStatus }) } }).catch(() => {})
     await audit({ orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice', action: 'telephony.call_not_answered', entity: 'conversation', entityId: conversation.id, meta: { callSid, receptionistStatus } })
@@ -106,6 +107,7 @@ export const POST = withPublic(async (req: NextRequest) => {
   // Escalation automations fire only on the transition into waiting_human.
   if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {
     await emitEvent(org.id, 'conversation_escalated', { conversationId: conversation.id, entityId: conversation.id })
+    await notifyEscalation(org.id, conversation.id, 'phone call')
   }
   await audit({ orgId: org.id, actorType: 'webhook', actorId: 'twilio_voice', action: 'telephony.call_turn', entity: 'conversation', entityId: conversation.id, meta: { callSid, speech: speech.slice(0, 200), reply: reply.slice(0, 200) } })
 

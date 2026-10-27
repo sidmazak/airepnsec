@@ -1,11 +1,12 @@
 import { NextRequest, after } from 'next/server'
+import { notifyEscalation } from '@/lib/notifications/staff'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { withPublic } from '@/lib/api'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
 import { getEnabledIntegration, sendTwilio, sanitizeMessage } from '@/lib/integrations/connectors'
-import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import {
   resolveTelephonyRoute, verifyTwilioSignature, candidateWebhookUrls, formParams,
   matchCustomerByPhone, logWebhook, plainResponse, twiml,
@@ -62,7 +63,7 @@ export const POST = withPublic(async (req: NextRequest) => {
 
   // "stopped" means the app does not listen: acknowledge the webhook, audit a
   // short preview of what arrived, and open no conversation at all.
-  const receptionistStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  const receptionistStatus = (await resolveReceptionistStatus(org)).status
   if (receptionistStatus === 'stopped') {
     await audit({
       orgId: org.id, actorType: 'webhook', actorId: 'twilio_whatsapp',
@@ -107,6 +108,7 @@ export const POST = withPublic(async (req: NextRequest) => {
       // Escalation automations fire only on the transition into waiting_human.
       if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {
         await emitEvent(org.id, 'conversation_escalated', { conversationId, entityId: conversationId })
+        await notifyEscalation(org.id, conversationId, 'WhatsApp')
       }
       if (!result.reply) return
 

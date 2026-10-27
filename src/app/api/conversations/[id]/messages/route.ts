@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { notifyEscalation } from '@/lib/notifications/staff'
 import { withAuth, json, fail, parseBody } from '@/lib/api'
 import { db } from '@/lib/db'
 import { handleReceptionistTurn, type TurnResult } from '@/lib/ai/receptionist'
@@ -41,6 +42,7 @@ export const POST = withAuth(async (req, ctx, params) => {
       conversationId: conversation.id,
       entityId: conversation.id,
     })
+    await notifyEscalation(ctx.org.id, conversation.id, 'dashboard conversation')
   }
 
   return json({ ...result, assistantReply: result.reply })

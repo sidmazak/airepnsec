@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
+import { notifyStaffEvent } from '@/lib/notifications/staff'
 import { parseJson } from '@/lib/org'
 import { say, hangup, twiml, voicemailRecord, publicOrigin, matchCustomerByPhone } from '@/lib/telephony/twiml'
 
@@ -43,41 +44,15 @@ export async function notifyMissedCall(input: { orgId: string; callSid: string; 
   if (!org) return
   const customer = await matchCustomerByPhone(org.id, input.from)
   const body = `${customer?.name ? `${customer.name} — ` : ''}${input.from || 'unknown caller'} called ${input.to || 'the business line'} and the call was not answered (${input.reason}).`
-  await db.outboxMessage
-    .create({
-      data: {
-        orgId: org.id,
-        channel: 'inapp',
-        recipient: 'staff',
-        subject: 'Missed call',
-        body,
-        status: 'sent',
-        sentAt: new Date(),
-        relatedType: 'telephony_call',
-        dedupeKey: `missed-call:${input.callSid}`,
-      },
-    })
-    .catch((err: { code?: string }) => {
-      if (err?.code !== 'P2002') throw err
-    })
-  if (org.email && org.email.includes('@')) {
-    await db.outboxMessage
-      .create({
-        data: {
-          orgId: org.id,
-          channel: 'email',
-          recipient: org.email,
-          subject: `Missed call from ${input.from || 'unknown caller'}`,
-          body,
-          status: 'queued',
-          relatedType: 'telephony_call',
-          dedupeKey: `missed-call-email:${input.callSid}`,
-        },
-      })
-      .catch((err: { code?: string }) => {
-        if (err?.code !== 'P2002') throw err
-      })
-  }
+  await notifyStaffEvent({
+    orgId: org.id,
+    event: 'missed_call',
+    subject: 'Missed call',
+    body,
+    relatedType: 'telephony_call',
+    dedupeKey: `missed-call:${input.callSid}`,
+  })
+
   await audit({
     orgId: org.id,
     actorType: 'system',
@@ -171,45 +146,18 @@ export async function persistVoicemail(input: VoicemailInput): Promise<{ convers
   // the transcription callback cannot create two alerts.
   let notificationQueued = false
   if (!existing) {
-    await db.outboxMessage
-      .create({
-        data: {
-          orgId: org.id,
-          channel: 'inapp',
-          recipient: 'staff',
-          subject: `New voicemail from ${input.from || 'unknown caller'}`,
-          body: `${customer?.name ? `${customer.name} — ` : ''}${transcript || 'A caller left a voicemail.'} Open the inbox to review it.`,
-          status: 'sent',
-          sentAt: new Date(),
-          relatedType: 'conversation',
-          relatedId: conversation.id,
-          dedupeKey: `voicemail-notify:${input.callSid}`,
-        },
-      })
-      .catch((err: { code?: string }) => {
-        if (err?.code !== 'P2002') throw err
-      })
-    notificationQueued = true
+    const sent = await notifyStaffEvent({
+      orgId: org.id,
+      event: 'voicemail',
+      subject: `New voicemail from ${input.from || 'unknown caller'}`,
+      body: `${customer?.name ? `${customer.name} — ` : ''}${transcript || 'A caller left a voicemail.'}${input.recordingUrl ? `
 
-    if (org.email && org.email.includes('@')) {
-      await db.outboxMessage
-        .create({
-          data: {
-            orgId: org.id,
-            channel: 'email',
-            recipient: org.email,
-            subject: `New voicemail from ${input.from || 'unknown caller'}`,
-            body: `${customer?.name ? `${customer.name} — ` : ''}${transcript || 'A caller left a voicemail.'}\n\nRecording: ${input.recordingUrl || 'not available'}`,
-            status: 'queued',
-            relatedType: 'telephony_call',
-            relatedId: conversation.id,
-            dedupeKey: `voicemail-email:${input.callSid}`,
-          },
-        })
-        .catch((err: { code?: string }) => {
-          if (err?.code !== 'P2002') throw err
-        })
-    }
+Recording: ${input.recordingUrl}` : ''}`,
+      relatedType: 'telephony_call',
+      relatedId: conversation.id,
+      dedupeKey: `voicemail-notify:${input.callSid}`,
+    })
+    notificationQueued = sent.inapp || sent.email
   }
 
   // Optional caller acknowledgement. Only for a caller we can text, and only

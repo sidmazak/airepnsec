@@ -144,8 +144,15 @@ export type SessionInfo = {
   org?: {
     id: string; name: string; slug: string; demo: boolean; setupComplete: boolean
     dataMode: string; timezone: string; currency: string; businessType: string
-    /** Runtime switch of the AI receptionist: running | paused | stopped. */
+    /** Effective runtime switch: running | paused | stopped (schedule applied). */
     receptionistStatus?: string
+    receptionistBaseStatus?: string
+    receptionistScheduledOff?: boolean
+    receptionistSchedule?: {
+      enabled: boolean
+      days: Record<string, { start: string; end: string } | null>
+      timezone?: string
+    }
   }
   demoAvailable?: boolean
 }

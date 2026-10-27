@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { notifyEscalation } from '@/lib/notifications/staff'
 import { withPublic, parseBody, json, fail, handleError, rateLimit, rateLimitShared, clientIp } from '@/lib/api'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/audit'
 import { randomToken } from '@/lib/crypto'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
-import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 
 export const maxDuration = 60
 
@@ -68,7 +69,7 @@ export const POST = withPublic(async (req, params) => {
 
     // "stopped" = the assistant is off: nothing is stored, the visitor is told
     // honestly that no one is answering right now.
-    if (normalizeReceptionistStatus(org.receptionistStatus) === 'stopped') {
+    if ((await resolveReceptionistStatus(org)).status === 'stopped') {
       return cors(
         json({
           token: body.token ?? '',
@@ -134,6 +135,7 @@ export const POST = withPublic(async (req, params) => {
     const fresh = await db.conversation.findUnique({ where: { id: conversation!.id } })
     if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {
       await emitEvent(org.id, 'conversation_escalated', { conversationId: conversation!.id, entityId: conversation!.id })
+      await notifyEscalation(org.id, conversation!.id, 'public chat')
     }
 
     return cors(

@@ -81,6 +81,7 @@ export async function nudgeChannel(orgId: string, kind: string): Promise<void> {
     twilio_sms: ['sms'],
     sms_gateway: ['sms'],
     twilio_whatsapp: ['whatsapp'],
+    meta_whatsapp: ['whatsapp'],
     webhook_out: ['webhook'],
   }
   const channels = channelByKind[kind]
@@ -106,7 +107,7 @@ async function deliver(message: OutboxMessage): Promise<Outcome> {
     case 'sms':
       return deliverSms(message)
     case 'whatsapp':
-      return deliverTwilio(message, 'twilio_whatsapp')
+      return deliverWhatsApp(message)
     case 'webhook':
       return deliverWebhook(message)
     default:
@@ -252,6 +253,31 @@ async function deliverSms(message: OutboxMessage): Promise<Outcome> {
   }
 }
 
+async function deliverWhatsApp(message: OutboxMessage): Promise<Outcome> {
+  const twilio = await getEnabledIntegration(message.orgId, 'twilio_whatsapp')
+  if (twilio) {
+    try {
+      await sendTwilio(twilio, { to: message.recipient, body: message.body })
+      await markSent(message)
+      return 'sent'
+    } catch (err) {
+      return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), twilio))
+    }
+  }
+  const meta = await getEnabledIntegration(message.orgId, 'meta_whatsapp')
+  if (meta) {
+    try {
+      const { sendMetaWhatsApp } = await import('@/lib/integrations/connectors')
+      await sendMetaWhatsApp(meta, { to: message.recipient, body: message.body })
+      await markSent(message)
+      return 'sent'
+    } catch (err) {
+      return await markFailed(message, sanitizeMessage(err instanceof Error ? err.message : String(err), meta))
+    }
+  }
+  return await waitForIntegration(message, 'whatsapp')
+}
+
 async function deliverTwilio(message: OutboxMessage, kind: 'twilio_sms' | 'twilio_whatsapp'): Promise<Outcome> {
   const integration = await getEnabledIntegration(message.orgId, kind)
   if (!integration) return await waitForIntegration(message, message.channel)
@@ -344,6 +370,22 @@ async function markFailed(message: OutboxMessage, sanitizedError: string): Promi
       where: { id: message.id },
       data: { attempts, status: 'failed', statusReason: sanitizedError },
     })
+    if (message.relatedType !== 'integration_failure') {
+      const { notifyStaffEvent } = await import('@/lib/notifications/staff')
+      await notifyStaffEvent({
+        orgId: message.orgId,
+        event: 'integration_failure',
+        subject: `Delivery failed: ${message.channel}`,
+        body: `A queued ${message.channel} message could not be delivered after ${attempts} attempts.
+
+${sanitizedError}
+
+Check the integration settings and the outbox.`,
+        relatedType: 'integration_failure',
+        relatedId: message.id,
+        dedupeKey: `outbox-failed:${message.id}`,
+      })
+    }
   } else {
     const backoffMin = Math.min(60, 2 ** attempts)
     await db.outboxMessage.update({

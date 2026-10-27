@@ -9,6 +9,7 @@ import {
   matchCustomerByPhone, logWebhook, plainResponse, twiml, gatherSpeech, say, hangup, dialNumber, dialNumbers,
 } from '@/lib/telephony/twiml'
 import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import {
   buildLineCandidates,
   normalizeAgentLines,
@@ -237,7 +238,7 @@ export const POST = withPublic(async (req: NextRequest) => {
 
   // Organization-wide runtime switch. Calls routed to a human agent line are
   // unaffected — only the AI receptionist stops answering.
-  const receptionistStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  const receptionistStatus = (await resolveReceptionistStatus(org)).status
   if (receptionistStatus !== 'running') {
     const callId = await recordCall(org.id, callSid, from, to, '', { strategy: 'receptionist', receptionistStatus, ai: false })
     await audit({

@@ -1,5 +1,6 @@
 import { withPublic, json, getCtx } from '@/lib/api'
 import { db } from '@/lib/db'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 
 /**
  * GET /api/session
@@ -19,6 +20,8 @@ export const GET = withPublic(async (req) => {
   const ctx = await getCtx(req)
   if (!ctx) return json({ authenticated: false, needsSetup: false, demoAvailable })
 
+  const receptionist = await resolveReceptionistStatus(ctx.org)
+
   return json({
     authenticated: true,
     user: { id: ctx.user.id, name: ctx.user.name, email: ctx.user.email, role: ctx.user.role },
@@ -32,7 +35,10 @@ export const GET = withPublic(async (req) => {
       timezone: ctx.org.timezone,
       currency: ctx.org.currency,
       businessType: ctx.org.businessType,
-      receptionistStatus: ctx.org.receptionistStatus || 'running',
+      receptionistStatus: receptionist.status,
+      receptionistBaseStatus: receptionist.baseStatus,
+      receptionistScheduledOff: receptionist.scheduledOff,
+      receptionistSchedule: receptionist.schedule,
     },
     demoAvailable,
   })

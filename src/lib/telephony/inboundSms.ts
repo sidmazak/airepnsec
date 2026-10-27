@@ -3,7 +3,7 @@ import { audit } from '@/lib/audit'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
 import { emitEvent } from '@/lib/automation/engine'
 import { sendOrgSms } from '@/lib/integrations/connectors'
-import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 import { matchCustomerByPhone } from '@/lib/telephony/twiml'
 import { consentKeyword, type ConsentKeyword } from '@/lib/telephony/sms-keywords'
 import type { Organization } from '@prisma/client'
@@ -54,7 +54,7 @@ export async function ingestInboundSms(input: {
   const { org, from, to, body, messageSid, provider } = input
   const customer = await matchCustomerByPhone(org.id, from)
   const keyword = consentKeyword(body)
-  const receptionistStatus = normalizeReceptionistStatus(org.receptionistStatus)
+  const receptionistStatus = (await resolveReceptionistStatus(org)).status
 
   if (keyword && customer) {
     const conversation = await findOrCreateConversation(org.id, from, customer.name || from, customer.id)

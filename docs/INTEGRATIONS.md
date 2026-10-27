@@ -1,6 +1,6 @@
 # Integrations — AI Secretary
 
-How the app talks to third-party services: email (SMTP or SendGrid/Mailgun/Postmark/Resend/Brevo/Mailjet/SparkPost/Elastic Email), SMS/WhatsApp (Twilio or a self-hosted/carrier SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), inbound email (IMAP), Stripe/Square payments, QuickBooks/Xero/MYB accounting, Shopify/WooCommerce/Wix/Mailchimp contact sync, CalDAV calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
+How the app talks to third-party services: email (SMTP or SendGrid/Mailgun/Postmark/Resend/Brevo/Mailjet/SparkPost/Elastic Email), SMS/WhatsApp (Twilio, Meta WhatsApp Cloud API, or a self-hosted/carrier SMS gateway), real telephony (Twilio Voice inbound calls + inbound SMS), inbound email (IMAP), Stripe/Square payments, QuickBooks/Xero/MYB accounting, Shopify/WooCommerce/Wix/Mailchimp contact sync, CalDAV calendar sync (push + pull), **Google Calendar** sync (OAuth two-way), and signed outbound webhooks. Speech recognition/synthesis for the
 browser **Voice Console** is not an integration row — it rides the AI provider layer (capabilities
 `stt`/`tts`, same BYOK + data-mode policy as chat; see [ARCHITECTURE.md](./ARCHITECTURE.md) §9).
 Everything here is **BYOK (bring your own key)** — the app ships with zero third-party accounts and
@@ -51,7 +51,7 @@ connection test exposed at `POST /api/integrations/[id]/test` (results stored in
   marked `failed` with the last (sanitized) error.
 - **Enabling an integration nudges pending messages**: queued messages of the
   matching channel (`smtp→email`, `email_api→email`, `twilio_sms→sms`,
-  `twilio_whatsapp→whatsapp`, `webhook_out→webhook`) get `scheduledFor = now`
+  `twilio_whatsapp→whatsapp`, `meta_whatsapp→whatsapp`, `webhook_out→webhook`) get `scheduledFor = now`
   and are flushed on the next tick.
 - **Manual flush**: `POST /api/outbox/dispatch` (owner/admin) releases the
   backoff for every enabled channel and dispatches immediately — returns
@@ -64,7 +64,7 @@ connection test exposed at `POST /api/integrations/[id]/test` (results stored in
 Config = non-secret fields (`configJson`), Secrets = encrypted fields.
 `GET /api/integrations` returns config plus `configured`, `enabled`,
 `lastTestAt/Ok/Error` — never secrets. Singleton kinds (one row per org):
-`smtp`, `email_api`, `twilio_sms`, `twilio_whatsapp`, `twilio_voice`, `sms_gateway`, `caldav`,
+`smtp`, `email_api`, `twilio_sms`, `twilio_whatsapp`, `meta_whatsapp`, `twilio_voice`, `sms_gateway`, `caldav`,
 `google_calendar`, `microsoft_calendar`, `stripe`, `square`, `quickbooks`, `xero`, `myob`,
 `shopify`, `woocommerce`, `wix`, `mailchimp`; `webhook_out` allows one row per destination URL.
 
@@ -91,6 +91,20 @@ already_configured`.
 | Test routine | Real authenticated `GET https://api.twilio.com/2010-04-01/Accounts/<sid>.json` (10 s timeout). Success: `Twilio SMS verified — account "My Co" (active), sender +15551234567`. |
 | Delivery | `POST …/Messages.json` (form: `To`, `From`, `Body`), Basic auth, 15 s timeout; for `twilio_whatsapp` the destination is normalized to `whatsapp:+…`. Returns the Twilio message `sid` into the audit trail. |
 | Failure examples | `Twilio API rejected the credentials (HTTP 401): Authenticate` (bad authToken) · `Twilio error 400: Unable to create record: The 'To' number is not a valid phone number` · `From` number not WhatsApp-enabled → Twilio 400/401 on send. |
+
+### `meta_whatsapp` — WhatsApp Cloud API (direct with Meta)
+
+| | |
+|---|---|
+| Config | `phoneNumberId` (required): Meta WhatsApp phone number ID (not the phone number); `verifyToken` (required, ≥ 8 chars): the token you also paste into the Meta App Dashboard webhook config; `apiVersion?`: Graph API version, default `v21.0`; `publicBaseUrl?`: optional exact HTTPS origin for the callback URL display |
+| Secrets | `accessToken` (required): permanent system-user token with `whatsapp_business_messaging`; `appSecret` (required): Meta app secret used to verify `x-hub-signature-256` on every webhook |
+| Test routine | Real authenticated `GET https://graph.facebook.com/<version>/<phoneNumberId>?fields=id,display_phone_number,verified_name` (10 s timeout). Success reports the verified business name and display number. |
+| Delivery | `POST https://graph.facebook.com/<version>/<phoneNumberId>/messages` JSON `{messaging_product:'whatsapp', to, type:'text', text:{body, preview_url:false}}` with a bearer token; 15 s timeout. The Meta message id is returned and used for dedupe. |
+| Inbound | `GET /api/telephony/whatsapp/meta` answers Meta's `hub.challenge` handshake; `POST /api/telephony/whatsapp/meta` verifies the HMAC-SHA256 signature, dedupes by message id, persists inbound text, then runs the AI receptionist and replies through Meta. Non-text messages are audited as unsupported. |
+| Failure examples | `Meta Graph API rejected the credentials (HTTP 401): Invalid OAuth access token` · `Meta WhatsApp error 400: Recipient phone number not in allowed list` (test-number mode) · webhook with a wrong app secret → `403 Invalid signature` and a rejected `WebhookEvent`. |
+
+The outbox `whatsapp` channel resolves an enabled Twilio WhatsApp integration first, then Meta.
+The UI shows the exact webhook callback URL after saving.
 
 ### `sms_gateway` — BYO Android modem / HTTP SMS bridge
 
@@ -536,6 +550,14 @@ unauthenticated listener.
 - Video/webinars: https://www.twilio.com/video
 - Pricing: https://www.twilio.com/pricing
 - Account management: https://www.twilio.com/console
+
+**Meta WhatsApp Cloud API**
+- Overview: https://developers.facebook.com/docs/whatsapp/cloud-api
+- Get started: https://developers.facebook.com/docs/whatsapp/cloud-api/get-started
+- Send messages: https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages
+- Webhooks: https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks
+- Graph API reference: https://developers.facebook.com/docs/whatsapp/cloud-api/reference
+- Pricing: https://developers.facebook.com/docs/whatsapp/pricing
 
 **SendGrid**
 - API docs: https://sendgrid.com/docs/api-reference

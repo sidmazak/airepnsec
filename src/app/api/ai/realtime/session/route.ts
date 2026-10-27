@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { withAuth, json, ApiError } from '@/lib/api'
 import { assertAiPolicy, getApiKey, getActiveProvider } from '@/lib/ai/providers'
 import { REALTIME_TOOLS } from '@/lib/ai/receptionist'
-import { normalizeReceptionistStatus } from '@/lib/receptionist/status'
+import { resolveReceptionistStatus } from '@/lib/receptionist/runtime'
 
 // POST /api/ai/realtime/session — mint a short-lived client secret for the OpenAI
 // Realtime API (WebRTC) using the org's OpenAI-compatible provider. The browser uses
@@ -13,7 +13,7 @@ export const POST = withAuth(async (req, ctx) => {
   const body = await req.json().catch(() => ({}))
   // The runtime switch also gates realtime voice — a paused receptionist must not
   // open a live customer session.
-  const status = normalizeReceptionistStatus(ctx.org.receptionistStatus)
+  const status = (await resolveReceptionistStatus(ctx.org)).status
   if (status !== 'running') {
     throw new ApiError(503, `The AI receptionist is ${status} — realtime voice sessions are disabled.`, 'receptionist_not_running')
   }

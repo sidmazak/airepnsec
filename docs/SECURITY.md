@@ -98,6 +98,7 @@ HSTS/CSP but must not weaken these.
   or `PUBLIC_BASE_URL/api/square/webhook` and must match Square's dashboard exactly.
   Only `payment.created`/`payment.updated` events with `COMPLETED` status are recorded;
   the order is re-fetched to read invoice metadata before any payment is posted.
+- **Meta WhatsApp Cloud API:** `x-hub-signature-256` HMAC-SHA256 over the raw body using the integration's app secret (required); GET `hub.verify_token` handshake; message-id dedupe.
 - **Twilio Voice/SMS/WhatsApp:** `X-Twilio-Signature` HMAC-SHA1 over the full URL + sorted params;
   candidate URL list handles proxies; every attempt persisted in `WebhookEvent` with `signatureValid`.
 - **Outbound webhooks:** hex HMAC-SHA256 (`x-signature`) when a secret is configured; literal `none`

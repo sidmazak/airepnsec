@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
+import { notifyEscalation } from '@/lib/notifications/staff'
 import { withAuth, fail, parseBody, ApiError } from '@/lib/api'
 import { db } from '@/lib/db'
 import { handleReceptionistTurn } from '@/lib/ai/receptionist'
@@ -70,6 +71,7 @@ export const POST = withAuth(async (req, ctx) => {
         const fresh = await db.conversation.findUnique({ where: { id: conversationId }, select: { status: true } })
         if (statusBefore !== 'waiting_human' && fresh?.status === 'waiting_human') {
           await emitEvent(ctx.org.id, 'conversation_escalated', { conversationId, entityId: conversationId })
+          await notifyEscalation(ctx.org.id, conversationId, 'live chat')
         }
 
         send({

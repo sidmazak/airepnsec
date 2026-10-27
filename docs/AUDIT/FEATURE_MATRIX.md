@@ -1,7 +1,7 @@
 # Feature Matrix — AI Secretary
 
 Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomplete/honest-gap;
-**MISSING** = not implemented; **N/A** = not applicable. Last reviewed: iteration 4, 2026-10-23.
+**MISSING** = not implemented; **N/A** = not applicable. Last reviewed: iteration 5, 2026-10-27.
 
 ## SPA sections (19 + auth)
 | Section | Primary APIs | Status | Notes |
@@ -22,9 +22,10 @@ Status legend: **DONE** = implemented + working; **PARTIAL** = exists but incomp
 | Security | `/api/auth/2fa/*`, `/api/auth/sessions/revoke-all` | DONE | TOTP enrollment/disable; revoke other sessions. |
 | Team | `/api/users*` | DONE | Members, invitations, roles, deactivation, session revocation, password reset; owner/admin only. |
 | Business Profile | `/api/setup`, `/api/settings/*` | DONE | Profile, hours, policies, AI identity, collections config. |
-| Integrations | `/api/integrations/*` | DONE | SMTP + 8 email APIs, Twilio (voice/voicemail/SMS/WhatsApp), 11 SMS gateways, Stripe/Square, QuickBooks/Xero/MYB, Shopify/WooCommerce/Wix/Mailchimp, CalDAV, Google/Microsoft calendars, outbound webhooks; per-kind tests + contact sync. |
+| Integrations | `/api/integrations/*` | DONE | SMTP + 8 email APIs, Twilio (voice/voicemail/SMS/WhatsApp), direct Meta WhatsApp Cloud API, 11 SMS gateways, Stripe/Square, QuickBooks/Xero/MYB, Shopify/WooCommerce/Wix/Mailchimp, CalDAV, Google/Microsoft calendars, outbound webhooks; per-kind tests + contact sync + per-provider setup docs. |
 | Notification routing / consent | `/api/settings/notifications`, `/api/customers*` | DONE | Customer event × channel matrix, staff alerts, quiet hours with deferral, consent requirements, per-customer `commPrefs`, honest `skipped` outbox rows. |
 | Telephony PABX / voicemail | `/api/telephony/voice/*` | DONE | least-busy/round-robin/redirect/simultaneous, ring timeout, after-hours actions, voicemail recording + transcript, staff alerts, caller ack SMS. |
+| Receptionist schedule | `/api/settings/receptionist` | DONE | Weekly windows in the org fixed-offset timezone, overnight support, effective paused state, next-open time; dashboard editor and session bootstrap. |
 | Diagnostics | `/api/health/detail` | DONE | DB tuning, worker leases, heartbeat, providers, counts. |
 | Setup Wizard | `/api/setup*` | DONE | Autosave/resume; readiness checks; end-to-end test. |
 | Auth screen | `/api/auth/*`, `/api/session` | DONE | scrypt passwords, hashed sessions, optional TOTP. |

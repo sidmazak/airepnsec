@@ -32,7 +32,7 @@ export type ChannelReadiness = {
 const CHANNEL_DEFS: Array<{ key: ChannelKey; label: string; kinds: IntegrationKind[] }> = [
   { key: 'email', label: 'Email', kinds: ['smtp', 'email_api'] },
   { key: 'sms', label: 'SMS', kinds: ['twilio_sms', 'sms_gateway'] },
-  { key: 'whatsapp', label: 'WhatsApp', kinds: ['twilio_whatsapp'] },
+  { key: 'whatsapp', label: 'WhatsApp', kinds: ['twilio_whatsapp', 'meta_whatsapp'] },
   { key: 'voice', label: 'Phone receptionist', kinds: ['twilio_voice'] },
   { key: 'imap', label: 'Inbound email', kinds: ['imap'] },
   { key: 'calendar', label: 'Calendar sync', kinds: ['google_calendar', 'microsoft_calendar', 'caldav'] },
@@ -73,6 +73,8 @@ function usable(row: IntegrationRow): boolean {
     case 'twilio_whatsapp':
     case 'twilio_voice':
       return Boolean(secrets.accountSid && secrets.authToken && str(config, 'from'))
+    case 'meta_whatsapp':
+      return Boolean(secrets.accessToken && secrets.appSecret && str(config, 'phoneNumberId'))
     case 'sms_gateway': {
       const provider = str(config, 'provider')
       return Boolean(provider) && (provider !== 'generic_http' || Boolean(str(config, 'url')))
@@ -113,6 +115,7 @@ function providerInfo(kind: string, config: Record<string, unknown>): { provider
     case 'smtp': return { provider: 'smtp', label: 'SMTP' }
     case 'twilio_sms': return { provider: 'twilio', label: 'Twilio SMS' }
     case 'twilio_whatsapp': return { provider: 'twilio', label: 'Twilio WhatsApp' }
+    case 'meta_whatsapp': return { provider: 'meta', label: 'Meta WhatsApp' }
     case 'twilio_voice': return { provider: 'twilio', label: 'Twilio Voice' }
     case 'imap': return { provider: 'imap', label: 'IMAP' }
     default: return { provider: kind, label: entry?.title ?? kind }
@@ -126,6 +129,7 @@ function readyDetail(kind: string, config: Record<string, unknown>, label: strin
     case 'twilio_sms':
     case 'twilio_whatsapp':
     case 'twilio_voice': return `Twilio · ${str(config, 'from') || 'sender not set'}`
+    case 'meta_whatsapp': return `Meta Cloud API · ${str(config, 'phoneNumberId') || 'phone number ID not set'}`
     case 'sms_gateway': return `${label}${str(config, 'from') ? ` · ${str(config, 'from')}` : ''}`
     case 'imap': return `IMAP · ${str(config, 'host')}`
     case 'caldav': return `CalDAV · ${str(config, 'url')}`

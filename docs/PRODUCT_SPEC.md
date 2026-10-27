@@ -58,14 +58,14 @@ rules, invoice/payment math, ledger rules, RBAC checks, audit, automation engine
 | Ledger | Append-only ledger, adjustments/reversals only, per-invoice reconciliation | Implemented |
 | Assistant | Text chat receptionist with strict JSON tool loop and validated tools | Implemented |
 | Assistant | Voice Console — browser Web Speech fallback, BYOK OpenAI-compatible STT/TTS, or fully local ONNX speech models (Whisper / MMS-TTS) driving the same tool loop | Implemented |
-| Assistant | Inbound telephony (Twilio Voice/TwiML, speech Gather, escalation, PABX line routing) + inbound SMS/WhatsApp threads | Implemented (BYOK) |
+| Assistant | Inbound telephony (Twilio Voice/TwiML, speech Gather, escalation, PABX line routing) + inbound SMS/WhatsApp threads (Twilio or direct Meta Cloud API) | Implemented (BYOK) |
 | Assistant | Outbound PSTN dialing / voice broadcast | **Deferred** — inbound telephony only |
 | Assistant | Server-side streaming (SSE), native provider tool calls, reranking, vision | Implemented — SSE stream (`/api/ai/stream`), native tool calling with JSON-protocol fallback, second-stage reranking, image reading |
 | Knowledge | FAQ/knowledge items, approved-only retrieval, local lexical + neural embeddings | Implemented |
 | Knowledge | External datasources (Postgres/MySQL/SQLite read-only, HTTP JSON) into the same RAG pipeline | Implemented (BYOK; SSRF-guarded) |
 | AI providers | Local Ollama, any OpenAI-compatible endpoint, browser STT, local ONNX speech models, built-in local neural/lexical embeddings, hardware probe + model catalog, policy gate | Implemented; **no managed/hosted default** |
 | Automations | Trigger/condition/delay/action engine, retry, dedupe, audit, per-day caps, quiet hours | Implemented |
-| Automations | Outbound delivery (SMTP, Twilio SMS/WhatsApp, BYO SMS gateway, signed webhooks) via the leased outbox dispatcher | Implemented; consent/opt-out enforced at queue and run time |
+| Automations | Outbound delivery (SMTP, email APIs, Twilio SMS/WhatsApp, Meta WhatsApp Cloud API, BYO SMS gateway, signed webhooks) via the leased outbox dispatcher | Implemented; consent/opt-out enforced at queue and run time |
 | Collections | Overdue policy, dunning schedule, escalation | Implemented (audited queued messages/tasks; nothing auto-sends unverified) |
 | Channels | Web text chat, public embedded web chat, Voice Console, phone, inbound SMS, inbound WhatsApp | Implemented |
 | Channels | Instagram inbound | **Planned** |
