@@ -168,3 +168,10 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Dialog and toast dismissal**: the shared dialog close control and toast dismiss control now have labels and tooltips.
 ✅ **Regression guard**: `tests/unit/ui-tooltips.test.mts` uses the TypeScript AST to fail if any icon-only button loses its accessible name or tooltip.
 ✅ **Verification**: tsc clean, lint clean, 194/194 unit tests, 44/44 smoke checks.
+
+## Phase 25 — Login page polish (2026-10-28)
+✅ **Clean split layout**: a restrained brand panel with one short value statement and four product tags, paired with a focused 400px sign-in card. Marketing bullets, demo credentials and long explanatory copy were removed.
+✅ **Enterprise details**: 44px inputs and actions, password visibility toggle with accessible label/tooltip, busy labels while submitting, concise two-factor prompts, and a conditional owner-registration link that only appears on a genuinely unconfigured instance.
+✅ **Demo and SSO**: SSO buttons remain available with a minimal "or" divider; the demo workspace is a single footer action with an explicit "sample data" note.
+✅ **Responsive/E2E verified**: desktop and 390px mobile emulation show no horizontal overflow or console errors; demo sign-in reaches the dashboard with all 19 sidebar sections.
+✅ **Verification**: tsc clean, lint clean, 194/194 unit tests, 44/44 smoke checks.
