@@ -269,7 +269,7 @@ export function DiagnosticsSection() {
           <AlertTitle>Diagnostics unavailable</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
-        <Button onClick={() => void load()} className="min-h-[44px]">
+        <Button onClick={() => void load()} className="min-h-[44px]" title="Retry">
           <RefreshCw className="h-4 w-4" aria-hidden />
           Retry
         </Button>
@@ -322,7 +322,7 @@ export function DiagnosticsSection() {
           <span className="text-xs text-muted-foreground" aria-live="polite">
             {updatedLabel}
           </span>
-          <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => void load(true)} disabled={refreshing}>
+          <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => void load(true)} disabled={refreshing} title="Refresh">
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
             Refresh
           </Button>
@@ -344,7 +344,7 @@ export function DiagnosticsSection() {
                 variant="outline"
                 className="min-h-[44px] border-amber-400 text-amber-900 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900"
                 onClick={() => void runAutomations()}
-                disabled={runningAutomations}
+                disabled={runningAutomations} title="Run automations now"
               >
                 <PlayCircle className="h-4 w-4" aria-hidden />
                 Run automations now
@@ -439,7 +439,7 @@ export function DiagnosticsSection() {
               />
             </ul>
             <Separator className="my-3" />
-            <Button variant="secondary" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('ai')}>
+            <Button variant="secondary" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('ai')} title="Open AI Providers">
               Open AI Providers
               <ArrowRight className="h-4 w-4" aria-hidden />
             </Button>
@@ -542,7 +542,7 @@ export function DiagnosticsSection() {
             <p className="text-sm text-muted-foreground">
               Change this and review each provider&rsquo;s data handling in the AI Providers section.
             </p>
-            <Button variant="secondary" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('ai')}>
+            <Button variant="secondary" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('ai')} title="Review AI providers">
               Review AI providers
               <ArrowRight className="h-4 w-4" aria-hidden />
             </Button>
@@ -603,14 +603,14 @@ export function DiagnosticsSection() {
           {isAdmin ? (
             <>
               <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={() => void createBackup()} disabled={backingUp} className="min-h-[44px]">
+                <Button onClick={() => void createBackup()} disabled={backingUp} className="min-h-[44px]" title={backingUp ? 'Creating backup' : 'Create backup'}>
                   {backingUp ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden /> : <DatabaseBackup className="h-4 w-4" aria-hidden />}
                   {backingUp ? 'Creating backup…' : 'Create backup'}
                 </Button>
                 <Button
                   variant="outline"
                   className="min-h-[44px]"
-                  onClick={() => window.open('/api/admin/export', '_blank', 'noopener')}
+                  onClick={() => window.open('/api/admin/export', '_blank', 'noopener')} title="Export data (JSON)"
                 >
                   <Download className="h-4 w-4" aria-hidden />
                   Export data (JSON)

@@ -192,7 +192,7 @@ export function TeamSection() {
           </p>
         </div>
         {canManage && (
-          <Button className="min-h-[44px]" onClick={() => { setInviteOpen(true); setInviteUrl(null) }}>
+          <Button className="min-h-[44px]" onClick={() => { setInviteOpen(true); setInviteUrl(null) }} title="Invite member">
             <UserPlus className="h-4 w-4" aria-hidden />
             Invite member
           </Button>
@@ -203,7 +203,7 @@ export function TeamSection() {
         <Alert variant="destructive" role="alert">
           <AlertDescription className="flex items-center justify-between gap-3">
             <span>{error}</span>
-            <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>
+            <Button variant="outline" size="sm" onClick={() => void load()} title="Retry">Retry</Button>
           </AlertDescription>
         </Alert>
       )}
@@ -281,7 +281,7 @@ export function TeamSection() {
                         <TableCell>
                           <div className="flex justify-end gap-1">
                             {manageable && (
-                              <Button variant="ghost" size="sm" className="min-h-[36px]" aria-label={`Sign out ${m.name}`} onClick={() => void revokeSessions(m)}>
+                              <Button variant="ghost" size="sm" className="min-h-[36px]" aria-label={`Sign out ${m.name}`} onClick={() => void revokeSessions(m)} title={`Sign out ${m.name}`}>
                                 Sign out
                               </Button>
                             )}
@@ -291,7 +291,7 @@ export function TeamSection() {
                                 size="sm"
                                 className="min-h-[36px]"
                                 aria-label={`Issue a password reset for ${m.name}`}
-                                onClick={() => { setResetTarget(m); setResetLink(null) }}
+                                onClick={() => { setResetTarget(m); setResetLink(null) }} title={`Issue a password reset for ${m.name}`}
                               >
                                 <KeyRound className="h-4 w-4" aria-hidden />
                                 Reset
@@ -303,7 +303,7 @@ export function TeamSection() {
                                 size="sm"
                                 className="min-h-[36px] text-destructive"
                                 aria-label={`Deactivate ${m.name}`}
-                                onClick={() => setDeactivateTarget(m)}
+                                onClick={() => setDeactivateTarget(m)} title={`Deactivate ${m.name}`}
                               >
                                 <ShieldOff className="h-4 w-4" aria-hidden />
                                 Deactivate
@@ -347,7 +347,7 @@ export function TeamSection() {
                         {ROLE_LABEL[i.role] ?? i.role} · expires {new Date(i.expiresAt).toLocaleString()}
                       </p>
                     </div>
-                    <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void revokeInvite(i)}>
+                    <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void revokeInvite(i)} title="Revoke">
                       Revoke
                     </Button>
                   </li>
@@ -364,7 +364,7 @@ export function TeamSection() {
           <CardDescription>Change the password you sign in with.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Button variant="outline" className="min-h-[44px]" onClick={() => setPwOpen(true)}>
+          <Button variant="outline" className="min-h-[44px]" onClick={() => setPwOpen(true)} title="Change my password">
             <KeyRound className="h-4 w-4" aria-hidden />
             Change my password
           </Button>
@@ -411,8 +411,8 @@ export function TeamSection() {
               </div>
             )}
             <DialogFooter>
-              <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setInviteOpen(false)}>Close</Button>
-              <Button type="submit" className="min-h-[44px]" disabled={inviteBusy}>
+              <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setInviteOpen(false)} title="Close">Close</Button>
+              <Button type="submit" className="min-h-[44px]" disabled={inviteBusy} title="Create invitation">
                 {inviteBusy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                 Create invitation
               </Button>
@@ -442,13 +442,13 @@ export function TeamSection() {
               </div>
             </div>
           ) : (
-            <Button className="min-h-[44px]" disabled={resetBusy} onClick={() => void issueReset()}>
+            <Button className="min-h-[44px]" disabled={resetBusy} onClick={() => void issueReset()} title="Issue reset link">
               {resetBusy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
               Issue reset link
             </Button>
           )}
           <DialogFooter>
-            <Button variant="outline" className="min-h-[44px]" onClick={() => { setResetTarget(null); setResetLink(null) }}>Close</Button>
+            <Button variant="outline" className="min-h-[44px]" onClick={() => { setResetTarget(null); setResetLink(null) }} title="Close">Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -470,8 +470,8 @@ export function TeamSection() {
               <Input id="team-new-pw" type="password" autoComplete="new-password" minLength={8} required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="min-h-[44px]" />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setPwOpen(false)}>Cancel</Button>
-              <Button type="submit" className="min-h-[44px]" disabled={pwBusy}>
+              <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setPwOpen(false)} title="Cancel">Cancel</Button>
+              <Button type="submit" className="min-h-[44px]" disabled={pwBusy} title="Change password">
                 {pwBusy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                 Change password
               </Button>

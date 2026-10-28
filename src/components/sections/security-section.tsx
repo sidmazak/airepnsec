@@ -114,7 +114,7 @@ export function SecuritySection() {
         <Alert variant="destructive" role="alert">
           <AlertDescription className="flex items-center justify-between gap-3">
             <span>{error}</span>
-            <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>
+            <Button variant="outline" size="sm" onClick={() => void load()} title="Retry">Retry</Button>
           </AlertDescription>
         </Alert>
       )}
@@ -149,7 +149,7 @@ export function SecuritySection() {
                   ? 'Codes are required on every sign-in. Keep your authenticator app backed up; without it, an owner must reset the account directly in the database.'
                   : 'Protect this account with a second factor. Setup takes about a minute.'}
               </p>
-              <Button className="min-h-[44px]" onClick={() => { resetFlow(); setFlow(status?.enabled ? 'disable' : 'enroll') }}>
+              <Button className="min-h-[44px]" onClick={() => { resetFlow(); setFlow(status?.enabled ? 'disable' : 'enroll') }} title={status?.enabled ? 'Disable two-factor authentication' : 'Enable two-factor authentication'}>
                 <KeyRound className="h-4 w-4" aria-hidden />
                 {status?.enabled ? 'Disable two-factor' : 'Enable two-factor'}
               </Button>
@@ -161,11 +161,11 @@ export function SecuritySection() {
                 <Input id="sec-password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className="min-h-[44px]" />
               </div>
               <div className="flex gap-2">
-                <Button type="submit" className="min-h-[44px]" disabled={busy}>
+                <Button type="submit" className="min-h-[44px]" disabled={busy} title="Continue">
                   {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                   Continue
                 </Button>
-                <Button type="button" variant="outline" className="min-h-[44px]" onClick={resetFlow}>Cancel</Button>
+                <Button type="button" variant="outline" className="min-h-[44px]" onClick={resetFlow} title="Cancel">Cancel</Button>
               </div>
             </form>
           ) : flow === 'confirm' && enrollment ? (
@@ -191,11 +191,11 @@ export function SecuritySection() {
                 <Input id="sec-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10} required value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" className="min-h-[44px] tracking-[0.3em]" />
               </div>
               <div className="flex gap-2">
-                <Button type="submit" className="min-h-[44px]" disabled={busy}>
+                <Button type="submit" className="min-h-[44px]" disabled={busy} title="Verify &amp; enable">
                   {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                   Verify &amp; enable
                 </Button>
-                <Button type="button" variant="outline" className="min-h-[44px]" onClick={resetFlow}>Cancel</Button>
+                <Button type="button" variant="outline" className="min-h-[44px]" onClick={resetFlow} title="Cancel">Cancel</Button>
               </div>
             </form>
           ) : (
@@ -209,11 +209,11 @@ export function SecuritySection() {
                 <Input id="sec-off-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10} required value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" className="min-h-[44px] tracking-[0.3em]" />
               </div>
               <div className="flex gap-2">
-                <Button type="submit" variant="destructive" className="min-h-[44px]" disabled={busy}>
+                <Button type="submit" variant="destructive" className="min-h-[44px]" disabled={busy} title="Disable two-factor">
                   {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                   Disable two-factor
                 </Button>
-                <Button type="button" variant="outline" className="min-h-[44px]" onClick={resetFlow}>Cancel</Button>
+                <Button type="button" variant="outline" className="min-h-[44px]" onClick={resetFlow} title="Cancel">Cancel</Button>
               </div>
             </form>
           )}

@@ -392,13 +392,13 @@ export function KnowledgeSection() {
             What your AI receptionist is allowed to say. {approvedCount} of {docs.length} document{docs.length === 1 ? '' : 's'} approved.
           </p>
         </div>
-        <Button variant="outline" onClick={() => { resetImport(); setImportOpen(true) }} className="min-h-[44px]" aria-label="Import a document file">
+        <Button variant="outline" onClick={() => { resetImport(); setImportOpen(true) }} className="min-h-[44px]" aria-label="Import a document file" title="Import a document file">
           <FileUp className="h-4 w-4" aria-hidden /> Import file
         </Button>
-        <Button variant="outline" onClick={() => { setCrawlOpen(true); setCrawlError(''); setCrawlResult(null) }} className="min-h-[44px]" aria-label="Import a website">
+        <Button variant="outline" onClick={() => { setCrawlOpen(true); setCrawlError(''); setCrawlResult(null) }} className="min-h-[44px]" aria-label="Import a website" title="Import a website">
           <Globe2 className="h-4 w-4" aria-hidden /> Import website
         </Button>
-        <Button onClick={openNew} className="min-h-[44px]" aria-label="Add a knowledge document">
+        <Button onClick={openNew} className="min-h-[44px]" aria-label="Add a knowledge document" title="Add a knowledge document">
           <Plus className="h-4 w-4" aria-hidden /> New document
         </Button>
       </div>
@@ -441,7 +441,7 @@ export function KnowledgeSection() {
                     {indexStatus.chunksWithCurrentModel} of {indexStatus.totalChunks} chunks use the current model ({indexStatus.model}). Re-index to restore full semantic quality — documents stay available during reindex.
                   </AlertDescription>
                   {canManage && (
-                    <Button size="sm" onClick={() => void reindex()} disabled={reindexing} className="min-h-[44px]" aria-label="Reindex knowledge with the current embedding model">
+                    <Button size="sm" onClick={() => void reindex()} disabled={reindexing} className="min-h-[44px]" aria-label="Reindex knowledge with the current embedding model" title="Reindex knowledge with the current embedding model">
                       {reindexing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
                       Reindex
                     </Button>
@@ -477,7 +477,7 @@ export function KnowledgeSection() {
               <ShieldAlert className="h-4 w-4" aria-hidden />
               <AlertDescription className="space-y-2">
                 <p>{error}</p>
-                <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+                <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
               </AlertDescription>
             </Alert>
           ) : docs.length === 0 ? (
@@ -487,7 +487,7 @@ export function KnowledgeSection() {
                 <p className="text-sm text-muted-foreground">
                   No knowledge yet. Add your business FAQs, prices and policies — the AI only answers from documents you approve here.
                 </p>
-                <Button onClick={openNew} className="min-h-[44px]"><Plus className="h-4 w-4" aria-hidden /> Add your first document</Button>
+                <Button onClick={openNew} className="min-h-[44px]" title="Add your first document"><Plus className="h-4 w-4" aria-hidden /> Add your first document</Button>
               </CardContent>
             </Card>
           ) : (
@@ -545,10 +545,10 @@ export function KnowledgeSection() {
                             </span>
                           )}
                           <div className="ml-auto flex gap-2">
-                            <Button size="sm" variant="outline" onClick={() => openEdit(doc)} className="min-h-[44px]" aria-label={`Edit ${doc.title}`}>
+                            <Button size="sm" variant="outline" onClick={() => openEdit(doc)} className="min-h-[44px]" aria-label={`Edit ${doc.title}`} title={`Edit ${doc.title}`}>
                               <Pencil className="h-3.5 w-3.5" aria-hidden /> Edit
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(doc)} className="min-h-[44px] text-rose-700 hover:text-rose-800" aria-label={`Delete ${doc.title}`}>
+                            <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(doc)} className="min-h-[44px] text-rose-700 hover:text-rose-800" aria-label={`Delete ${doc.title}`} title={`Delete ${doc.title}`}>
                               <Trash2 className="h-3.5 w-3.5" aria-hidden /> Delete
                             </Button>
                           </div>
@@ -595,7 +595,7 @@ export function KnowledgeSection() {
             <Button
               onClick={() => void readWithVision()}
               disabled={!visionFile || visionBusy}
-              className="min-h-[44px] w-full"
+              className="min-h-[44px] w-full" title="Read the image"
             >
               {visionBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <ScanEye className="h-4 w-4" aria-hidden />}
               Read the image
@@ -609,7 +609,7 @@ export function KnowledgeSection() {
             {visionText && (
               <>
                 <Textarea readOnly rows={6} value={visionText} aria-label="Text read from the image" />
-                <Button onClick={() => void saveVisionAsDoc()} variant="outline" className="min-h-[44px] w-full">
+                <Button onClick={() => void saveVisionAsDoc()} variant="outline" className="min-h-[44px] w-full" title="Save as a knowledge document">
                   <Plus className="h-4 w-4" aria-hidden /> Save as a knowledge document
                 </Button>
               </>
@@ -688,7 +688,7 @@ export function KnowledgeSection() {
                 type="button"
                 onClick={() => setActiveSection('ai')}
                 className="underline underline-offset-2 min-h-[44px] flex items-center"
-                aria-label="Open AI Providers settings"
+                aria-label="Open AI Providers settings" title="Open AI Providers settings"
               >
                 Open AI Providers →
               </button>
@@ -749,8 +749,8 @@ export function KnowledgeSection() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)} className="min-h-[44px]">Cancel</Button>
-            <Button onClick={() => void saveDoc()} disabled={saving || !form.title.trim() || (!form.id && !form.content.trim())} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setFormOpen(false)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button onClick={() => void saveDoc()} disabled={saving || !form.title.trim() || (!form.id && !form.content.trim())} className="min-h-[44px]" title={form.id ? 'Save document changes' : 'Add document'}>
               {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
               {form.id ? 'Save changes' : 'Add document'}
             </Button>
@@ -861,8 +861,8 @@ export function KnowledgeSection() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setImportOpen(false)} className="min-h-[44px]">Cancel</Button>
-            <Button onClick={() => void saveImport()} disabled={!importDoc || importSaving || !importTitle.trim()} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setImportOpen(false)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button onClick={() => void saveImport()} disabled={!importDoc || importSaving || !importTitle.trim()} className="min-h-[44px]" title="Save document">
               {importSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileUp className="h-4 w-4" aria-hidden />}
               Save document
             </Button>
@@ -955,7 +955,7 @@ export function KnowledgeSection() {
                 <AlertDescription className="space-y-2">
                   <p>{crawlError}</p>
                   {crawlError.toLowerCase().includes('configure') && (
-                    <Button size="sm" variant="outline" onClick={() => { setCrawlOpen(false); setActiveSection('ai') }} className="min-h-[44px]">
+                    <Button size="sm" variant="outline" onClick={() => { setCrawlOpen(false); setActiveSection('ai') }} className="min-h-[44px]" title="Open AI Providers">
                       Open AI Providers
                     </Button>
                   )}
@@ -992,8 +992,8 @@ export function KnowledgeSection() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCrawlOpen(false)} disabled={crawling} className="min-h-[44px]">Close</Button>
-            <Button onClick={() => void runCrawl()} disabled={crawling || !crawlUrl.trim()} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setCrawlOpen(false)} disabled={crawling} className="min-h-[44px]" title="Close">Close</Button>
+            <Button onClick={() => void runCrawl()} disabled={crawling || !crawlUrl.trim()} className="min-h-[44px]" title="Start import">
               {crawling ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Globe2 className="h-4 w-4" aria-hidden />}
               Start import
             </Button>

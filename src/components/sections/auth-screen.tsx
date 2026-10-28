@@ -203,7 +203,7 @@ export function AuthScreen() {
                         />
                       </div>
                     )}
-                    <Button type="submit" className="min-h-[44px] w-full" disabled={busy}>
+                    <Button type="submit" className="min-h-[44px] w-full" disabled={busy} title={busy ? 'Signing in' : 'Sign in'}>
                       {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <LogIn className="h-4 w-4" aria-hidden />}
                       {busy ? 'Signing in…' : 'Sign in'}
                     </Button>
@@ -245,7 +245,7 @@ export function AuthScreen() {
                         </button>
                       </div>
                     </div>
-                    <Button type="submit" className="min-h-[44px] w-full" disabled={busy}>
+                    <Button type="submit" className="min-h-[44px] w-full" disabled={busy} title={busy ? 'Creating workspace' : 'Create workspace'}>
                       {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />}
                       {busy ? 'Creating workspace…' : 'Create workspace'}
                     </Button>
@@ -259,6 +259,7 @@ export function AuthScreen() {
                       type="button"
                       className="font-medium text-foreground underline-offset-4 hover:underline"
                       onClick={() => { setError(''); setMode(mode === 'login' ? 'setup' : 'login') }}
+                      title={mode === 'login' ? 'Create the owner account' : 'Sign in instead'}
                     >
                       {mode === 'login' ? 'Create owner account' : 'Sign in'}
                     </button>
@@ -274,8 +275,8 @@ export function AuthScreen() {
                     </div>
                     <div className="space-y-2">
                       {ssoProviders.map((provider) => (
-                        <Button key={provider.kind} asChild variant="outline" className="min-h-[44px] w-full">
-                          <a href={`/api/auth/sso/${provider.kind}/start`}>
+                        <Button key={provider.kind} asChild variant="outline" className="min-h-[44px] w-full" title={`Continue with ${provider.label}`}>
+                          <a href={`/api/auth/sso/${provider.kind}/start`} title={`Continue with ${provider.label}`}>
                             <KeyRound className="h-4 w-4" aria-hidden />
                             Continue with {provider.label}
                           </a>
@@ -286,7 +287,7 @@ export function AuthScreen() {
                 )}
               </CardContent>
               <CardFooter className="border-t bg-muted/20 px-6 py-3">
-                <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={demoLogin} disabled={busy}>
+                <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={demoLogin} disabled={busy} title={demoAvailable === false ? 'Create demo workspace with sample data' : 'Explore demo workspace with sample data'}>
                   <Sparkles className="h-4 w-4" aria-hidden />
                   {demoAvailable === false ? 'Create demo workspace (sample data)' : 'Explore demo workspace (sample data)'}
                 </Button>

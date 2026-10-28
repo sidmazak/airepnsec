@@ -56,7 +56,7 @@ export default function UsageSection() {
         </div>
         <div className="flex items-center gap-2">
           <Select value={days} onValueChange={setDays}>
-            <SelectTrigger className="w-32 min-h-[44px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-32 min-h-[44px]" aria-label="Usage period"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="7">Last 7 days</SelectItem>
               <SelectItem value="30">Last 30 days</SelectItem>
@@ -69,7 +69,7 @@ export default function UsageSection() {
       </div>
 
       {error && (
-        <Alert variant="destructive"><AlertTitle>Failed to load usage</AlertTitle><AlertDescription>{error}</AlertDescription><Button variant="outline" size="sm" onClick={load} className="mt-2">Retry</Button></Alert>
+        <Alert variant="destructive"><AlertTitle>Failed to load usage</AlertTitle><AlertDescription>{error}</AlertDescription><Button variant="outline" size="sm" onClick={load} className="mt-2" title="Retry">Retry</Button></Alert>
       )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

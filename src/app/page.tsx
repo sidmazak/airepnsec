@@ -146,7 +146,7 @@ export default function Home() {
                   ? 'Inbound is recorded for staff, but the assistant does not reply.'
                   : 'The app is not answering SMS, WhatsApp, calls or web chat.'}
               </span>
-              <button onClick={() => setActiveSection('dashboard')} className="underline font-medium hover:no-underline" aria-label="Open the dashboard to restart the receptionist">
+              <button onClick={() => setActiveSection('dashboard')} className="underline font-medium hover:no-underline" aria-label="Open the dashboard to restart the receptionist" title="Open the dashboard to restart the receptionist">
                 Change in dashboard
               </button>
             </div>
@@ -155,7 +155,7 @@ export default function Home() {
           {needsSetup && activeSection !== 'setup' && (
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 px-4 py-3 text-sm text-amber-900 dark:text-amber-200 flex flex-wrap items-center gap-2">
               <span>Setup is not complete — the assistant, reminders, and readiness checks depend on it.</span>
-              <button onClick={() => setActiveSection('setup')} className="underline font-medium hover:no-underline" aria-label="Open setup wizard">
+              <button onClick={() => setActiveSection('setup')} className="underline font-medium hover:no-underline" aria-label="Open setup wizard" title="Open setup wizard">
                 Continue setup
               </button>
             </div>

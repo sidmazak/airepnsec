@@ -466,6 +466,7 @@ function ReceptionistControl() {
               size="sm"
               onClick={() => void saveSchedule()}
               disabled={!canManage || !schedule || savingSchedule}
+              title={savingSchedule ? 'Saving schedule' : 'Save schedule'}
             >
               <Save className="mr-1.5 h-4 w-4" aria-hidden /> {savingSchedule ? 'Saving…' : 'Save schedule'}
             </Button>
@@ -583,7 +584,7 @@ export function DashboardSection() {
           <AlertTitle>Dashboard unavailable</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
-        <Button onClick={() => void load()} className="min-h-[44px]">
+        <Button onClick={() => void load()} className="min-h-[44px]" title="Retry">
           <RefreshCw className="h-4 w-4" aria-hidden />
           Retry
         </Button>
@@ -602,7 +603,7 @@ export function DashboardSection() {
           <span className="text-xs text-muted-foreground" aria-live="polite">
             {updatedLabel}
           </span>
-          <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => void load(true)} disabled={refreshing}>
+          <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => void load(true)} disabled={refreshing} title="Refresh">
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
             Refresh
           </Button>
@@ -657,7 +658,7 @@ export function DashboardSection() {
               <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed p-6 text-center">
                 <CalendarDays className="h-8 w-8 text-muted-foreground" aria-hidden />
                 <p className="text-sm text-muted-foreground">No upcoming appointments yet.</p>
-                <Button variant="secondary" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('bookings')}>
+                <Button variant="secondary" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('bookings')} title="Create a booking">
                   <PlusCircle className="h-4 w-4" aria-hidden />
                   Create a booking
                 </Button>
@@ -679,7 +680,7 @@ export function DashboardSection() {
               </ul>
             )}
             {hiddenBookings > 0 && (
-              <Button variant="link" size="sm" className="mt-2 px-0" onClick={() => setActiveSection('bookings')}>
+              <Button variant="link" size="sm" className="mt-2 px-0" onClick={() => setActiveSection('bookings')} title="+ more — open Bookings">
                 +{hiddenBookings} more — open Bookings
               </Button>
             )}
@@ -696,7 +697,7 @@ export function DashboardSection() {
               <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed p-6 text-center">
                 <CheckCircle2 className="h-8 w-8 text-emerald-600" aria-hidden />
                 <p className="text-sm text-muted-foreground">No overdue invoices — every account is current.</p>
-                <Button variant="secondary" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('invoices')}>
+                <Button variant="secondary" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('invoices')} title="Open Invoices &amp; Payments">
                   Open Invoices &amp; Payments
                 </Button>
               </div>
@@ -708,7 +709,7 @@ export function DashboardSection() {
                       type="button"
                       onClick={() => setActiveSection('invoices')}
                       aria-label={`Invoice ${inv.number}, ${formatMoney(inv.outstandingCents, currency)}, ${inv.daysOverdue} days overdue. Open Invoices`}
-                      className="w-full min-h-[44px] rounded-lg border p-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="w-full min-h-[44px] rounded-lg border p-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" title={`Invoice ${inv.number}, ${formatMoney(inv.outstandingCents, currency)}, ${inv.daysOverdue} days overdue. Open Invoices`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <p className="truncate text-sm font-medium">
@@ -767,7 +768,7 @@ export function DashboardSection() {
               </ul>
             )}
             <Separator className="my-4" />
-            <Button className="min-h-[44px]" onClick={() => setActiveSection('setup')}>
+            <Button className="min-h-[44px]" onClick={() => setActiveSection('setup')} title="Open setup wizard">
               Open setup wizard
               <ArrowRight className="h-4 w-4" aria-hidden />
             </Button>

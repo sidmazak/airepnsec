@@ -186,8 +186,8 @@ function RecordPaymentDialog({
             <Input id="rp-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Receipt #, transfer ID…" className="min-h-[44px]" />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose}>Cancel</Button>
-            <Button type="submit" className="min-h-[44px]" disabled={busy}>
+            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose} title="Cancel">Cancel</Button>
+            <Button type="submit" className="min-h-[44px]" disabled={busy} title="Record payment">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Wallet className="h-4 w-4" aria-hidden />}
               Record payment
             </Button>
@@ -261,8 +261,8 @@ function RefundDialog({
           </div>
           <p className="text-xs text-muted-foreground">A retry with this idempotency key cannot refund twice.</p>
           <DialogFooter>
-            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="destructive" className="min-h-[44px]" disabled={busy}>
+            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose} title="Cancel">Cancel</Button>
+            <Button type="submit" variant="destructive" className="min-h-[44px]" disabled={busy} title="Record refund">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Undo2 className="h-4 w-4" aria-hidden />}
               Record refund
             </Button>
@@ -349,8 +349,8 @@ function SimulateWebhookDialog({
               Real payment providers POST to <code>/api/payments/webhook</code> with an HMAC signature header (<code>x-signature</code>). This button builds and signs the same payload locally so you can test end-to-end without a provider account.
             </p>
             <DialogFooter>
-              <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose}>Close</Button>
-              <Button type="submit" className="min-h-[44px]" disabled={busy}>
+              <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose} title="Close">Close</Button>
+              <Button type="submit" className="min-h-[44px]" disabled={busy} title="Send signed test event">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FlaskConical className="h-4 w-4" aria-hidden />}
                 Send signed test event
               </Button>
@@ -505,7 +505,7 @@ function InvoiceDetailDialog({
           {error && (
             <div className="space-y-3">
               <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-              {invoiceId && <Button variant="outline" className="min-h-[44px]" onClick={() => void load(invoiceId)}><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>}
+              {invoiceId && <Button variant="outline" className="min-h-[44px]" onClick={() => void load(invoiceId)} title="Retry"><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>}
             </div>
           )}
 
@@ -563,7 +563,7 @@ function InvoiceDetailDialog({
                             <TableCell className="text-right">{formatMoney(p.amountCents)}</TableCell>
                             <TableCell className="text-right">
                               {isAdmin && p.status === 'verified' && p.source !== 'refund' && invoice.status !== 'void' && invoice.status !== 'draft' && (
-                                <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setRefundTarget(p)} aria-label={`Refund payment of ${formatMoney(p.amountCents)}`}>
+                                <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setRefundTarget(p)} aria-label={`Refund payment of ${formatMoney(p.amountCents)}`} title={`Refund payment of ${formatMoney(p.amountCents)}`}>
                                   <Undo2 className="h-4 w-4" aria-hidden /> Refund
                                 </Button>
                               )}
@@ -593,7 +593,7 @@ function InvoiceDetailDialog({
                           const ok = await copyText(sendLink)
                           toast(ok ? { title: 'Copied to clipboard' } : { title: 'Copy failed', description: 'Select the text and copy it manually.', variant: 'destructive' })
                         }}
-                        aria-label="Copy payment link"
+                        aria-label="Copy payment link" title="Copy payment link"
                       >
                         <Copy className="h-4 w-4" aria-hidden /> Copy
                       </Button>
@@ -624,7 +624,7 @@ function InvoiceDetailDialog({
                   className="min-h-[44px]"
                   disabled={!isAdmin || invoice.status === 'void' || invoice.status === 'draft'}
                   onClick={() => setRecordOpen(true)}
-                  title={isAdmin ? undefined : 'Owner or admin only'}
+                  title={isAdmin ? 'Record a verified payment against this invoice' : 'Owner or admin only'}
                 >
                   <Wallet className="h-4 w-4" aria-hidden /> Record verified payment
                 </Button>
@@ -642,7 +642,7 @@ function InvoiceDetailDialog({
                   className="min-h-[44px] text-destructive hover:text-destructive"
                   disabled={!isAdmin || invoice.status === 'void'}
                   onClick={() => setVoidOpen(true)}
-                  title={isAdmin ? undefined : 'Owner or admin only'}
+                  title={isAdmin ? 'Void this invoice and reverse its ledger charge' : 'Owner or admin only'}
                 >
                   <Ban className="h-4 w-4" aria-hidden /> Void invoice
                 </Button>
@@ -700,7 +700,7 @@ function InvoiceDetailDialog({
                 <div className="space-y-1.5">
                   <Label htmlFor="push-accounting-kind">Accounting provider</Label>
                   <Select value={pushKind} onValueChange={setPushKind}>
-                    <SelectTrigger id="push-accounting-kind" className="min-h-[44px]"><SelectValue /></SelectTrigger>
+                    <SelectTrigger id="push-accounting-kind" className="min-h-[44px]" aria-label="Accounting provider"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="quickbooks">QuickBooks Online</SelectItem>
                       <SelectItem value="xero">Xero</SelectItem>
@@ -716,8 +716,8 @@ function InvoiceDetailDialog({
                 )}
               </div>
               <DialogFooter className="gap-2 sm:gap-0">
-                <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setPushOpen(false)}>Close</Button>
-                <Button type="button" className="min-h-[44px]" disabled={pushBusy} onClick={() => void pushToAccounting()}>
+                <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setPushOpen(false)} title="Close">Close</Button>
+                <Button type="button" className="min-h-[44px]" disabled={pushBusy} onClick={() => void pushToAccounting()} title="Push invoice">
                   {pushBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <BookOpen className="h-4 w-4" aria-hidden />} Push invoice
                 </Button>
               </DialogFooter>
@@ -746,14 +746,14 @@ function InvoiceDetailDialog({
                         const ok = await copyText(linkResult.url)
                         toast(ok ? { title: 'Copied to clipboard' } : { title: 'Copy failed', description: 'Select the text and copy it manually.', variant: 'destructive' })
                       }}
-                      aria-label="Copy payment link"
+                      aria-label="Copy payment link" title="Copy payment link"
                     >
                       <Copy className="h-4 w-4" aria-hidden /> Copy link
                     </Button>
                     <Button
                       variant="outline" className="min-h-[44px]"
                       onClick={() => window.open(linkResult.url, '_blank', 'noopener')}
-                      aria-label="Open payment link in a new tab"
+                      aria-label="Open payment link in a new tab" title="Open payment link in a new tab"
                     >
                       <ExternalLink className="h-4 w-4" aria-hidden /> Open
                     </Button>
@@ -761,7 +761,7 @@ function InvoiceDetailDialog({
                 </div>
               )}
               <DialogFooter>
-                <Button variant="outline" className="min-h-[44px]" onClick={() => setLinkOpen(false)}>Close</Button>
+                <Button variant="outline" className="min-h-[44px]" onClick={() => setLinkOpen(false)} title="Close">Close</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -868,7 +868,7 @@ function VerifyQueueTab({ onChanged }: { onChanged: () => void }) {
       ) : error ? (
         <div className="space-y-3">
           <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-          <Button className="min-h-[44px]" onClick={() => void load()}><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
+          <Button className="min-h-[44px]" onClick={() => void load()} title="Retry"><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
         </div>
       ) : queue.length === 0 ? (
         <Card>
@@ -908,7 +908,7 @@ function VerifyQueueTab({ onChanged }: { onChanged: () => void }) {
                       <TableCell className="text-right">
                         {isAdmin ? (
                           <span className="inline-flex justify-end gap-1.5">
-                            <Button size="sm" className="min-h-[44px]" disabled={busyId === p.id} onClick={() => void verify(p)}>
+                            <Button size="sm" className="min-h-[44px]" disabled={busyId === p.id} onClick={() => void verify(p)} title="Verify">
                               {busyId === p.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />}
                               Verify
                             </Button>
@@ -917,7 +917,7 @@ function VerifyQueueTab({ onChanged }: { onChanged: () => void }) {
                               className="min-h-[44px] text-destructive hover:text-destructive"
                               disabled={busyId === p.id}
                               onClick={() => { setRejectTarget(p); setReason('') }}
-                              aria-label={`Reject claimed payment for ${p.invoiceNumber ?? 'invoice'}`}
+                              aria-label={`Reject claimed payment for ${p.invoiceNumber ?? 'invoice'}`} title={`Reject claimed payment for ${p.invoiceNumber ?? 'invoice'}`}
                             >
                               Reject
                             </Button>
@@ -1095,7 +1095,7 @@ function NewInvoiceForm({
                 </div>
               </div>
             ))}
-            <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setItems((prev) => [...prev, { description: '', qty: '1', unitPrice: '' }])}>
+            <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setItems((prev) => [...prev, { description: '', qty: '1', unitPrice: '' }])} title="Add line item">
               <Plus className="h-4 w-4" aria-hidden /> Add line item
             </Button>
             <p className="text-sm text-right text-muted-foreground">
@@ -1132,7 +1132,7 @@ function NewInvoiceForm({
             </div>
           </div>
 
-          <Button type="submit" className="min-h-[44px]" disabled={!canSubmit || busy}>
+          <Button type="submit" className="min-h-[44px]" disabled={!canSubmit || busy} title={draft ? 'Save this invoice as a draft' : 'Create this invoice'}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Receipt className="h-4 w-4" aria-hidden />}
             {draft ? 'Save draft' : 'Create invoice'}
           </Button>
@@ -1194,7 +1194,7 @@ export function InvoicesSection() {
     return (
       <div className="space-y-4">
         <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-        <Button className="min-h-[44px]" onClick={() => void load()}><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
+        <Button className="min-h-[44px]" onClick={() => void load()} title="Retry"><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
       </div>
     )
   }
@@ -1210,7 +1210,7 @@ export function InvoicesSection() {
             {invoices.length} invoice{invoices.length === 1 ? '' : 's'} · outstanding {formatMoney(outstandingTotal)} · claims are never auto-settled.
           </p>
         </div>
-        <Button variant="outline" className="min-h-[44px]" onClick={refresh} aria-label="Refresh invoices">
+        <Button variant="outline" className="min-h-[44px]" onClick={refresh} aria-label="Refresh invoices" title="Refresh invoices">
           <RefreshCw className="h-4 w-4" aria-hidden /><span className="hidden sm:inline">Refresh</span>
         </Button>
       </div>
@@ -1251,7 +1251,7 @@ export function InvoicesSection() {
                     {invoices.length === 0 ? 'No invoices yet — create your first one to bill a customer.' : 'No invoices match this status filter.'}
                   </p>
                   {invoices.length === 0 && (
-                    <Button className="min-h-[44px]" onClick={() => setTab('new')}>
+                    <Button className="min-h-[44px]" onClick={() => setTab('new')} title="New invoice">
                       <Plus className="h-4 w-4" aria-hidden /> New invoice
                     </Button>
                   )}

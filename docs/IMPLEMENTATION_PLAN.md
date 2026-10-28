@@ -175,3 +175,10 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Demo and SSO**: SSO buttons remain available with a minimal "or" divider; the demo workspace is a single footer action with an explicit "sample data" note.
 ✅ **Responsive/E2E verified**: desktop and 390px mobile emulation show no horizontal overflow or console errors; demo sign-in reaches the dashboard with all 19 sidebar sections.
 ✅ **Verification**: tsc clean, lint clean, 194/194 unit tests, 44/44 smoke checks.
+
+## Phase 26 — Universal pointer cursors and tooltip titles (2026-10-28)
+✅ **Pointer cursors**: global rules cover enabled buttons, `role="button"`, shadcn button slots, links, summary, label-for and select controls; disabled controls use `not-allowed`.
+✅ **Titles everywhere**: the AST sweep covers every `Button`, `button`, `a` and `Link`; dynamic labels were written manually, and `Switch`, `TabsTrigger` and `SelectTrigger` fall back to `aria-label` or visible text so rendered controls always have a native title.
+✅ **Regression guard**: `tests/unit/ui-tooltips.test.mts` now checks every button/link plus toggles, tabs and selects, and asserts the global pointer-cursor rules. 197 unit tests.
+✅ **Runtime audit**: headless Edge sweep across the login page and all 19 SPA sections checked 1,043 rendered controls — 0 missing titles, 0 wrong cursors, 0 console errors.
+✅ **Verification**: tsc clean, lint clean, 197/197 unit tests, 44/44 smoke checks.

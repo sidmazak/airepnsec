@@ -102,7 +102,7 @@ export function JoinScreen({ token, onDone }: { token: string; onDone: () => voi
             <Input id="join-password" type="password" required minLength={8} maxLength={200} value={password} onChange={(e) => setPassword(e.target.value)} className="min-h-[44px]" autoComplete="new-password" />
             <p className="text-xs text-muted-foreground">At least 8 characters.</p>
           </div>
-          <Button type="submit" className="w-full min-h-[44px]" disabled={busy}>
+          <Button type="submit" className="w-full min-h-[44px]" disabled={busy} title="Create my account">
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <UserPlus className="h-4 w-4" aria-hidden />}
             Create my account
           </Button>
@@ -147,7 +147,7 @@ export function ResetPasswordScreen({ token, onDone }: { token: string; onDone: 
           <Label htmlFor="reset-pw2">Repeat password</Label>
           <Input id="reset-pw2" type="password" required minLength={8} maxLength={200} value={confirm} onChange={(e) => setConfirm(e.target.value)} className="min-h-[44px]" autoComplete="new-password" />
         </div>
-        <Button type="submit" className="w-full min-h-[44px]" disabled={busy}>
+        <Button type="submit" className="w-full min-h-[44px]" disabled={busy} title="Update password">
           {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
           Update password
         </Button>

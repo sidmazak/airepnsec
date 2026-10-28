@@ -410,7 +410,7 @@ export function AiSection() {
       <Alert variant="destructive" role="alert">
         <AlertDescription className="space-y-2">
           <p>{error}</p>
-          <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+          <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
         </AlertDescription>
       </Alert>
     )
@@ -430,9 +430,9 @@ export function AiSection() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label="AI settings tabs">
-          <TabsTrigger value="providers" className="min-h-[44px]"><Bot className="h-4 w-4 mr-1.5" aria-hidden /> Providers</TabsTrigger>
-          <TabsTrigger value="hardware" className="min-h-[44px]"><Monitor className="h-4 w-4 mr-1.5" aria-hidden /> Hardware</TabsTrigger>
-          <TabsTrigger value="logs" className="min-h-[44px]"><RefreshCw className="h-4 w-4 mr-1.5" aria-hidden /> AI activity log</TabsTrigger>
+          <TabsTrigger value="providers" className="min-h-[44px]" title="Providers"><Bot className="h-4 w-4 mr-1.5" aria-hidden /> Providers</TabsTrigger>
+          <TabsTrigger value="hardware" className="min-h-[44px]" title="Hardware"><Monitor className="h-4 w-4 mr-1.5" aria-hidden /> Hardware</TabsTrigger>
+          <TabsTrigger value="logs" className="min-h-[44px]" title="AI activity log"><RefreshCw className="h-4 w-4 mr-1.5" aria-hidden /> AI activity log</TabsTrigger>
         </TabsList>
 
         <TabsContent value="hardware" className="space-y-4 mt-4">
@@ -474,6 +474,7 @@ export function AiSection() {
                       aria-checked={selected}
                       disabled={!canManage}
                       onClick={() => void setDataModeValue(m.id)}
+                      title={m.title}
                       className={cn(
                         'text-left rounded-lg border p-3 min-h-[44px] transition-colors disabled:opacity-60',
                         selected ? 'border-primary bg-muted/50' : 'hover:bg-muted/40',
@@ -535,7 +536,7 @@ export function AiSection() {
                           variant="outline" size="sm" className="min-h-[36px]"
                           disabled={!canManage || localSpeechBusy === m.id}
                           onClick={() => void removeLocalModel(m.id)}
-                          aria-label={`Remove ${m.label}`}
+                          aria-label={`Remove ${m.label}`} title={`Remove ${m.label}`}
                         >
                           {localSpeechBusy === m.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
                           Remove
@@ -545,7 +546,7 @@ export function AiSection() {
                           size="sm" className="min-h-[36px]"
                           disabled={!canManage || localSpeechBusy === m.id}
                           onClick={() => void downloadLocalModel(m.id)}
-                          aria-label={`Download ${m.label}`}
+                          aria-label={`Download ${m.label}`} title={`Download ${m.label}`}
                         >
                           {localSpeechBusy === m.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
                           Download
@@ -704,7 +705,7 @@ export function AiSection() {
                             type="button" size="sm" variant="ghost" className="h-8 px-2 text-xs"
                             disabled={!canManage || modelsLoading === cap}
                             onClick={() => void loadModels(cap)}
-                            aria-label={`Load model list for ${info?.label ?? cap}`}
+                            aria-label={`Load model list for ${info?.label ?? cap}`} title={`Load model list for ${info?.label ?? cap}`}
                           >
                             {modelsLoading === cap ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
                             Load models
@@ -748,7 +749,7 @@ export function AiSection() {
                             onClick={() => {
                               setModelCustom((c) => ({ ...c, [cap]: false }))
                               setDraft(cap, { model: options[0] })
-                            }}
+                            }} title="Back to the provider model list"
                           >
                             Back to the provider model list
                           </button>
@@ -786,7 +787,7 @@ export function AiSection() {
                     <div className="flex flex-wrap items-center gap-2">
                       <Button
                         size="sm" onClick={() => void saveCapability(cap)} disabled={!canManage || savingCap === cap}
-                        className="min-h-[44px]" aria-label={`Save ${info?.label ?? cap} configuration`}
+                        className="min-h-[44px]" aria-label={`Save ${info?.label ?? cap} configuration`} title={`Save ${info?.label ?? cap} configuration`}
                       >
                         {savingCap === cap ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PlugZap className="h-4 w-4" aria-hidden />}
                         Save
@@ -794,7 +795,7 @@ export function AiSection() {
                       <Button
                         size="sm" variant="outline" onClick={() => void testCapability(cap)}
                         disabled={testingCap === cap || !canManage}
-                        className="min-h-[44px]" aria-label={`Test connection for ${info?.label ?? cap}`}
+                        className="min-h-[44px]" aria-label={`Test connection for ${info?.label ?? cap}`} title={`Test connection for ${info?.label ?? cap}`}
                       >
                         {testingCap === cap ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
                         Test connection
@@ -857,7 +858,7 @@ export function AiSection() {
                 <Skeleton className="h-16 w-full" />
               )}
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('integrations')}>
+                <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setActiveSection('integrations')} title="Configure in Integrations">
                   <PlugZap className="h-4 w-4 mr-1.5" aria-hidden /> Configure in Integrations
                 </Button>
                 <p className="text-xs text-muted-foreground">Readiness is derived from real credentials; queued messages never claim to be sent.</p>
@@ -869,7 +870,7 @@ export function AiSection() {
         <TabsContent value="logs" className="space-y-3 mt-4">
           <div className="flex items-center gap-2">
             <p className="text-sm text-muted-foreground mr-auto">Every AI call is logged with metrics only — never conversation content.</p>
-            <Button size="sm" variant="outline" onClick={() => void loadLogs()} disabled={logsLoading} className="min-h-[44px]" aria-label="Refresh activity log">
+            <Button size="sm" variant="outline" onClick={() => void loadLogs()} disabled={logsLoading} className="min-h-[44px]" aria-label="Refresh activity log" title="Refresh activity log">
               {logsLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
               Refresh
             </Button>
@@ -883,7 +884,7 @@ export function AiSection() {
             <Alert variant="destructive" role="alert">
               <AlertDescription className="space-y-2">
                 <p>{logsError}</p>
-                <Button size="sm" variant="outline" onClick={() => void loadLogs()} className="min-h-[44px]">Retry</Button>
+                <Button size="sm" variant="outline" onClick={() => void loadLogs()} className="min-h-[44px]" title="Retry">Retry</Button>
               </AlertDescription>
             </Alert>
           ) : logs.length === 0 ? (

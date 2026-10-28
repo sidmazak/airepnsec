@@ -170,8 +170,8 @@ export default function RealtimeSection() {
         </div>
         <div className="flex gap-2">
           {status === 'connected'
-            ? <Button variant="destructive" onClick={stop}><Square className="h-4 w-4 mr-1.5" /> Stop</Button>
-            : <Button onClick={start} disabled={status === 'connecting'}><Mic className="h-4 w-4 mr-1.5" /> {status === 'connecting' ? 'Connecting…' : 'Start realtime'}</Button>}
+            ? <Button variant="destructive" onClick={stop} title="Stop"><Square className="h-4 w-4 mr-1.5" /> Stop</Button>
+            : <Button onClick={start} disabled={status === 'connecting'} title={status === 'connecting' ? 'Connecting to realtime voice' : 'Start realtime voice'}><Mic className="h-4 w-4 mr-1.5" /> {status === 'connecting' ? 'Connecting…' : 'Start realtime'}</Button>}
         </div>
       </div>
 

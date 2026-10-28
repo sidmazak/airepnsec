@@ -472,7 +472,7 @@ export function VoiceSection() {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={newSession}>
+          <Button variant="outline" size="sm" onClick={newSession} title="New session">
             <Phone className="h-4 w-4 mr-1.5" aria-hidden /> New session
           </Button>
         </div>
@@ -543,7 +543,7 @@ export function VoiceSection() {
                                 variant="ghost" size="sm"
                                 className="h-6 px-1.5 text-xs text-muted-foreground"
                                 disabled={status === 'speaking'}
-                                onClick={() => { setReplayingId(m.id); void speak(m.content) }}
+                                onClick={() => { setReplayingId(m.id); void speak(m.content) }} title={replayingId === m.id ? 'Replaying message' : 'Replay message'}
                               >
                                 {replayingId === m.id ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" aria-hidden /> speaking…</> : <><Volume2 className="h-3 w-3 mr-1" aria-hidden /> replay</>}
                               </Button>
@@ -626,7 +626,7 @@ export function VoiceSection() {
                 disabled={busy}
                 aria-label="Type a message to the receptionist"
               />
-              <Button type="submit" variant="secondary" disabled={busy || !textInput.trim()}>
+              <Button type="submit" variant="secondary" disabled={busy || !textInput.trim()} title="Send">
                 <Keyboard className="h-4 w-4 mr-1" aria-hidden /> Send
               </Button>
             </form>
@@ -682,11 +682,11 @@ export function VoiceSection() {
                 <strong className="text-foreground"> real phone number </strong>
                 through the Twilio Voice integration.
               </p>
-              <Button variant="outline" size="sm" className="w-full" onClick={() => setActiveSection('integrations')}>
+              <Button variant="outline" size="sm" className="w-full" onClick={() => setActiveSection('integrations')} title="Set up phone + SMS">
                 <Phone className="h-4 w-4 mr-1.5" aria-hidden /> Set up phone + SMS
                 <ArrowUpRight className="h-3.5 w-3.5 ml-auto" aria-hidden />
               </Button>
-              <Button variant="ghost" size="sm" className="w-full" onClick={() => setActiveSection('inbox')}>
+              <Button variant="ghost" size="sm" className="w-full" onClick={() => setActiveSection('inbox')} title="View sessions in Inbox">
                 <RotateCcw className="h-4 w-4 mr-1.5" aria-hidden /> View sessions in Inbox
               </Button>
             </CardContent>

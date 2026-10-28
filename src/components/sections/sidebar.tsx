@@ -130,7 +130,7 @@ export function Sidebar() {
 
   const logoutBtn = (
     <div className="pt-2 border-t">
-      <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground min-h-[44px]" onClick={logout}>
+      <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground min-h-[44px]" onClick={logout} title="Sign out">
         <LogOut className="h-4 w-4" aria-hidden />
         Sign out
       </Button>

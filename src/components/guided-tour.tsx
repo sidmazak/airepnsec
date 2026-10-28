@@ -161,11 +161,11 @@ export function GuidedTour() {
           <span className="text-xs text-muted-foreground">{idx + 1} / {STEPS.length}</span>
           <div className="flex gap-2">
             {idx > 0 && (
-              <Button variant="outline" size="sm" className="min-h-[36px]" onClick={prev}>
+              <Button variant="outline" size="sm" className="min-h-[36px]" onClick={prev} title="Back">
                 <ChevronLeft className="h-4 w-4" aria-hidden /> Back
               </Button>
             )}
-            <Button size="sm" className="min-h-[36px]" onClick={next}>
+            <Button size="sm" className="min-h-[36px]" onClick={next} title={idx === STEPS.length - 1 ? 'Finish tour' : 'Next step'}>
               {idx === STEPS.length - 1 ? 'Finish' : 'Next'} <ChevronRight className="h-4 w-4" aria-hidden />
             </Button>
           </div>

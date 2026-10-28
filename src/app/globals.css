@@ -132,6 +132,21 @@
   }
 }
 
+/* Interactive controls should read as clickable. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[data-slot="button"]:not(:disabled):not([aria-disabled="true"]),
+a[href],
+summary,
+label[for],
+select:not(:disabled) {
+  cursor: pointer;
+}
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 /* Slick, thin scrollbars that widen slightly on hover. */
 * {
   scrollbar-width: thin;

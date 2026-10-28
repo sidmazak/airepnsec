@@ -208,7 +208,7 @@ export function SetupSection() {
       <Alert variant="destructive" role="alert">
         <AlertDescription className="space-y-2">
           <p>{error || 'Setup state unavailable.'}</p>
-          <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+          <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
         </AlertDescription>
       </Alert>
     )
@@ -228,10 +228,10 @@ export function SetupSection() {
               Setup is complete. The receptionist answers from your approved knowledge, bookings go through the real availability engine, and money movements are recorded in the ledger. You can revisit any step below or from the sidebar.
             </p>
             <div className="flex flex-wrap justify-center gap-2 pt-2">
-              <Button onClick={() => setActiveSection('dashboard')} className="min-h-[44px]">
+              <Button onClick={() => setActiveSection('dashboard')} className="min-h-[44px]" title="Go to dashboard">
                 <ArrowRight className="h-4 w-4" aria-hidden /> Go to dashboard
               </Button>
-              <Button variant="outline" onClick={() => setActivated(false)} className="min-h-[44px]">Review wizard</Button>
+              <Button variant="outline" onClick={() => setActivated(false)} className="min-h-[44px]" title="Review wizard">Review wizard</Button>
             </div>
           </CardContent>
         </Card>
@@ -299,11 +299,11 @@ export function SetupSection() {
 
       {/* back / continue */}
       <div className="flex items-center gap-2">
-        <Button variant="outline" onClick={goBack} disabled={current === 0} className="min-h-[44px]" aria-label="Go back a step">
+        <Button variant="outline" onClick={goBack} disabled={current === 0} className="min-h-[44px]" aria-label="Go back a step" title="Go back a step">
           <ArrowLeft className="h-4 w-4" aria-hidden /> Back
         </Button>
         {current < STEPS.length - 1 && (
-          <Button onClick={() => void goNext()} className="min-h-[44px] ml-auto" aria-label="Continue to the next step">
+          <Button onClick={() => void goNext()} className="min-h-[44px] ml-auto" aria-label="Continue to the next step" title="Continue to the next step">
             Continue <ArrowRight className="h-4 w-4" aria-hidden />
           </Button>
         )}
@@ -590,7 +590,7 @@ function ServicesStep({ org, markStepDone }: StepProps) {
               </Table>
             </div>
           )}
-          <Button variant="outline" onClick={() => { setSvcForm(EMPTY_SERVICE); setSvcOpen(true) }} className="min-h-[44px]" aria-label="Add a service">
+          <Button variant="outline" onClick={() => { setSvcForm(EMPTY_SERVICE); setSvcOpen(true) }} className="min-h-[44px]" aria-label="Add a service" title="Add a service">
             <Plus className="h-4 w-4" aria-hidden /> Add service
           </Button>
         </CardContent>
@@ -633,7 +633,7 @@ function ServicesStep({ org, markStepDone }: StepProps) {
                           <Button
                             size="sm" variant="outline" className="min-h-[44px]"
                             onClick={() => { setLinksFor(m); setLinkIds(m.serviceIds ?? []) }}
-                            aria-label={`Link services for ${m.name}`}
+                            aria-label={`Link services for ${m.name}`} title={`Link services for ${m.name}`}
                           >
                             Services
                           </Button>
@@ -645,7 +645,7 @@ function ServicesStep({ org, markStepDone }: StepProps) {
               </Table>
             </div>
           )}
-          <Button variant="outline" onClick={() => { setStaffForm({ id: null, name: '', role: '', email: '', phone: '' }); setStaffOpen(true) }} className="min-h-[44px]" aria-label="Add a staff member">
+          <Button variant="outline" onClick={() => { setStaffForm({ id: null, name: '', role: '', email: '', phone: '' }); setStaffOpen(true) }} className="min-h-[44px]" aria-label="Add a staff member" title="Add a staff member">
             <Plus className="h-4 w-4" aria-hidden /> Add staff
           </Button>
         </CardContent>
@@ -684,7 +684,7 @@ function ServicesStep({ org, markStepDone }: StepProps) {
               )}
             </div>
           ))}
-          <Button onClick={() => void saveHours()} disabled={hoursSaving} className="min-h-[44px]" aria-label="Save working hours">
+          <Button onClick={() => void saveHours()} disabled={hoursSaving} className="min-h-[44px]" aria-label="Save working hours" title="Save working hours">
             {hoursSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
             Save working hours
           </Button>
@@ -727,8 +727,8 @@ function ServicesStep({ org, markStepDone }: StepProps) {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSvcOpen(false)} className="min-h-[44px]">Cancel</Button>
-            <Button onClick={() => void saveService()} disabled={svcSaving || !svcForm.name.trim()} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setSvcOpen(false)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button onClick={() => void saveService()} disabled={svcSaving || !svcForm.name.trim()} className="min-h-[44px]" title="Save service">
               {svcSaving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />} Save service
             </Button>
           </DialogFooter>
@@ -763,8 +763,8 @@ function ServicesStep({ org, markStepDone }: StepProps) {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setStaffOpen(false)} className="min-h-[44px]">Cancel</Button>
-            <Button onClick={() => void saveStaff()} disabled={staffSaving || !staffForm.name.trim()} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setStaffOpen(false)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button onClick={() => void saveStaff()} disabled={staffSaving || !staffForm.name.trim()} className="min-h-[44px]" title="Save staff">
               {staffSaving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />} Save staff
             </Button>
           </DialogFooter>
@@ -793,8 +793,8 @@ function ServicesStep({ org, markStepDone }: StepProps) {
             {services.length === 0 && <p className="text-sm text-muted-foreground">Add services first.</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setLinksFor(null)} className="min-h-[44px]">Cancel</Button>
-            <Button onClick={() => void saveLinks()} disabled={linksSaving} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setLinksFor(null)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button onClick={() => void saveLinks()} disabled={linksSaving} className="min-h-[44px]" title="Save links">
               {linksSaving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />} Save links
             </Button>
           </DialogFooter>
@@ -811,8 +811,8 @@ function ServicesStep({ org, markStepDone }: StepProps) {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteSvc(null)} className="min-h-[44px]">Cancel</Button>
-            <Button variant="destructive" onClick={() => void deleteService()} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setDeleteSvc(null)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button variant="destructive" onClick={() => void deleteService()} className="min-h-[44px]" title="Delete">
               <Trash2 className="h-4 w-4" aria-hidden /> Delete
             </Button>
           </DialogFooter>
@@ -919,14 +919,14 @@ function ImportsStep({ markStepDone }: StepProps) {
           <Button
             variant="outline" className="min-h-[44px]"
             onClick={() => downloadTextFile('customers-template.csv', 'name,email,phone,notes,tags\nJane Doe,jane@example.com,+1 555 010 1,VIP,retail\nJohn Smith,john@example.com,,,\n')}
-            aria-label="Download customers CSV template"
+            aria-label="Download customers CSV template" title="Download customers CSV template"
           >
             <Download className="h-4 w-4" aria-hidden /> customers.csv
           </Button>
           <Button
             variant="outline" className="min-h-[44px]"
             onClick={() => downloadTextFile('services-template.csv', 'name,category,durationMin,priceCents\nConsultation,general,30,5000\nSignature Cut,hair,60,6500\n')}
-            aria-label="Download services CSV template"
+            aria-label="Download services CSV template" title="Download services CSV template"
           >
             <Download className="h-4 w-4" aria-hidden /> services.csv
           </Button>
@@ -952,7 +952,7 @@ function ImportsStep({ markStepDone }: StepProps) {
             <p className="text-xs text-muted-foreground">Maximum 5 MB. You can review and edit the rows before importing.</p>
           </div>
           <Textarea rows={6} value={custCsv} onChange={(e) => setCustCsv(e.target.value)} placeholder={'name,email,phone,notes,tags\nJane Doe,jane@example.com,+1 555 010 1,,retail'} aria-label="Customer CSV paste area" />
-          <Button onClick={() => void importCustomers()} disabled={custBusy || !custCsv.trim()} className="min-h-[44px]" aria-label="Import customers">
+          <Button onClick={() => void importCustomers()} disabled={custBusy || !custCsv.trim()} className="min-h-[44px]" aria-label="Import customers" title="Import customers">
             {custBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Users className="h-4 w-4" aria-hidden />} Import customers
           </Button>
           {custResults && (
@@ -987,7 +987,7 @@ function ImportsStep({ markStepDone }: StepProps) {
             <p className="text-xs text-muted-foreground">Maximum 5 MB. You can review and edit the rows before importing.</p>
           </div>
           <Textarea rows={6} value={svcCsv} onChange={(e) => setSvcCsv(e.target.value)} placeholder={'name,category,durationMin,priceCents\nConsultation,general,30,5000'} aria-label="Services CSV paste area" />
-          <Button onClick={() => void importServices()} disabled={svcBusy || !svcCsv.trim()} className="min-h-[44px]" aria-label="Import services">
+          <Button onClick={() => void importServices()} disabled={svcBusy || !svcCsv.trim()} className="min-h-[44px]" aria-label="Import services" title="Import services">
             {svcBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />} Import services
           </Button>
           {svcResults && (
@@ -1083,10 +1083,10 @@ function KnowledgeStep({ canManage, markStepDone }: StepProps) {
           Approved — usable by the AI immediately
         </label>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void addDoc()} disabled={saving || !title.trim() || !content.trim() || !canManage} className="min-h-[44px]" aria-label="Add FAQ document">
+          <Button onClick={() => void addDoc()} disabled={saving || !title.trim() || !content.trim() || !canManage} className="min-h-[44px]" aria-label="Add FAQ document" title="Add FAQ document">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />} Add FAQ
           </Button>
-          <Button variant="outline" onClick={() => setActiveSection('knowledge')} className="min-h-[44px]" aria-label="Open the full knowledge section">
+          <Button variant="outline" onClick={() => setActiveSection('knowledge')} className="min-h-[44px]" aria-label="Open the full knowledge section" title="Open the full knowledge section">
             Open full Knowledge section →
           </Button>
         </div>
@@ -1210,6 +1210,7 @@ function AiStep({ canManage, markStepDone }: StepProps) {
                 type="button"
                 role="radio"
                 aria-checked={provider === opt.id}
+                title={opt.title}
                 disabled={!canManage}
                 onClick={() => setProvider(opt.id)}
                 className={cn(
@@ -1242,10 +1243,10 @@ function AiStep({ canManage, markStepDone }: StepProps) {
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => void save()} disabled={saving || !canManage} className="min-h-[44px]" aria-label="Save LLM provider">
+            <Button onClick={() => void save()} disabled={saving || !canManage} className="min-h-[44px]" aria-label="Save LLM provider" title="Save LLM provider">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />} Save
             </Button>
-            <Button variant="outline" onClick={() => void runTest()} disabled={testing || !canManage} className="min-h-[44px]" aria-label="Test the LLM connection">
+            <Button variant="outline" onClick={() => void runTest()} disabled={testing || !canManage} className="min-h-[44px]" aria-label="Test the LLM connection" title="Test the LLM connection">
               {testing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PlayCircle className="h-4 w-4" aria-hidden />} Test connection
             </Button>
           </div>
@@ -1276,6 +1277,7 @@ function AiStep({ canManage, markStepDone }: StepProps) {
                 type="button"
                 role="radio"
                 aria-checked={dataMode === m.id}
+                title={m.label}
                 disabled={!canManage}
                 onClick={() => void changeDataMode(m.id)}
                 className={cn(
@@ -1349,7 +1351,7 @@ function ChannelsStep({ markStepDone, canManage }: StepProps) {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground break-words">{ch.detail}</p>
-                  <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setActiveSection('integrations')}>
+                  <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setActiveSection('integrations')} title={ch.integrationId ? 'Finish integration setup' : 'Add an integration'}>
                     {ch.integrationId ? 'Finish setup' : 'Add integration'} →
                   </Button>
                 </div>
@@ -1362,8 +1364,8 @@ function ChannelsStep({ markStepDone, canManage }: StepProps) {
           <span>Queued messages are never reported as sent until the outbox dispatcher actually delivers through an enabled, configured integration.</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setActiveSection('integrations')} className="min-h-[44px]">Open Integrations</Button>
-          <Button onClick={() => void toggleDone()} disabled={busy || !canManage} className="min-h-[44px] ml-auto">Mark step complete</Button>
+          <Button variant="outline" onClick={() => setActiveSection('integrations')} className="min-h-[44px]" title="Open Integrations">Open Integrations</Button>
+          <Button onClick={() => void toggleDone()} disabled={busy || !canManage} className="min-h-[44px] ml-auto" title="Mark step complete">Mark step complete</Button>
         </div>
       </CardContent>
     </Card>
@@ -1453,7 +1455,7 @@ function CollectionsStep({ org, queueSave, canManage, markStepDone }: StepProps)
         </div>
         <Separator />
         <div className="space-y-2">
-          <Button onClick={() => void createAutomation()} disabled={creating || !canManage} className="min-h-[44px]" aria-label="Create the overdue reminder automation in test mode">
+          <Button onClick={() => void createAutomation()} disabled={creating || !canManage} className="min-h-[44px]" aria-label="Create the overdue reminder automation in test mode" title="Create the overdue reminder automation in test mode">
             {creating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FlaskConical className="h-4 w-4" aria-hidden />}
             Create overdue-reminder automation (test mode)
           </Button>
@@ -1687,7 +1689,7 @@ function TestStep({ canManage, onComplete }: StepProps & { onComplete: () => voi
             onClick={() => void complete()}
             disabled={!allPassed || completing || !canManage}
             className="min-h-[44px]"
-            aria-label="Complete setup"
+            aria-label="Complete setup" title="Complete setup"
           >
             {completing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />}
             Complete setup

@@ -399,7 +399,7 @@ export function BusinessSection() {
           <AlertTitle>Business settings unavailable</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
-        <Button onClick={() => void load()} className="min-h-[44px]">
+        <Button onClick={() => void load()} className="min-h-[44px]" title="Retry">
           <RefreshCw className="h-4 w-4" aria-hidden />
           Retry
         </Button>
@@ -541,7 +541,7 @@ export function BusinessSection() {
           </div>
           {canEdit && (
             <div className="flex justify-end">
-              <Button onClick={saveBusiness} disabled={saving !== null} className="min-h-[44px]">
+              <Button onClick={saveBusiness} disabled={saving !== null} className="min-h-[44px]" title="Save business profile">
                 {saving === 'business' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
                 Save business profile
               </Button>
@@ -628,7 +628,7 @@ export function BusinessSection() {
           </div>
           {canEdit && (
             <div className="flex justify-end">
-              <Button onClick={saveHours} disabled={saving !== null} className="min-h-[44px]">
+              <Button onClick={saveHours} disabled={saving !== null} className="min-h-[44px]" title="Save hours &amp; holidays">
                 {saving === 'hours' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
                 Save hours &amp; holidays
               </Button>
@@ -658,6 +658,7 @@ export function BusinessSection() {
                 checked={policies.autoConfirmBookings}
                 disabled={!canEdit}
                 onCheckedChange={(v) => setPolicies({ ...policies, autoConfirmBookings: v })}
+                title="Auto-confirm new bookings"
               />
             </div>
             <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
@@ -672,6 +673,7 @@ export function BusinessSection() {
                 checked={policies.depositRequired}
                 disabled={!canEdit}
                 onCheckedChange={(v) => setPolicies({ ...policies, depositRequired: v })}
+                title="Require a deposit for bookings"
               />
             </div>
             <div className="space-y-1.5">
@@ -719,7 +721,7 @@ export function BusinessSection() {
           </div>
           {canEdit && (
             <div className="flex justify-end">
-              <Button onClick={savePolicies} disabled={saving !== null} className="min-h-[44px]">
+              <Button onClick={savePolicies} disabled={saving !== null} className="min-h-[44px]" title="Save policies">
                 {saving === 'policies' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
                 Save policies
               </Button>
@@ -788,7 +790,7 @@ export function BusinessSection() {
           </div>
           {canEdit && (
             <div className="flex justify-end">
-              <Button onClick={saveIdentity} disabled={saving !== null} className="min-h-[44px]">
+              <Button onClick={saveIdentity} disabled={saving !== null} className="min-h-[44px]" title="Save AI identity">
                 {saving === 'ai_identity' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
                 Save AI identity
               </Button>
@@ -911,7 +913,7 @@ export function BusinessSection() {
 
           {canEdit && (
             <div className="flex justify-end">
-              <Button onClick={saveCollections} disabled={saving !== null} className="min-h-[44px]">
+              <Button onClick={saveCollections} disabled={saving !== null} className="min-h-[44px]" title="Save collections settings">
                 {saving === 'collections' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
                 Save collections settings
               </Button>

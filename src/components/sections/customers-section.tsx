@@ -147,17 +147,17 @@ function ViewCustomerDialog({
         {error && (
           <div className="space-y-3">
             <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-            {customer && <Button variant="outline" className="min-h-[44px]" onClick={() => void load(customer.id)}><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>}
+            {customer && <Button variant="outline" className="min-h-[44px]" onClick={() => void load(customer.id)} title="Retry"><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>}
           </div>
         )}
 
         {detail && !loading && (
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="flex-wrap h-auto">
-              <TabsTrigger value="details" className="min-h-[44px]">Details</TabsTrigger>
-              <TabsTrigger value="bookings" className="min-h-[44px]">Bookings ({detail.bookings.length})</TabsTrigger>
-              <TabsTrigger value="invoices" className="min-h-[44px]">Invoices ({detail.invoices.length})</TabsTrigger>
-              <TabsTrigger value="statement" className="min-h-[44px]">Statement</TabsTrigger>
+              <TabsTrigger value="details" className="min-h-[44px]" title="Customer details">Details</TabsTrigger>
+              <TabsTrigger value="bookings" className="min-h-[44px]" title={`Bookings (${detail.bookings.length})`}>Bookings ({detail.bookings.length})</TabsTrigger>
+              <TabsTrigger value="invoices" className="min-h-[44px]" title={`Invoices (${detail.invoices.length})`}>Invoices ({detail.invoices.length})</TabsTrigger>
+              <TabsTrigger value="statement" className="min-h-[44px]" title="Account statement">Statement</TabsTrigger>
             </TabsList>
 
             <TabsContent value="details" className="mt-3 space-y-2 text-sm">
@@ -302,7 +302,7 @@ function ViewCustomerDialog({
         )}
 
         <DialogFooter>
-          <Button variant="outline" className="min-h-[44px]" onClick={onClose}>Close</Button>
+          <Button variant="outline" className="min-h-[44px]" onClick={onClose} title="Close">Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -436,8 +436,8 @@ function EditCustomerDialog({
             )}
           </fieldset>
           <DialogFooter>
-            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose}>Cancel</Button>
-            <Button type="submit" className="min-h-[44px]" disabled={busy}>
+            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose} title="Cancel">Cancel</Button>
+            <Button type="submit" className="min-h-[44px]" disabled={busy} title="Save changes">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Pencil className="h-4 w-4" aria-hidden />}
               Save changes
             </Button>
@@ -565,8 +565,8 @@ function NewCustomerDialog({
             <Textarea id="nc-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Preferences, allergies, anything useful." className="min-h-[44px]" />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose}>Cancel</Button>
-            <Button type="submit" className="min-h-[44px]" disabled={busy}>
+            <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose} title="Cancel">Cancel</Button>
+            <Button type="submit" className="min-h-[44px]" disabled={busy} title="Create customer">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
               Create customer
             </Button>
@@ -687,11 +687,11 @@ function ImportTab({ onImported }: { onImported: () => void }) {
               <p id="csv-help" className="text-xs text-muted-foreground">One customer per line. Extra columns are ignored.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" className="min-h-[44px]" disabled={busy || !csv.trim()}>
+              <Button type="submit" className="min-h-[44px]" disabled={busy || !csv.trim()} title="Import customers">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Upload className="h-4 w-4" aria-hidden />}
                 Import customers
               </Button>
-              <Button type="button" variant="outline" className="min-h-[44px]" onClick={downloadTemplate}>
+              <Button type="button" variant="outline" className="min-h-[44px]" onClick={downloadTemplate} title="Download template">
                 <FileDown className="h-4 w-4" aria-hidden /> Download template
               </Button>
             </div>
@@ -801,7 +801,7 @@ export function CustomersSection() {
     return (
       <div className="space-y-4">
         <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-        <Button className="min-h-[44px]" onClick={() => void load()}><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
+        <Button className="min-h-[44px]" onClick={() => void load()} title="Retry"><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
       </div>
     )
   }
@@ -814,10 +814,10 @@ export function CustomersSection() {
           <p className="text-sm text-muted-foreground">{customers.length} record{customers.length === 1 ? '' : 's'} · consent and opt-out are respected by every automated message.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="min-h-[44px]" onClick={refresh} aria-label="Refresh customers">
+          <Button variant="outline" className="min-h-[44px]" onClick={refresh} aria-label="Refresh customers" title="Refresh customers">
             <RefreshCw className="h-4 w-4" aria-hidden /><span className="hidden sm:inline">Refresh</span>
           </Button>
-          <Button className="min-h-[44px]" onClick={() => setNewOpen(true)}>
+          <Button className="min-h-[44px]" onClick={() => setNewOpen(true)} title="New customer">
             <Plus className="h-4 w-4" aria-hidden /> New customer
           </Button>
         </div>
@@ -852,7 +852,7 @@ export function CustomersSection() {
                     {customers.length === 0 ? 'No customers yet — add your first one or import a CSV.' : 'No customers match that search.'}
                   </p>
                   {customers.length === 0 && (
-                    <Button className="min-h-[44px]" onClick={() => setNewOpen(true)}>
+                    <Button className="min-h-[44px]" onClick={() => setNewOpen(true)} title="New customer">
                       <Plus className="h-4 w-4" aria-hidden /> New customer
                     </Button>
                   )}
@@ -888,13 +888,13 @@ export function CustomersSection() {
                           </TableCell>
                           <TableCell className="text-right">
                             <span className="inline-flex justify-end gap-1">
-                              <Button variant="ghost" size="sm" className="min-h-[44px]" onClick={() => setViewTarget(c)} aria-label={`View ${c.name}`}>
+                              <Button variant="ghost" size="sm" className="min-h-[44px]" onClick={() => setViewTarget(c)} aria-label={`View ${c.name}`} title={`View ${c.name}`}>
                                 <Eye className="h-4 w-4" aria-hidden /><span className="sr-only sm:not-sr-only sm:inline">View</span>
                               </Button>
-                              <Button variant="ghost" size="sm" className="min-h-[44px]" onClick={() => setEditTarget(c)} aria-label={`Edit ${c.name}`}>
+                              <Button variant="ghost" size="sm" className="min-h-[44px]" onClick={() => setEditTarget(c)} aria-label={`Edit ${c.name}`} title={`Edit ${c.name}`}>
                                 <Pencil className="h-4 w-4" aria-hidden /><span className="sr-only sm:not-sr-only sm:inline">Edit</span>
                               </Button>
-                              <Button variant="ghost" size="sm" className="min-h-[44px] text-destructive hover:text-destructive" onClick={() => setDeleteTarget(c)} aria-label={`Delete ${c.name}`}>
+                              <Button variant="ghost" size="sm" className="min-h-[44px] text-destructive hover:text-destructive" onClick={() => setDeleteTarget(c)} aria-label={`Delete ${c.name}`} title={`Delete ${c.name}`}>
                                 <Trash2 className="h-4 w-4" aria-hidden /><span className="sr-only">Delete</span>
                               </Button>
                             </span>

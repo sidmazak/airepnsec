@@ -162,7 +162,7 @@ function EntriesTab({ onChanged }: { onChanged: () => void }) {
     return (
       <div className="space-y-3">
         <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-        <Button className="min-h-[44px]" onClick={() => void load()}><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
+        <Button className="min-h-[44px]" onClick={() => void load()} title="Retry"><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
       </div>
     )
   }
@@ -173,10 +173,10 @@ function EntriesTab({ onChanged }: { onChanged: () => void }) {
         <CardTitle className="text-base flex items-center gap-2"><BookOpen className="h-4 w-4" aria-hidden /> Double-entry ledger</CardTitle>
         <CardDescription>Every money movement as debit → credit. Entries are append-only; corrections are reversals, never edits.</CardDescription>
         <div className="flex flex-wrap gap-2 pt-2">
-          <Button variant="outline" className="min-h-[44px]" onClick={() => window.open('/api/ledger/export', '_blank')}>
+          <Button variant="outline" className="min-h-[44px]" onClick={() => window.open('/api/ledger/export', '_blank')} title="Export CSV">
             <Download className="h-4 w-4" aria-hidden /> Export CSV
           </Button>
-          <Button variant="outline" className="min-h-[44px]" onClick={() => { void load(); onChanged() }} aria-label="Refresh ledger">
+          <Button variant="outline" className="min-h-[44px]" onClick={() => { void load(); onChanged() }} aria-label="Refresh ledger" title="Refresh ledger">
             <RefreshCw className="h-4 w-4" aria-hidden /> Refresh
           </Button>
         </div>
@@ -242,7 +242,7 @@ function EntriesTab({ onChanged }: { onChanged: () => void }) {
                             variant="ghost" size="sm"
                             className="min-h-[44px]"
                             onClick={() => setReverseTarget(e)}
-                            aria-label={`Reverse ${e.type} entry of ${formatMoney(e.amountCents)}`}
+                            aria-label={`Reverse ${e.type} entry of ${formatMoney(e.amountCents)}`} title={`Reverse ${e.type} entry of ${formatMoney(e.amountCents)}`}
                           >
                             <Undo2 className="h-4 w-4" aria-hidden /><span className="sr-only sm:not-sr-only sm:inline">Reverse</span>
                           </Button>
@@ -368,7 +368,7 @@ function AuditTab() {
     return (
       <div className="space-y-3">
         <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-        <Button className="min-h-[44px]" onClick={() => void load()}><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
+        <Button className="min-h-[44px]" onClick={() => void load()} title="Retry"><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
       </div>
     )
   }
@@ -378,7 +378,7 @@ function AuditTab() {
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2"><FileClock className="h-4 w-4" aria-hidden /> Audit trail</CardTitle>
         <CardDescription>Who did what, when — every consequential action is recorded and cannot be edited.</CardDescription>
-        <Button variant="outline" className="min-h-[44px] mt-2 w-fit" onClick={() => void load()} aria-label="Refresh audit trail">
+        <Button variant="outline" className="min-h-[44px] mt-2 w-fit" onClick={() => void load()} aria-label="Refresh audit trail" title="Refresh audit trail">
           <RefreshCw className="h-4 w-4" aria-hidden /> Refresh
         </Button>
       </CardHeader>
@@ -460,7 +460,7 @@ export function LedgerSection() {
     return (
       <div className="space-y-4">
         <Alert variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-        <Button className="min-h-[44px]" onClick={() => void load()}><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
+        <Button className="min-h-[44px]" onClick={() => void load()} title="Retry"><RefreshCw className="h-4 w-4" aria-hidden /> Retry</Button>
       </div>
     )
   }

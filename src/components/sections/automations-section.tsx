@@ -377,8 +377,8 @@ export function AutomationsSection() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label="Automations tabs">
-          <TabsTrigger value="automations" className="min-h-[44px]"><Workflow className="h-4 w-4 mr-1.5" aria-hidden /> Rules</TabsTrigger>
-          <TabsTrigger value="outbox" className="min-h-[44px]"><Inbox className="h-4 w-4 mr-1.5" aria-hidden /> Outbox {outbox.length > 0 ? `(${outbox.length})` : ''}</TabsTrigger>
+          <TabsTrigger value="automations" className="min-h-[44px]" title="Automation rules"><Workflow className="h-4 w-4 mr-1.5" aria-hidden /> Rules</TabsTrigger>
+          <TabsTrigger value="outbox" className="min-h-[44px]" title="Automation outbox"><Inbox className="h-4 w-4 mr-1.5" aria-hidden /> Outbox {outbox.length > 0 ? `(${outbox.length})` : ''}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="automations" className="space-y-4 mt-4">
@@ -387,11 +387,11 @@ export function AutomationsSection() {
               onClick={() => { setEditor(emptyEditor()); setEditorOpen(true) }}
               disabled={!canManage}
               className="min-h-[44px]"
-              aria-label="Create a new automation"
+              aria-label="Create a new automation" title="Create a new automation"
             >
               <Plus className="h-4 w-4" aria-hidden /> New automation
             </Button>
-            <Button variant="outline" onClick={() => void runAll()} disabled={runAllBusy} className="min-h-[44px]" aria-label="Run all automations now">
+            <Button variant="outline" onClick={() => void runAll()} disabled={runAllBusy} className="min-h-[44px]" aria-label="Run all automations now" title="Run all automations now">
               {runAllBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PlayCircle className="h-4 w-4" aria-hidden />}
               Run all now
             </Button>
@@ -407,7 +407,7 @@ export function AutomationsSection() {
               <ShieldAlert className="h-4 w-4" aria-hidden />
               <AlertDescription className="space-y-2">
                 <p>{error}</p>
-                <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+                <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
               </AlertDescription>
             </Alert>
           ) : automations.length === 0 ? (
@@ -418,7 +418,7 @@ export function AutomationsSection() {
                   No automations yet. A good first one: “When an invoice becomes overdue, send a reminder after 1 day” — start it in test mode to watch what it would do.
                 </p>
                 {canManage && (
-                  <Button onClick={() => { setEditor(emptyEditor()); setEditorOpen(true) }} className="min-h-[44px]">
+                  <Button onClick={() => { setEditor(emptyEditor()); setEditorOpen(true) }} className="min-h-[44px]" title="Create an automation">
                     <Plus className="h-4 w-4" aria-hidden /> Create an automation
                   </Button>
                 )}
@@ -482,7 +482,7 @@ export function AutomationsSection() {
                             onClick={() => void toggleHistory(a.id)}
                             aria-expanded={Boolean(historyOpen[a.id])}
                             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground min-h-[44px] px-1"
-                            aria-label={`Toggle run history for ${a.name}`}
+                            aria-label={`Toggle run history for ${a.name}`} title={`Toggle run history for ${a.name}`}
                           >
                             <History className="h-4 w-4" aria-hidden />
                             Run history
@@ -492,14 +492,14 @@ export function AutomationsSection() {
                             <Button
                               size="sm" variant="outline" disabled={!canManage}
                               onClick={() => { setEditor(editorFromAutomation(a)); setEditorOpen(true) }}
-                              className="min-h-[44px]" aria-label={`Edit ${a.name}`}
+                              className="min-h-[44px]" aria-label={`Edit ${a.name}`} title={`Edit ${a.name}`}
                             >
                               <Pencil className="h-3.5 w-3.5" aria-hidden /> Edit
                             </Button>
                             <Button
                               size="sm" variant="ghost" disabled={!canManage}
                               onClick={() => setDeleteTarget(a)}
-                              className="min-h-[44px] text-rose-700 hover:text-rose-800" aria-label={`Delete ${a.name}`}
+                              className="min-h-[44px] text-rose-700 hover:text-rose-800" aria-label={`Delete ${a.name}`} title={`Delete ${a.name}`}
                             >
                               <Trash2 className="h-3.5 w-3.5" aria-hidden /> Delete
                             </Button>
@@ -567,7 +567,7 @@ export function AutomationsSection() {
             <Alert variant="destructive" role="alert">
               <AlertDescription className="space-y-2">
                 <p>{outboxError}</p>
-                <Button size="sm" variant="outline" onClick={() => void loadOutbox()} className="min-h-[44px]">Retry</Button>
+                <Button size="sm" variant="outline" onClick={() => void loadOutbox()} className="min-h-[44px]" title="Retry">Retry</Button>
               </AlertDescription>
             </Alert>
           ) : outbox.length === 0 ? (
@@ -714,7 +714,7 @@ export function AutomationsSection() {
               ))}
               <Button
                 type="button" variant="outline" size="sm" className="min-h-[44px]"
-                onClick={() => setEditor((s) => ({ ...s, extraConditions: [...s.extraConditions, { key: actionKey++, field: '', op: 'gt', value: '0' }] }))}
+                onClick={() => setEditor((s) => ({ ...s, extraConditions: [...s.extraConditions, { key: actionKey++, field: '', op: 'gt', value: '0' }] }))} title="Add condition"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden /> Add condition
               </Button>
@@ -857,7 +857,7 @@ export function AutomationsSection() {
               ))}
               <Button
                 type="button" variant="outline" size="sm" className="min-h-[44px]"
-                onClick={() => setEditor((s) => ({ ...s, actions: [...s.actions, newAction()] }))}
+                onClick={() => setEditor((s) => ({ ...s, actions: [...s.actions, newAction()] }))} title="Add action"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden /> Add action
               </Button>
@@ -880,8 +880,8 @@ export function AutomationsSection() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditorOpen(false)} className="min-h-[44px]">Cancel</Button>
-            <Button onClick={() => void saveEditor()} disabled={saving || !editor.name.trim()} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setEditorOpen(false)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button onClick={() => void saveEditor()} disabled={saving || !editor.name.trim()} className="min-h-[44px]" title={editor.id ? 'Save automation changes' : 'Create automation'}>
               {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
               {editor.id ? 'Save changes' : 'Create automation'}
             </Button>

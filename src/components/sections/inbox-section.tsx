@@ -498,12 +498,12 @@ export function InboxSection() {
           onClick={() => setVoiceOpen((v) => !v)}
           aria-pressed={voiceOpen}
           aria-label="Toggle browser voice test"
-          className="min-h-[44px]"
+          className="min-h-[44px]" title="Toggle browser voice test"
         >
           <Mic className="h-4 w-4" aria-hidden />
           Voice test
         </Button>
-        <Button onClick={openNewDialog} className="min-h-[44px]" aria-label="Start a new conversation">
+        <Button onClick={openNewDialog} className="min-h-[44px]" aria-label="Start a new conversation" title="Start a new conversation">
           <MessageSquare className="h-4 w-4" aria-hidden />
           New conversation
         </Button>
@@ -528,14 +528,14 @@ export function InboxSection() {
               <Alert variant="destructive" role="alert">
                 <AlertDescription className="space-y-2">
                   <p>{listError}</p>
-                  <Button size="sm" variant="outline" onClick={() => void loadList()} className="min-h-[44px]">Retry</Button>
+                  <Button size="sm" variant="outline" onClick={() => void loadList()} className="min-h-[44px]" title="Retry">Retry</Button>
                 </AlertDescription>
               </Alert>
             ) : convs.length === 0 ? (
               <div className="py-8 text-center space-y-3">
                 <Bot className="h-8 w-8 mx-auto text-muted-foreground" aria-hidden />
                 <p className="text-sm text-muted-foreground">No conversations yet. Start one and the AI receptionist will answer as your customers would.</p>
-                <Button size="sm" onClick={openNewDialog} className="min-h-[44px]"><Plus className="h-4 w-4" aria-hidden /> New conversation</Button>
+                <Button size="sm" onClick={openNewDialog} className="min-h-[44px]" title="New conversation"><Plus className="h-4 w-4" aria-hidden /> New conversation</Button>
               </div>
             ) : (
               <ul className="max-h-96 lg:max-h-[65vh] overflow-y-auto space-y-1" aria-label="Conversation list">
@@ -543,6 +543,7 @@ export function InboxSection() {
                   <li key={c.id}>
                     <button
                       onClick={() => openConversation(c.id)}
+                      title={c.contactName || c.customerName || c.customer?.name || 'Open conversation'}
                       aria-current={selectedId === c.id ? 'true' : undefined}
                       className={cn(
                         'w-full text-left rounded-md border p-3 min-h-[44px] transition-colors',
@@ -589,7 +590,7 @@ export function InboxSection() {
                 <Alert variant="destructive" role="alert">
                   <AlertDescription className="space-y-2">
                     <p>{detailError}</p>
-                    <Button size="sm" variant="outline" onClick={() => selectedId && void loadDetail(selectedId)} className="min-h-[44px]">Retry</Button>
+                    <Button size="sm" variant="outline" onClick={() => selectedId && void loadDetail(selectedId)} className="min-h-[44px]" title="Retry">Retry</Button>
                   </AlertDescription>
                 </Alert>
               </div>
@@ -626,7 +627,7 @@ export function InboxSection() {
                       disabled={conv.status === 'closed'}
                       onClick={() => void patchConversation({ status: 'open', aiEnabled: false })}
                       className="min-h-[44px]"
-                      aria-label="Take over from the AI and reply as staff"
+                      aria-label="Take over from the AI and reply as staff" title="Take over from the AI and reply as staff"
                     >
                       <UserRound className="h-4 w-4" aria-hidden /> Take over
                     </Button>
@@ -635,7 +636,7 @@ export function InboxSection() {
                       disabled={conv.status === 'closed' || conv.aiEnabled}
                       onClick={() => void patchConversation({ status: 'open', aiEnabled: true })}
                       className="min-h-[44px]"
-                      aria-label="Resume AI replies"
+                      aria-label="Resume AI replies" title="Resume AI replies"
                     >
                       <Sparkles className="h-4 w-4" aria-hidden /> Resume AI
                     </Button>
@@ -644,7 +645,7 @@ export function InboxSection() {
                       disabled={conv.status === 'closed'}
                       onClick={() => void patchConversation({ status: 'closed' })}
                       className="min-h-[44px] text-muted-foreground"
-                      aria-label="Close this conversation"
+                      aria-label="Close this conversation" title="Close this conversation"
                     >
                       <XCircle className="h-4 w-4" aria-hidden /> Close
                     </Button>
@@ -755,7 +756,7 @@ export function InboxSection() {
                       type="button"
                       onClick={() => setStaffMode(false)}
                       aria-pressed={!staffMode}
-                      className={cn('rounded-md border px-2 py-1.5 min-h-[44px] text-xs', !staffMode ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted')}
+                      className={cn('rounded-md border px-2 py-1.5 min-h-[44px] text-xs', !staffMode ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted')} title="Simulating customer"
                     >
                       Simulating customer
                     </button>
@@ -763,7 +764,7 @@ export function InboxSection() {
                       type="button"
                       onClick={() => setStaffMode(true)}
                       aria-pressed={staffMode}
-                      className={cn('rounded-md border px-2 py-1.5 min-h-[44px] text-xs', staffMode ? 'bg-secondary text-secondary-foreground border-border' : 'hover:bg-muted')}
+                      className={cn('rounded-md border px-2 py-1.5 min-h-[44px] text-xs', staffMode ? 'bg-secondary text-secondary-foreground border-border' : 'hover:bg-muted')} title="📝 Reply as staff"
                     >
                       📝 Reply as staff
                     </button>
@@ -789,7 +790,7 @@ export function InboxSection() {
                       type="submit"
                       disabled={sending || !composer.trim() || (!staffMode && conv.status === 'closed')}
                       aria-label={staffMode ? 'Send staff reply' : 'Send customer message'}
-                      className="min-h-[44px]"
+                      className="min-h-[44px]" title={staffMode ? 'Send staff reply' : 'Send customer message'}
                     >
                       {sending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
                       Send
@@ -851,8 +852,8 @@ export function InboxSection() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setNewOpen(false)} className="min-h-[44px]">Cancel</Button>
-            <Button onClick={() => void createConversation()} disabled={creating} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setNewOpen(false)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button onClick={() => void createConversation()} disabled={creating} className="min-h-[44px]" title="Create conversation">
               {creating && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
               Create conversation
             </Button>

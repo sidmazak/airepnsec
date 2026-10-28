@@ -171,13 +171,13 @@ function GoogleCalendarBox({ connected, canManage, onChanged }: { connected: boo
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium">Bookings ↔ Google Calendar (two-way)</p>
         {connected && info?.enabled ? (
-          <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing}>
+          <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing} title="Sync now">
             {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
             Sync now
           </Button>
         ) : !connected ? (
-          <Button asChild variant="outline" size="sm" className="min-h-[36px]" disabled={!canManage}>
-            <a href="/api/integrations/google_calendar/authorize">Connect Google Calendar</a>
+          <Button asChild variant="outline" size="sm" className="min-h-[36px]" disabled={!canManage} title="Connect Google Calendar">
+            <a href="/api/integrations/google_calendar/authorize" title="Connect Google Calendar">Connect Google Calendar</a>
           </Button>
         ) : null}
       </div>
@@ -504,7 +504,7 @@ function CalDavSyncBox({ canManage, onChanged }: { canManage: boolean; onChanged
     <div className="rounded-md border p-3 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium">Bookings ↔ calendar (two-way)</p>
-        <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing || !canManage || !info?.enabled}>
+        <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing || !canManage || !info?.enabled} title="Sync now">
           {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
           Sync now
         </Button>
@@ -568,13 +568,13 @@ function MicrosoftCalendarBox({ connected, canManage, onChanged }: { connected: 
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium">Bookings &#8596; Microsoft 365 (two-way)</p>
         {connected && info?.enabled ? (
-          <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing}>
+          <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => void syncNow()} disabled={syncing} title="Sync now">
             {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
             Sync now
           </Button>
         ) : !connected ? (
-          <Button asChild variant="outline" size="sm" className="min-h-[36px]" disabled={!canManage}>
-            <a href="/api/integrations/microsoft_calendar/authorize">Connect Microsoft 365</a>
+          <Button asChild variant="outline" size="sm" className="min-h-[36px]" disabled={!canManage} title="Connect Microsoft 365">
+            <a href="/api/integrations/microsoft_calendar/authorize" title="Connect Microsoft 365">Connect Microsoft 365</a>
           </Button>
         ) : null}
       </div>
@@ -895,7 +895,7 @@ function ConnectorCard({
         )}
 
         <div className="flex flex-wrap gap-2 mt-auto pt-1">
-          <Button variant="outline" className="min-h-[44px]" onClick={openDialog} aria-label={`Configure ${meta.title}`}>
+          <Button variant="outline" className="min-h-[44px]" onClick={openDialog} aria-label={`Configure ${meta.title}`} title={`Configure ${meta.title}`}>
             <Plug className="h-4 w-4" aria-hidden /> Configure
           </Button>
           {row && (
@@ -965,6 +965,7 @@ function ProviderPicker({
               aria-checked={selected}
               disabled={disabled}
               onClick={() => onChange(option.id)}
+              title={option.label}
               className={cn(
                 'flex items-center gap-2 rounded-md border p-2.5 text-sm min-h-[44px] text-left transition-colors disabled:opacity-60',
                 selected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:bg-muted',
@@ -1091,7 +1092,7 @@ function ConfigureDialog({
                   href={metaEntry.docsUrl}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-xs underline underline-offset-2 hover:text-foreground min-h-[28px]"
+                  className="inline-flex items-center gap-1 text-xs underline underline-offset-2 hover:text-foreground min-h-[28px]" title="Provider documentation"
                 >
                   Provider documentation <ExternalLink className="h-3 w-3" aria-hidden />
                 </a>
@@ -1101,7 +1102,7 @@ function ConfigureDialog({
                   href={providerDocumentation(cfg.provider)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-xs underline underline-offset-2 hover:text-foreground min-h-[28px]"
+                  className="inline-flex items-center gap-1 text-xs underline underline-offset-2 hover:text-foreground min-h-[28px]" title="Open provider setup documentation"
                 >
                   {providerLabel(metaEntry, cfg.provider)} setup documentation <ExternalLink className="h-3 w-3" aria-hidden />
                 </a>
@@ -1941,7 +1942,7 @@ function ConfigureDialog({
                 type="button" variant="ghost" size="sm"
                 className="min-h-[44px] text-destructive hover:text-destructive"
                 onClick={() => void clearCredentials()} disabled={busy || !canManage}
-                aria-label={`Clear saved credentials for ${meta.title}`}
+                aria-label={`Clear saved credentials for ${meta.title}`} title={`Clear saved credentials for ${meta.title}`}
               >
                 {clearing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
                 Clear saved credentials
@@ -1956,12 +1957,12 @@ function ConfigureDialog({
             </Alert>
           )}
           <DialogFooter className="flex-col gap-2 sm:flex-row">
-            <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => onOpenChange(false)} title="Cancel">Cancel</Button>
             <Button
               type="submit"
               className="min-h-[44px]"
               disabled={!canManage || busy}
-              aria-label={`Save ${meta.title}`}
+              aria-label={`Save ${meta.title}`} title={`Save ${meta.title}`}
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
               Save
@@ -1972,7 +1973,7 @@ function ConfigureDialog({
               className="min-h-[44px]"
               disabled={!canManage || busy}
               onClick={() => void save(true)}
-              aria-label={`Save and test ${meta.title}`}
+              aria-label={`Save and test ${meta.title}`} title={`Save and test ${meta.title}`}
             >
               {savingTest ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
               Save &amp; test
@@ -2087,7 +2088,7 @@ function WebhookDestinationsCard({
                     <Button
                       size="sm" variant="outline" className="min-h-[44px]"
                       onClick={() => void runTest(row)} disabled={testBusy === row.id || !canManage}
-                      aria-label={`Test webhook ${str(row.config.url)}`}
+                      aria-label={`Test webhook ${str(row.config.url)}`} title={`Test webhook ${str(row.config.url)}`}
                     >
                       {testBusy === row.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
                       Test
@@ -2096,7 +2097,7 @@ function WebhookDestinationsCard({
                       size="sm" variant="ghost"
                       className="min-h-[44px] text-destructive hover:text-destructive"
                       onClick={() => setDeleteTarget(row)} disabled={!canManage}
-                      aria-label={`Delete webhook ${str(row.config.url)}`}
+                      aria-label={`Delete webhook ${str(row.config.url)}`} title={`Delete webhook ${str(row.config.url)}`}
                     >
                       <Trash2 className="h-4 w-4" aria-hidden /> Delete
                     </Button>
@@ -2107,7 +2108,7 @@ function WebhookDestinationsCard({
           </ul>
         )}
 
-        <Button className="min-h-[44px] w-full sm:w-auto" onClick={() => { setError(''); setAddOpen(true) }} disabled={!canManage} aria-label="Add webhook destination">
+        <Button className="min-h-[44px] w-full sm:w-auto" onClick={() => { setError(''); setAddOpen(true) }} disabled={!canManage} aria-label="Add webhook destination" title="Add webhook destination">
           <Plug className="h-4 w-4" aria-hidden /> Add destination
         </Button>
         {!canManage && <p className="text-xs text-muted-foreground">Read-only — owner/admin can edit.</p>}
@@ -2135,8 +2136,8 @@ function WebhookDestinationsCard({
               <p className="text-xs text-muted-foreground">Saved credentials are never shown again.</p>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setAddOpen(false)}>Cancel</Button>
-              <Button type="submit" className="min-h-[44px]" disabled={saving || !url.trim()}>
+              <Button type="button" variant="outline" className="min-h-[44px]" onClick={() => setAddOpen(false)} title="Cancel">Cancel</Button>
+              <Button type="submit" className="min-h-[44px]" disabled={saving || !url.trim()} title="Add destination">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plug className="h-4 w-4" aria-hidden />}
                 Add destination
               </Button>
@@ -2239,12 +2240,12 @@ function OutboxTab({ canManage }: { canManage: boolean }) {
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm text-muted-foreground mr-auto">Every outbound message with its real delivery state — queued rows say why.</p>
         {canManage && (
-          <Button onClick={() => void dispatch()} disabled={dispatching} className="min-h-[44px]" aria-label="Dispatch the outbox now">
+          <Button onClick={() => void dispatch()} disabled={dispatching} className="min-h-[44px]" aria-label="Dispatch the outbox now" title="Dispatch the outbox now">
             {dispatching ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
             Dispatch now
           </Button>
         )}
-        <Button variant="outline" onClick={() => void load()} disabled={loading} className="min-h-[44px]" aria-label="Refresh outbox">
+        <Button variant="outline" onClick={() => void load()} disabled={loading} className="min-h-[44px]" aria-label="Refresh outbox" title="Refresh outbox">
           <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} aria-hidden /> Refresh
         </Button>
       </div>
@@ -2257,7 +2258,7 @@ function OutboxTab({ canManage }: { canManage: boolean }) {
         <Alert variant="destructive" role="alert">
           <AlertDescription className="space-y-2">
             <p>{error}</p>
-            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
           </AlertDescription>
         </Alert>
       ) : messages.length === 0 ? (
@@ -2333,7 +2334,7 @@ function CalendarTab() {
             variant="outline" size="sm" className="min-h-[44px]"
             disabled={!origin}
             onClick={() => window.open(feedUrl, '_blank', 'noopener')}
-            aria-label="Open calendar feed"
+            aria-label="Open calendar feed" title="Open calendar feed"
           >
             <ExternalLink className="h-4 w-4" aria-hidden /> Open feed
           </Button>
@@ -2432,7 +2433,7 @@ function InboundWebhookTab({ canManage }: { canManage: boolean }) {
               <p className="text-sm text-muted-foreground">
                 No secret is retrievable right now. Rotate to generate a new one — the value is displayed exactly once, so copy it immediately.
               </p>
-              <Button onClick={() => void rotate()} disabled={rotating} className="min-h-[44px]" aria-label="Rotate webhook signing secret">
+              <Button onClick={() => void rotate()} disabled={rotating} className="min-h-[44px]" aria-label="Rotate webhook signing secret" title="Rotate webhook signing secret">
                 {rotating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
                 Rotate secret
               </Button>
@@ -2552,7 +2553,7 @@ function NotificationsTab({ canManage }: { canManage: boolean }) {
       <Alert variant="destructive" role="alert">
         <AlertDescription className="space-y-2">
           <p>{error || 'Notification settings are unavailable.'}</p>
-          <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+          <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
         </AlertDescription>
       </Alert>
     )
@@ -2567,10 +2568,10 @@ function NotificationsTab({ canManage }: { canManage: boolean }) {
         <p className="text-sm text-muted-foreground mr-auto">
           Delivery rules for every automated message. Opt-out and per-customer preferences always override these settings.
         </p>
-        <Button variant="outline" onClick={() => setConfig(data.defaults)} disabled={!canManage || saving} className="min-h-[44px]">
+        <Button variant="outline" onClick={() => setConfig(data.defaults)} disabled={!canManage || saving} className="min-h-[44px]" title="Reset to defaults">
           Reset to defaults
         </Button>
-        <Button onClick={() => void save()} disabled={!canManage || saving} className="min-h-[44px]">
+        <Button onClick={() => void save()} disabled={!canManage || saving} className="min-h-[44px]" title="Save routing">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
           Save routing
         </Button>
@@ -2722,7 +2723,7 @@ export function IntegrationsSection() {
         <Alert variant="destructive" role="alert">
           <AlertDescription className="space-y-2">
             <p>{error}</p>
-            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
           </AlertDescription>
         </Alert>
       </div>
@@ -2746,7 +2747,7 @@ export function IntegrationsSection() {
         <Alert variant="destructive" role="alert">
           <AlertDescription className="space-y-2">
             <p>Refresh failed, showing the last known state — {error}</p>
-            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
           </AlertDescription>
         </Alert>
       )}
@@ -2765,7 +2766,7 @@ export function IntegrationsSection() {
         {q && (
           <p className="text-xs text-muted-foreground" aria-live="polite">
             {matchCount} {matchCount === 1 ? 'match' : 'matches'}
-            <Button variant="link" size="sm" onClick={() => setQuery('')} className="ml-1 h-auto p-0 text-xs">Clear</Button>
+            <Button variant="link" size="sm" onClick={() => setQuery('')} className="ml-1 h-auto p-0 text-xs" title="Clear">Clear</Button>
           </p>
         )}
       </div>
@@ -2774,7 +2775,7 @@ export function IntegrationsSection() {
         <Card>
           <CardContent className="py-10 text-center space-y-3">
             <p className="text-sm text-muted-foreground">No integrations match “{query}”.</p>
-            <Button variant="outline" onClick={() => setQuery('')} className="min-h-[44px]">Clear search</Button>
+            <Button variant="outline" onClick={() => setQuery('')} className="min-h-[44px]" title="Clear search">Clear search</Button>
           </CardContent>
         </Card>
       ) : (
@@ -2808,10 +2809,10 @@ export function IntegrationsSection() {
 
       <Tabs defaultValue="outbox">
         <TabsList aria-label="Integration tools">
-          <TabsTrigger value="outbox" className="min-h-[44px]"><Send className="h-4 w-4 mr-1.5" aria-hidden /> Outbox</TabsTrigger>
-          <TabsTrigger value="notifications" className="min-h-[44px]"><Bell className="h-4 w-4 mr-1.5" aria-hidden /> Notifications</TabsTrigger>
-          <TabsTrigger value="calendar" className="min-h-[44px]"><CalendarDays className="h-4 w-4 mr-1.5" aria-hidden /> Calendar</TabsTrigger>
-          <TabsTrigger value="inbound" className="min-h-[44px]"><WebhookIcon className="h-4 w-4 mr-1.5" aria-hidden /> Inbound webhook</TabsTrigger>
+          <TabsTrigger value="outbox" className="min-h-[44px]" title="Integration outbox"><Send className="h-4 w-4 mr-1.5" aria-hidden /> Outbox</TabsTrigger>
+          <TabsTrigger value="notifications" className="min-h-[44px]" title="Notification settings"><Bell className="h-4 w-4 mr-1.5" aria-hidden /> Notifications</TabsTrigger>
+          <TabsTrigger value="calendar" className="min-h-[44px]" title="Calendar sync"><CalendarDays className="h-4 w-4 mr-1.5" aria-hidden /> Calendar</TabsTrigger>
+          <TabsTrigger value="inbound" className="min-h-[44px]" title="Inbound webhook events"><WebhookIcon className="h-4 w-4 mr-1.5" aria-hidden /> Inbound webhook</TabsTrigger>
         </TabsList>
 
         <TabsContent value="outbox" className="mt-4">

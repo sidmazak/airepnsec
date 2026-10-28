@@ -143,7 +143,7 @@ function SlotPicker({
     return (
       <div className="space-y-2">
         <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>
-        <Button type="button" variant="outline" size="sm" className="min-h-[44px]" onClick={() => void load()}>
+        <Button type="button" variant="outline" size="sm" className="min-h-[44px]" onClick={() => void load()} title="Retry availability">
           <RefreshCw className="h-4 w-4" aria-hidden /> Retry availability
         </Button>
       </div>
@@ -176,6 +176,7 @@ function SlotPicker({
             variant={value === s.startAt ? 'default' : 'outline'}
             className="min-h-[44px] text-sm"
             onClick={() => onChange(s.startAt)}
+            title={`Book ${format(new Date(s.startAt), 'h:mm a')}`}
           >
             {format(new Date(s.startAt), 'h:mm a')}
           </Button>
@@ -210,30 +211,30 @@ function BookingActions({ booking, onChanged }: { booking: Booking; onChanged: (
   return (
     <div className="flex flex-wrap items-center gap-1.5" aria-label={`Actions for booking ${booking.service?.name ?? booking.id}`}>
       {booking.status === 'pending' && (
-        <Button type="button" size="sm" className="min-h-[44px]" disabled={busy !== null} onClick={() => void run('confirm', 'Booking confirmed')}>
+        <Button type="button" size="sm" className="min-h-[44px]" disabled={busy !== null} onClick={() => void run('confirm', 'Booking confirmed')} title="Confirm">
           {busy === 'confirm' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Check className="h-4 w-4" aria-hidden />}
           Confirm
         </Button>
       )}
       {booking.status === 'confirmed' && (
-        <Button type="button" size="sm" className="min-h-[44px]" disabled={busy !== null} onClick={() => void run('complete', 'Booking completed')}>
+        <Button type="button" size="sm" className="min-h-[44px]" disabled={busy !== null} onClick={() => void run('complete', 'Booking completed')} title="Complete">
           {busy === 'complete' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />}
           Complete
         </Button>
       )}
       {booking.status === 'confirmed' && (
-        <Button type="button" size="sm" variant="outline" className="min-h-[44px]" disabled={busy !== null} onClick={() => void run('no_show', 'Marked as no-show')}>
+        <Button type="button" size="sm" variant="outline" className="min-h-[44px]" disabled={busy !== null} onClick={() => void run('no_show', 'Marked as no-show')} title="No-show">
           {busy === 'no_show' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <UserX className="h-4 w-4" aria-hidden />}
           No-show
         </Button>
       )}
       {canAct && (
-        <Button type="button" size="sm" variant="outline" className="min-h-[44px]" onClick={() => setRescheduleOpen(true)}>
+        <Button type="button" size="sm" variant="outline" className="min-h-[44px]" onClick={() => setRescheduleOpen(true)} title="Reschedule">
           <Repeat className="h-4 w-4" aria-hidden /> Reschedule
         </Button>
       )}
       {canAct && (
-        <Button type="button" size="sm" variant="outline" className="min-h-[44px] text-destructive hover:text-destructive" onClick={() => setCancelOpen(true)}>
+        <Button type="button" size="sm" variant="outline" className="min-h-[44px] text-destructive hover:text-destructive" onClick={() => setCancelOpen(true)} title="Cancel">
           <Ban className="h-4 w-4" aria-hidden /> Cancel
         </Button>
       )}
@@ -320,8 +321,8 @@ function RescheduleDialog({
           </div>
         )}
         <DialogFooter>
-          <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose}>Close</Button>
-          <Button type="button" className="min-h-[44px]" disabled={!slot || busy} onClick={() => void submit()}>
+          <Button type="button" variant="outline" className="min-h-[44px]" onClick={onClose} title="Close">Close</Button>
+          <Button type="button" className="min-h-[44px]" disabled={!slot || busy} onClick={() => void submit()} title="Move to selected slot">
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Check className="h-4 w-4" aria-hidden />}
             Move to selected slot
           </Button>
@@ -453,7 +454,7 @@ function UpcomingTab({
         <CardContent className="p-8 text-center space-y-3">
           <CalendarDays className="h-10 w-10 mx-auto text-muted-foreground" aria-hidden />
           <p className="text-sm text-muted-foreground">No upcoming appointments. Booked slots (pending or confirmed) will appear here grouped by day.</p>
-          <Button className="min-h-[44px]" onClick={onCreate}>
+          <Button className="min-h-[44px]" onClick={onCreate} title="Create booking">
             <CalendarPlus className="h-4 w-4" aria-hidden /> Create booking
           </Button>
         </CardContent>
@@ -533,6 +534,7 @@ function CalendarTab({ bookings, onChanged }: { bookings: Booking[]; onChanged: 
               role="option"
               aria-selected={active}
               onClick={() => setSelected(k)}
+              title={isToday(d) ? 'Today, ' + format(d, 'MMMM d') : format(d, 'EEEE, MMMM d')}
               className={cn(
                 'rounded-lg border p-2 min-h-[72px] text-left transition-colors hover:bg-muted/60',
                 active ? 'border-primary bg-primary/5' : ''
@@ -738,7 +740,7 @@ function NewBookingForm({
             <Textarea id="nb-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything the staff should know…" className="min-h-[44px]" />
           </div>
 
-          <Button type="submit" className="min-h-[44px]" disabled={!canSubmit || busy}>
+          <Button type="submit" className="min-h-[44px]" disabled={!canSubmit || busy} title="Create booking">
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CalendarPlus className="h-4 w-4" aria-hidden />}
             Create booking
           </Button>
@@ -928,7 +930,7 @@ export function BookingsSection() {
         <Alert variant="destructive" role="alert">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
-        <Button className="min-h-[44px]" onClick={() => void load()}>
+        <Button className="min-h-[44px]" onClick={() => void load()} title="Retry">
           <RefreshCw className="h-4 w-4" aria-hidden /> Retry
         </Button>
       </div>
@@ -942,7 +944,7 @@ export function BookingsSection() {
           <h2 className="text-lg font-semibold tracking-tight">Bookings</h2>
           <p className="text-sm text-muted-foreground">Confirm, complete, reschedule or cancel — all actions hit the real booking engine.</p>
         </div>
-        <Button variant="outline" className="min-h-[44px]" onClick={refresh} aria-label="Refresh bookings">
+        <Button variant="outline" className="min-h-[44px]" onClick={refresh} aria-label="Refresh bookings" title="Refresh bookings">
           <RefreshCw className="h-4 w-4" aria-hidden /> Refresh
         </Button>
       </div>

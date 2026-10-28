@@ -163,7 +163,7 @@ export function SsoSettings() {
           <Alert variant="destructive" role="alert" className="mb-4">
             <AlertDescription className="flex items-center justify-between gap-3">
               <span>{error}</span>
-              <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>
+              <Button variant="outline" size="sm" onClick={() => void load()} title="Retry">Retry</Button>
             </AlertDescription>
           </Alert>
         )}
@@ -287,6 +287,7 @@ export function SsoSettings() {
             <Label htmlFor="sso-default-role">Role for new accounts</Label>
             <select
               id="sso-default-role"
+              title="Role for new accounts"
               className="h-11 w-full rounded-md border bg-background px-3 text-sm"
               value={defaultRole.oidc ?? 'agent'}
               onChange={(e) => setDefaultRole({ ...defaultRole, oidc: e.target.value, saml: e.target.value })}
@@ -309,11 +310,11 @@ export function SsoSettings() {
         </div>
 
         <div className="mt-4 flex gap-2">
-          <Button className="min-h-[44px]" disabled={busy} onClick={() => void save('oidc')}>
+          <Button className="min-h-[44px]" disabled={busy} onClick={() => void save('oidc')} title="Save OIDC">
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
             Save OIDC
           </Button>
-          <Button variant="outline" className="min-h-[44px]" disabled={busy} onClick={() => void save('saml')}>
+          <Button variant="outline" className="min-h-[44px]" disabled={busy} onClick={() => void save('saml')} title="Save SAML">
             Save SAML
           </Button>
         </div>
@@ -409,7 +410,7 @@ export function ScimSettings() {
           <Alert variant="destructive" role="alert">
             <AlertDescription className="flex items-center justify-between gap-3">
               <span>{error}</span>
-              <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>
+              <Button variant="outline" size="sm" onClick={() => void load()} title="Retry">Retry</Button>
             </AlertDescription>
           </Alert>
         )}
@@ -451,12 +452,12 @@ export function ScimSettings() {
           </div>
         )}
         <div className="flex gap-2">
-          <Button className="min-h-[44px]" disabled={busy} onClick={() => void save(false)}>
+          <Button className="min-h-[44px]" disabled={busy} onClick={() => void save(false)} title="Save">
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
             <Plug className="h-4 w-4" aria-hidden />
             Save
           </Button>
-          <Button variant="outline" className="min-h-[44px]" disabled={busy} onClick={() => void save(true)}>
+          <Button variant="outline" className="min-h-[44px]" disabled={busy} onClick={() => void save(true)} title="Issue new token">
             Issue new token
           </Button>
         </div>

@@ -229,7 +229,7 @@ export function DataSourcesSection() {
           </p>
         </div>
         {canManage && (
-          <Button onClick={openNew} className="min-h-[44px]" aria-label="Add a data source">
+          <Button onClick={openNew} className="min-h-[44px]" aria-label="Add a data source" title="Add a data source">
             <Plus className="h-4 w-4" aria-hidden /> Add data source
           </Button>
         )}
@@ -251,7 +251,7 @@ export function DataSourcesSection() {
           <ShieldAlert className="h-4 w-4" aria-hidden />
           <AlertDescription className="space-y-2">
             <p>{error}</p>
-            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]">Retry</Button>
+            <Button size="sm" variant="outline" onClick={() => void load()} className="min-h-[44px]" title="Retry">Retry</Button>
           </AlertDescription>
         </Alert>
       ) : sources.length === 0 ? (
@@ -262,7 +262,7 @@ export function DataSourcesSection() {
               No external data sources yet. Add a PostgreSQL, MySQL or SQLite database, or a JSON HTTP endpoint,
               and the assistant will answer from its rows — using your existing embedding model.
             </p>
-            {canManage && <Button onClick={openNew} className="min-h-[44px]"><Plus className="h-4 w-4" aria-hidden /> Add your first data source</Button>}
+            {canManage && <Button onClick={openNew} className="min-h-[44px]" title="Add your first data source"><Plus className="h-4 w-4" aria-hidden /> Add your first data source</Button>}
           </CardContent>
         </Card>
       ) : (
@@ -346,10 +346,10 @@ export function DataSourcesSection() {
                       </div>
                     )}
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" variant="outline" onClick={() => void test(s)} disabled={busy} className="min-h-[44px]" aria-label={`Test connection for ${s.name}`}>
+                      <Button size="sm" variant="outline" onClick={() => void test(s)} disabled={busy} className="min-h-[44px]" aria-label={`Test connection for ${s.name}`} title={`Test connection for ${s.name}`}>
                         {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <PlugZap className="h-3.5 w-3.5" aria-hidden />} Test
                       </Button>
-                      <Button size="sm" onClick={() => void sync(s)} disabled={!canManage || busy} className="min-h-[44px]" aria-label={`Sync ${s.name} now`}>
+                      <Button size="sm" onClick={() => void sync(s)} disabled={!canManage || busy} className="min-h-[44px]" aria-label={`Sync ${s.name} now`} title={`Sync ${s.name} now`}>
                         {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />} Sync now
                       </Button>
                       {canManage && (
@@ -500,8 +500,8 @@ export function DataSourcesSection() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)} className="min-h-[44px]">Cancel</Button>
-            <Button onClick={() => void save()} disabled={saving || !form.name.trim()} className="min-h-[44px]">
+            <Button variant="outline" onClick={() => setFormOpen(false)} className="min-h-[44px]" title="Cancel">Cancel</Button>
+            <Button onClick={() => void save()} disabled={saving || !form.name.trim()} className="min-h-[44px]" title={form.id ? 'Save data source changes' : 'Add data source'}>
               {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />}
               {form.id ? 'Save changes' : 'Add source'}
             </Button>
