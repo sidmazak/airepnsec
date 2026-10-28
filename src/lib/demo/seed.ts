@@ -43,8 +43,21 @@ function nthBusinessDay(n: number): Date {
 export async function seedDemo(): Promise<{ orgId: string; email: string; password: string }> {
   const existing = await db.organization.findUnique({ where: { slug: DEMO_ORG_SLUG } })
   if (existing) {
-    const owner = await db.user.findFirst({ where: { orgId: existing.id, role: 'owner' } })
-    return { orgId: existing.id, email: owner?.email ?? DEMO_OWNER_EMAIL, password: DEMO_OWNER_PASSWORD }
+    // The seed contract returns a working login. Re-assert the demo owner's
+    // password (and active state) so an edited demo password cannot make the
+    // returned credentials fail.
+    const owner = await db.user.findFirst({ where: { orgId: existing.id, role: 'owner' }, orderBy: { createdAt: 'asc' } })
+    if (owner) {
+      await db.user.update({
+        where: { id: owner.id },
+        data: { passwordHash: hashPassword(DEMO_OWNER_PASSWORD), active: true },
+      })
+      return { orgId: existing.id, email: owner.email, password: DEMO_OWNER_PASSWORD }
+    }
+    const created = await db.user.create({
+      data: { orgId: existing.id, email: DEMO_OWNER_EMAIL, passwordHash: hashPassword(DEMO_OWNER_PASSWORD), name: 'Demo Owner', role: 'owner' },
+    })
+    return { orgId: existing.id, email: created.email, password: DEMO_OWNER_PASSWORD }
   }
 
   const org = await db.organization.create({

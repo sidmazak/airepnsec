@@ -154,7 +154,9 @@ export function AuthScreen() {
               <CardHeader className="space-y-1.5">
                 <h2 className="text-xl font-semibold leading-none tracking-tight">{mode === 'login' ? 'Sign in' : 'Create workspace'}</h2>
                 <CardDescription>
-                  {mode === 'login' ? 'Sign in to continue to your workspace.' : 'Set up the owner account for this instance.'}
+                  {needsSetup || mode === 'setup'
+                    ? 'First time as admin/owner — create the workspace below.'
+                    : 'Sign in as the owner of this workspace.'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

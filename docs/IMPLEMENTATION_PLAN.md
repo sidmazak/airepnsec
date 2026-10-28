@@ -182,3 +182,9 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Regression guard**: `tests/unit/ui-tooltips.test.mts` now checks every button/link plus toggles, tabs and selects, and asserts the global pointer-cursor rules. 197 unit tests.
 ✅ **Runtime audit**: headless Edge sweep across the login page and all 19 SPA sections checked 1,043 rendered controls — 0 missing titles, 0 wrong cursors, 0 console errors.
 ✅ **Verification**: tsc clean, lint clean, 197/197 unit tests, 44/44 smoke checks.
+
+## Phase 27 — Demo access scoped to sign-in (2026-10-28)
+✅ **Demo shortcut only while signed out**: the sign-in screen keeps the demo workspace action; the authenticated app never renders it. `/api/session` still reports `demoAvailable` only so the auth screen can choose between "Create demo workspace" and "Explore demo workspace".
+✅ **Logout behaviour**: after using the demo and signing out, the auth screen returns with "Explore demo workspace (sample data)" because the demo org exists; after signing in, the action is not present anywhere in the workspace.
+✅ **Seed credentials stay valid**: re-seeding an existing demo org re-asserts the demo owner's password and active state, so the credentials returned by `/api/demo/seed` always sign in.
+✅ **Session persistence**: a successful sign-in keeps the 14-day HTTP-only session cookie, so a reload goes straight back to the workspace.
