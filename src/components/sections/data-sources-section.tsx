@@ -354,10 +354,10 @@ export function DataSourcesSection() {
                       </Button>
                       {canManage && (
                         <>
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(s)} className="min-h-[44px]" aria-label={`Edit ${s.name}`}>
+                          <Button size="sm" variant="ghost" onClick={() => openEdit(s)} className="min-h-[44px]" aria-label={`Edit ${s.name}`} title={`Edit ${s.name}`}>
                             <Pencil className="h-3.5 w-3.5" aria-hidden />
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(s)} className="min-h-[44px] text-rose-700 hover:text-rose-800" aria-label={`Delete ${s.name}`}>
+                          <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(s)} className="min-h-[44px] text-rose-700 hover:text-rose-800" aria-label={`Delete ${s.name}`} title={`Delete ${s.name}`}>
                             <Trash2 className="h-3.5 w-3.5" aria-hidden />
                           </Button>
                         </>

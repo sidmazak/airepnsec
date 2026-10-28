@@ -215,7 +215,7 @@ function VoiceTestPanel({ onSend, disabled }: { onSend: (text: string) => Promis
               type="button"
               onClick={toggleMic}
               aria-pressed={vState === 'listening'}
-              aria-label={vState === 'listening' ? 'Stop listening' : 'Start voice test — speak to the assistant'}
+              aria-label={vState === 'listening' ? 'Stop listening' : 'Start voice test — speak to the assistant'} title={vState === 'listening' ? 'Stop listening' : 'Start voice test — speak to the assistant'}
               disabled={disabled || vState === 'processing'}
               className={cn(
                 'h-16 w-16 rounded-full flex items-center justify-center border-2 transition-colors min-h-[44px] min-w-[44px]',
@@ -258,7 +258,7 @@ function VoiceTestPanel({ onSend, disabled }: { onSend: (text: string) => Promis
             aria-label="Type a test message instead of speaking"
             className="min-h-[44px]"
           />
-          <Button type="submit" variant="secondary" disabled={disabled || !typed.trim() || vState === 'processing'} aria-label="Send typed test message">
+          <Button type="submit" variant="secondary" disabled={disabled || !typed.trim() || vState === 'processing'} aria-label="Send typed test message" title="Send typed test message">
             <Send className="h-4 w-4" aria-hidden />
           </Button>
         </form>
@@ -597,7 +597,7 @@ export function InboxSection() {
               <div className="flex flex-col">
                 {/* header */}
                 <div className="flex items-center gap-2 p-3 border-b">
-                  <Button variant="ghost" size="icon" className="lg:hidden min-h-[44px] min-w-[44px]" onClick={() => setSelectedId(null)} aria-label="Back to conversation list">
+                  <Button variant="ghost" size="icon" className="lg:hidden min-h-[44px] min-w-[44px]" onClick={() => setSelectedId(null)} aria-label="Back to conversation list" title="Back to conversation list">
                     <ArrowLeft className="h-5 w-5" aria-hidden />
                   </Button>
                   <div className="min-w-0 flex-1">

@@ -444,7 +444,7 @@ export function ScimSettings() {
             <p className="text-sm font-medium">Copy the token now — it is shown only once</p>
             <div className="flex items-center gap-2">
               <code className="text-xs break-all rounded bg-muted px-2 py-1 flex-1">{token}</code>
-              <Button type="button" variant="outline" size="sm" aria-label="Copy SCIM token" onClick={() => void copy(token, 'SCIM token')}>
+              <Button type="button" variant="outline" size="sm" aria-label="Copy SCIM token" title="Copy SCIM token" onClick={() => void copy(token, 'SCIM token')}>
                 <Copy className="h-4 w-4" aria-hidden />
               </Button>
             </div>

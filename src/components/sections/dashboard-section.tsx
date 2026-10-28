@@ -148,7 +148,7 @@ function StatCard({
     <button
       type="button"
       onClick={() => setActiveSection(target)}
-      aria-label={`${label}: ${value}. Open ${targetLabel}`}
+      aria-label={`${label}: ${value}. Open ${targetLabel}`} title={`${label}: ${value}. Open ${targetLabel}`}
       className="min-h-[44px] rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <Card className="h-full transition-colors hover:bg-muted/50">
@@ -374,7 +374,7 @@ function ReceptionistControl() {
                 type="button"
                 disabled={!canManage || busy}
                 aria-pressed={active}
-                aria-label={`${opt.label}: ${opt.detail}`}
+                aria-label={`${opt.label}: ${opt.detail}`} title={`${opt.label}: ${opt.detail}`}
                 onClick={() => {
                   if (active) return
                   if (opt.status === 'running') void apply('running')

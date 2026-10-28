@@ -1088,7 +1088,7 @@ function NewInvoiceForm({
                     className="min-h-[44px] min-w-[44px] text-destructive hover:text-destructive"
                     disabled={items.length === 1}
                     onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
-                    aria-label={`Remove line item ${idx + 1}`}
+                    aria-label={`Remove line item ${idx + 1}`} title={`Remove line item ${idx + 1}`}
                   >
                     <Trash2 className="h-4 w-4" aria-hidden />
                   </Button>

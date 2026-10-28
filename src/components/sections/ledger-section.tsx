@@ -225,7 +225,7 @@ function EntriesTab({ onChanged }: { onChanged: () => void }) {
                           type="button"
                           className="text-sm underline underline-offset-2 hover:no-underline min-h-[44px] sm:min-h-0"
                           onClick={() => setActiveSection('invoices')}
-                          aria-label={`Open invoices section to see ${e.invoiceNumber}`}
+                          aria-label={`Open invoices section to see ${e.invoiceNumber}`} title={`Open invoices section to see ${e.invoiceNumber}`}
                         >
                           {e.invoiceNumber}
                         </button>

@@ -529,7 +529,7 @@ export function KnowledgeSection() {
                             onClick={() => setExpanded((e) => ({ ...e, [doc.id]: !e[doc.id] }))}
                             className="text-xs text-muted-foreground underline underline-offset-2 min-h-[44px] flex items-center"
                             aria-expanded={isOpen}
-                            aria-label={isOpen ? `Collapse preview of ${doc.title}` : `Expand preview of ${doc.title}`}
+                            aria-label={isOpen ? `Collapse preview of ${doc.title}` : `Expand preview of ${doc.title}`} title={isOpen ? `Collapse preview of ${doc.title}` : `Expand preview of ${doc.title}`}
                           >
                             {isOpen ? <ChevronUp className="h-3 w-3 mr-1" aria-hidden /> : <ChevronDown className="h-3 w-3 mr-1" aria-hidden />}
                             {isOpen ? 'Show less' : 'Show more'}
@@ -632,7 +632,7 @@ export function KnowledgeSection() {
                 aria-label="Retrieval test query"
                 className="min-h-[44px]"
               />
-              <Button type="submit" disabled={testing || !testQuery.trim()} aria-label="Run retrieval test" className="min-h-[44px]">
+              <Button type="submit" disabled={testing || !testQuery.trim()} aria-label="Run retrieval test" title="Run retrieval test" className="min-h-[44px]">
                 {testing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Search className="h-4 w-4" aria-hidden />}
               </Button>
             </form>

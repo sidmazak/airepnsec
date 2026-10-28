@@ -161,3 +161,10 @@ Phased execution with goal + acceptance criteria per phase, and a live status ta
 ✅ **Monotonic states**: `delivery-protocol.ts` normalizes provider vocabulary and refuses regressions (`accepted → delivered → read`, `failed` terminal), unit-tested without touching the DB.
 ✅ **UI/docs**: delivery badges and provider detail in the dashboard/outbox, Twilio status-callback and DLR URLs in integration cards, plus API/INTEGRATIONS/DATA_MODEL/AUDIT updates.
 ✅ **Verification**: tsc clean, lint clean, 193/193 unit tests, 44/44 smoke checks.
+
+## Phase 24 — UI clarity: tooltips, titles and section descriptions (2026-10-28)
+✅ **Icon-only controls**: every icon-only button now has both an `aria-label` (accessible name) and a native `title` tooltip, including remove/refresh/copy/recording/sidebar/dialog/toast controls.
+✅ **Section navigation**: all 19 sidebar entries carry a one-line description exposed as a hover `title`, so the purpose of every section is visible before opening it.
+✅ **Dialog and toast dismissal**: the shared dialog close control and toast dismiss control now have labels and tooltips.
+✅ **Regression guard**: `tests/unit/ui-tooltips.test.mts` uses the TypeScript AST to fail if any icon-only button loses its accessible name or tooltip.
+✅ **Verification**: tsc clean, lint clean, 194/194 unit tests, 44/44 smoke checks.

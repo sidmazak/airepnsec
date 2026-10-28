@@ -111,7 +111,7 @@ function CopyButton({ value, label, className }: { value: string; label: string;
     <Button
       type="button" variant="outline" size="sm"
       className={cn('min-h-[44px]', className)}
-      aria-label={label}
+      aria-label={label} title={label}
       disabled={!value}
       onClick={async () => {
         const ok = await copyText(value)

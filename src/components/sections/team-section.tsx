@@ -404,7 +404,7 @@ export function TeamSection() {
                 <p className="text-xs text-muted-foreground">Invitation link (shown once):</p>
                 <div className="flex items-center gap-2">
                   <code className="text-xs break-all rounded bg-muted px-2 py-1 flex-1">{inviteUrl}</code>
-                  <Button type="button" variant="outline" size="sm" className="min-h-[36px]" aria-label="Copy invitation link" onClick={() => void copy(inviteUrl, 'Invitation link')}>
+                  <Button type="button" variant="outline" size="sm" className="min-h-[36px]" aria-label="Copy invitation link" title="Copy invitation link" onClick={() => void copy(inviteUrl, 'Invitation link')}>
                     <Copy className="h-4 w-4" aria-hidden />
                   </Button>
                 </div>
@@ -436,7 +436,7 @@ export function TeamSection() {
               <p className="text-xs text-muted-foreground">Reset link (shown once):</p>
               <div className="flex items-center gap-2">
                 <code className="text-xs break-all rounded bg-muted px-2 py-1 flex-1">{resetLink}</code>
-                <Button variant="outline" size="sm" className="min-h-[36px]" aria-label="Copy reset link" onClick={() => void copy(resetLink, 'Reset link')}>
+                <Button variant="outline" size="sm" className="min-h-[36px]" aria-label="Copy reset link" title="Copy reset link" onClick={() => void copy(resetLink, 'Reset link')}>
                   <Copy className="h-4 w-4" aria-hidden />
                 </Button>
               </div>

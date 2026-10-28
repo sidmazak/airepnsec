@@ -577,7 +577,7 @@ export function VoiceSection() {
               <button
                 onClick={toggleMic}
                 disabled={status === 'transcribing' || status === 'thinking'}
-                aria-label={status === 'recording' ? 'Stop recording and send' : busy ? 'Interrupt playback' : 'Start recording'}
+                aria-label={status === 'recording' ? 'Stop recording and send' : busy ? 'Interrupt playback' : 'Start recording'} title={status === 'recording' ? 'Stop recording and send' : busy ? 'Interrupt playback' : 'Start recording'}
                 className={cn(
                   'relative h-14 w-14 rounded-full flex items-center justify-center text-primary-foreground transition-[transform,background-color] shrink-0',
                   'disabled:opacity-50 disabled:cursor-not-allowed',

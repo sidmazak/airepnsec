@@ -152,7 +152,7 @@ export function GuidedTour() {
             <Sparkles className="h-4 w-4 text-primary shrink-0" aria-hidden />
             <h3 className="font-semibold text-sm">{step.title}</h3>
           </div>
-          <Button variant="ghost" size="icon" className="h-7 w-7 -mt-1 -mr-1" aria-label="Skip tour" onClick={finish}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 -mt-1 -mr-1" aria-label="Skip tour" title="Skip tour" onClick={finish}>
             <X className="h-4 w-4" aria-hidden />
           </Button>
         </div>

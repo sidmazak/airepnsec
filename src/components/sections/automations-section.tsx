@@ -705,7 +705,7 @@ export function AutomationsSection() {
                   </Select>
                   <Input aria-label="Condition value" placeholder="value" value={c.value} onChange={(e) => setEditor((s) => ({ ...s, extraConditions: s.extraConditions.map((x) => x.key === c.key ? { ...x, value: e.target.value } : x) }))} className="min-h-[44px]" />
                   <Button
-                    type="button" variant="ghost" size="icon" aria-label="Remove condition" className="min-h-[44px] min-w-[44px]"
+                    type="button" variant="ghost" size="icon" aria-label="Remove condition" title="Remove condition" className="min-h-[44px] min-w-[44px]"
                     onClick={() => setEditor((s) => ({ ...s, extraConditions: s.extraConditions.filter((x) => x.key !== c.key) }))}
                   >
                     <Trash2 className="h-4 w-4" aria-hidden />
@@ -735,7 +735,7 @@ export function AutomationsSection() {
                       </SelectContent>
                     </Select>
                     <Button
-                      type="button" variant="ghost" size="icon" aria-label="Remove action" className="min-h-[44px] min-w-[44px]"
+                      type="button" variant="ghost" size="icon" aria-label="Remove action" title="Remove action" className="min-h-[44px] min-w-[44px]"
                       disabled={editor.actions.length <= 1}
                       onClick={() => setEditor((s) => ({ ...s, actions: s.actions.filter((x) => x.key !== a.key) }))}
                     >

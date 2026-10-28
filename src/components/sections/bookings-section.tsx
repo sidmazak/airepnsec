@@ -162,7 +162,7 @@ function SlotPicker({
     <div className="space-y-2" role="radiogroup" aria-label="Open time slots">
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium text-muted-foreground">{slots.length} open slot{slots.length === 1 ? '' : 's'} — pick one</p>
-        <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" onClick={() => void load()} aria-label="Refresh available slots">
+        <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" onClick={() => void load()} aria-label="Refresh available slots" title="Refresh available slots">
           <RefreshCw className="h-4 w-4" aria-hidden />
         </Button>
       </div>

@@ -64,7 +64,7 @@ export default function UsageSection() {
               <SelectItem value="365">Last 12 months</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={load} className="min-h-[44px]" aria-label="Refresh usage"><RefreshCw className="h-4 w-4" /></Button>
+          <Button variant="outline" onClick={load} className="min-h-[44px]" aria-label="Refresh usage" title="Refresh usage"><RefreshCw className="h-4 w-4" /></Button>
         </div>
       </div>
 

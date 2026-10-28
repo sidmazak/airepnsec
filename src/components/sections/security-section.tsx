@@ -174,13 +174,13 @@ export function SecuritySection() {
                 <p className="text-sm font-medium">1. Add this secret to your authenticator app</p>
                 <div className="flex items-center gap-2">
                   <code className="text-xs break-all rounded bg-muted px-2 py-1 flex-1">{enrollment.secret}</code>
-                  <Button type="button" variant="outline" size="sm" className="min-h-[36px]" aria-label="Copy secret" onClick={() => void copy(enrollment.secret, 'Secret')}>
+                  <Button type="button" variant="outline" size="sm" className="min-h-[36px]" aria-label="Copy secret" title="Copy secret" onClick={() => void copy(enrollment.secret, 'Secret')}>
                     <Copy className="h-4 w-4" aria-hidden />
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
                   <code className="text-[10px] break-all rounded bg-muted px-2 py-1 flex-1 text-muted-foreground">{enrollment.otpauthUrl}</code>
-                  <Button type="button" variant="outline" size="sm" className="min-h-[36px]" aria-label="Copy otpauth URL" onClick={() => void copy(enrollment.otpauthUrl, 'otpauth URL')}>
+                  <Button type="button" variant="outline" size="sm" className="min-h-[36px]" aria-label="Copy otpauth URL" title="Copy otpauth URL" onClick={() => void copy(enrollment.otpauthUrl, 'otpauth URL')}>
                     <Copy className="h-4 w-4" aria-hidden />
                   </Button>
                 </div>

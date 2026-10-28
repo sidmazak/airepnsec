@@ -265,7 +265,7 @@ export function SetupSection() {
                     type="button"
                     onClick={() => setCurrent(i)}
                     aria-current={i === current ? 'step' : undefined}
-                    aria-label={`Step ${i + 1}: ${s.label}${isDone ? ' (done)' : ''}`}
+                    aria-label={`Step ${i + 1}: ${s.label}${isDone ? ' (done)' : ''}`} title={`Step ${i + 1}: ${s.label}${isDone ? ' (done)' : ''}`}
                     className={cn(
                       'rounded-full border px-2.5 py-1.5 text-xs min-h-[32px] transition-colors flex items-center gap-1',
                       i === current ? 'border-primary bg-primary text-primary-foreground font-medium' : isDone ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'text-muted-foreground hover:bg-muted',
@@ -574,12 +574,12 @@ function ServicesStep({ org, markStepDone }: StepProps) {
                         <div className="flex justify-end gap-1">
                           <Button
                             size="icon" variant="ghost" className="min-h-[44px] min-w-[44px]"
-                            aria-label={`Edit ${s.name}`}
+                            aria-label={`Edit ${s.name}`} title={`Edit ${s.name}`}
                             onClick={() => { setSvcForm({ id: s.id, name: s.name, category: s.category, durationMin: s.durationMin, price: (s.priceCents / 100).toFixed(2), bufferBeforeMin: s.bufferBeforeMin, bufferAfterMin: s.bufferAfterMin }); setSvcOpen(true) }}
                           >
                             <Pencil className="h-4 w-4" aria-hidden />
                           </Button>
-                          <Button size="icon" variant="ghost" className="min-h-[44px] min-w-[44px] text-rose-700" aria-label={`Delete ${s.name}`} onClick={() => setDeleteSvc(s)}>
+                          <Button size="icon" variant="ghost" className="min-h-[44px] min-w-[44px] text-rose-700" aria-label={`Delete ${s.name}`} title={`Delete ${s.name}`} onClick={() => setDeleteSvc(s)}>
                             <Trash2 className="h-4 w-4" aria-hidden />
                           </Button>
                         </div>
@@ -626,7 +626,7 @@ function ServicesStep({ org, markStepDone }: StepProps) {
                           <Button
                             size="sm" variant="outline" className="min-h-[44px]"
                             onClick={() => { setStaffForm({ id: m.id, name: m.name, role: m.role, email: m.email, phone: m.phone }); setStaffOpen(true) }}
-                            aria-label={`Edit ${m.name}`}
+                            aria-label={`Edit ${m.name}`} title={`Edit ${m.name}`}
                           >
                             <Pencil className="h-3.5 w-3.5" aria-hidden />
                           </Button>
@@ -1679,7 +1679,7 @@ function TestStep({ canManage, onComplete }: StepProps & { onComplete: () => voi
         </ul>
 
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void runTest()} disabled={running} className="min-h-[44px]" aria-label="Run the end-to-end test">
+          <Button onClick={() => void runTest()} disabled={running} className="min-h-[44px]" aria-label="Run the end-to-end test" title="Run the end-to-end test">
             {running ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PlayCircle className="h-4 w-4" aria-hidden />}
             {checks.some((c) => c.status === 'pass') ? 'Run test again' : 'Run end-to-end test'}
           </Button>

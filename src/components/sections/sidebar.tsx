@@ -13,26 +13,26 @@ import {
 const STAFF: string[] = ['owner', 'admin', 'agent']
 const ADMINS: string[] = ['owner', 'admin']
 
-const NAV: Array<{ id: SectionId; label: string; icon: typeof LayoutDashboard; group: string; roles?: string[] }> = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'Overview' },
-  { id: 'inbox', label: 'Inbox', icon: Inbox, group: 'Conversations', roles: STAFF },
-  { id: 'voice', label: 'Voice Console', icon: Mic, group: 'Conversations', roles: STAFF },
-  { id: 'realtime', label: 'Realtime Voice', icon: Wifi, group: 'Conversations', roles: ADMINS },
-  { id: 'bookings', label: 'Bookings', icon: CalendarDays, group: 'Operations', roles: STAFF },
-  { id: 'customers', label: 'Customers', icon: Users, group: 'Operations', roles: STAFF },
-  { id: 'invoices', label: 'Invoices & Payments', icon: Receipt, group: 'Money', roles: STAFF },
-  { id: 'ledger', label: 'Ledger', icon: BookOpen, group: 'Money', roles: ADMINS },
-  { id: 'usage', label: 'Usage & Billing', icon: BarChart3, group: 'Money', roles: ADMINS },
-  { id: 'knowledge', label: 'Knowledge & FAQs', icon: BookMarked, group: 'AI', roles: ADMINS },
-  { id: 'datasources', label: 'Data Sources', icon: Database, group: 'AI', roles: ADMINS },
-  { id: 'automations', label: 'Automations', icon: Workflow, group: 'AI', roles: ADMINS },
-  { id: 'ai', label: 'AI Providers', icon: Bot, group: 'Settings', roles: ADMINS },
-  { id: 'security', label: 'Security', icon: ShieldCheck, group: 'Settings' },
-  { id: 'business', label: 'Business Profile', icon: Store, group: 'Settings', roles: ADMINS },
-  { id: 'integrations', label: 'Integrations', icon: Plug, group: 'Settings', roles: ADMINS },
-  { id: 'diagnostics', label: 'Diagnostics', icon: Activity, group: 'Settings', roles: ADMINS },
-  { id: 'team', label: 'Team', icon: UserCog, group: 'Settings', roles: ADMINS },
-  { id: 'setup', label: 'Setup Wizard', icon: Menu, group: 'Settings', roles: ADMINS },
+const NAV: Array<{ id: SectionId; label: string; description: string; icon: typeof LayoutDashboard; group: string; roles?: string[] }> = [
+  { id: 'dashboard', label: 'Dashboard', description: "Today's bookings, outstanding balance and receptionist status at a glance.", icon: LayoutDashboard, group: 'Overview' },
+  { id: 'inbox', label: 'Inbox', description: 'Every web, SMS, WhatsApp and phone conversation in one place.', icon: Inbox, group: 'Conversations', roles: STAFF },
+  { id: 'voice', label: 'Voice Console', description: 'Test the AI receptionist by speaking, and hear its reply.', icon: Mic, group: 'Conversations', roles: STAFF },
+  { id: 'realtime', label: 'Realtime Voice', description: 'Low-latency voice test that uses the same receptionist tools and data.', icon: Wifi, group: 'Conversations', roles: ADMINS },
+  { id: 'bookings', label: 'Bookings', description: 'Calendar, availability and the booking engine that prevents double-booking.', icon: CalendarDays, group: 'Operations', roles: STAFF },
+  { id: 'customers', label: 'Customers', description: 'Contacts, consent, tags and per-customer channel preferences.', icon: Users, group: 'Operations', roles: STAFF },
+  { id: 'invoices', label: 'Invoices & Payments', description: 'Draft, issue, send and collect invoices. Payments post to the ledger.', icon: Receipt, group: 'Money', roles: STAFF },
+  { id: 'ledger', label: 'Ledger', description: 'Append-only double-entry ledger with reversals and a full audit trail.', icon: BookOpen, group: 'Money', roles: ADMINS },
+  { id: 'usage', label: 'Usage & Billing', description: 'AI token usage, latency and estimated cost by provider and model.', icon: BarChart3, group: 'Money', roles: ADMINS },
+  { id: 'knowledge', label: 'Knowledge & FAQs', description: 'Approved documents and answers the receptionist is allowed to use.', icon: BookMarked, group: 'AI', roles: ADMINS },
+  { id: 'datasources', label: 'Data Sources', description: 'Ingest your own read-only database or JSON API into retrieval.', icon: Database, group: 'AI', roles: ADMINS },
+  { id: 'automations', label: 'Automations', description: 'Rules that react to booking, invoice and message events.', icon: Workflow, group: 'AI', roles: ADMINS },
+  { id: 'ai', label: 'AI Providers', description: 'Choose BYOK providers per capability and enforce local-only data mode.', icon: Bot, group: 'Settings', roles: ADMINS },
+  { id: 'security', label: 'Security', description: 'Password, two-factor authentication and session protection.', icon: ShieldCheck, group: 'Settings' },
+  { id: 'business', label: 'Business Profile', description: 'Identity, hours, services, policies and AI voice settings.', icon: Store, group: 'Settings', roles: ADMINS },
+  { id: 'integrations', label: 'Integrations', description: 'BYOK email, SMS, WhatsApp, payments, calendars and webhooks.', icon: Plug, group: 'Settings', roles: ADMINS },
+  { id: 'diagnostics', label: 'Diagnostics', description: 'Live infrastructure checks, backups, logs and channel readiness.', icon: Activity, group: 'Settings', roles: ADMINS },
+  { id: 'team', label: 'Team', description: 'Staff accounts, roles, invitations, SSO and SCIM.', icon: UserCog, group: 'Settings', roles: ADMINS },
+  { id: 'setup', label: 'Setup Wizard', description: 'Guided checklist from an empty database to a live receptionist.', icon: Menu, group: 'Settings', roles: ADMINS },
 ]
 
 /** Section visibility by role — mirrors the server-side route role gates. */
@@ -61,7 +61,7 @@ export function MobileTopBar() {
   const session = useAppStore((s) => s.session)
   return (
     <div className="lg:hidden flex items-center gap-2 px-2 py-2 border-b bg-background sticky top-0 z-30">
-      <Button variant="ghost" size="icon" aria-label="Open menu" onClick={() => setMobileNavOpen(true)}>
+      <Button variant="ghost" size="icon" aria-label="Open menu" title="Open menu" onClick={() => setMobileNavOpen(true)}>
         <Menu className="h-5 w-5" aria-hidden />
       </Button>
       <span className="font-semibold text-sm">AI Secretary</span>
@@ -93,6 +93,7 @@ export function Sidebar() {
                 <button
                   onClick={() => setActiveSection(item.id)}
                   data-tour={`sidebar-${item.id}`}
+                  title={item.description}
                   aria-current={activeSection === item.id ? 'page' : undefined}
                   className={cn(
                     'w-full flex items-center gap-2.5 rounded-md px-2 py-2 text-sm min-h-[44px] transition-colors',
@@ -121,7 +122,7 @@ export function Sidebar() {
         <p className="text-sm font-semibold truncate">AI Secretary</p>
         <p className="text-[11px] text-muted-foreground truncate">{session?.org?.name ?? 'Workspace'}</p>
       </div>
-      <Button variant="ghost" size="icon" className="ml-auto" aria-label="Close menu" onClick={() => setMobileNavOpen(false)}>
+      <Button variant="ghost" size="icon" className="ml-auto" aria-label="Close menu" title="Close menu" onClick={() => setMobileNavOpen(false)}>
         <X className="h-4 w-4" aria-hidden />
       </Button>
     </div>
